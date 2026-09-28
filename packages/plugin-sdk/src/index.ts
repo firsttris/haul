@@ -105,6 +105,8 @@ export interface PluginDefinition {
   matches: RegExp[];
   /** Without an account the link is not even tried. */
   accountRequired?: boolean;
+  /** Labels and hint for the account form in the UI. */
+  account?: { userLabel?: string; secretLabel?: string; help?: string };
   check?(link: string, ctx: Ctx): Promise<CheckResult>;
   resolve(link: string, ctx: Ctx): Promise<Resolved>;
   checkAccount?(ctx: Ctx): Promise<AccountInfo>;

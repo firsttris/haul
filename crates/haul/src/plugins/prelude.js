@@ -89,6 +89,7 @@
         return typeof r === 'string' ? { source: r, flags: '' } : { source: r.source, flags: r.flags };
       }),
       accountRequired: !!p.accountRequired,
+      account: p.account || null,
       hasCheck: typeof p.check === 'function',
       hasCheckAccount: typeof p.checkAccount === 'function',
     });

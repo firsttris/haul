@@ -30,12 +30,14 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
     add.mutate();
   }
   if (withAccounts.length === 0) return null;
+  const selected = withAccounts.find((p) => p.id === pluginId) ?? withAccounts[0];
+  const form = selected.account ?? {};
   return (
     <form className="card" onSubmit={submit}>
       <h2>Account hinzufügen</h2>
       <div className="card-sub">
-        Benutzer und Passwort für den Web-Login, oder Benutzer leer lassen und den API-Key als Passwort eintragen.
-        Gespeichert wird verschlüsselt mit <span className="mono">APP_SECRET</span>.
+        {form.help ?? 'Benutzer und Passwort des Hoster-Accounts.'} Gespeichert wird verschlüsselt mit{' '}
+        <span className="mono">APP_SECRET</span>.
       </div>
       <div className="grid-4" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto', alignItems: 'end' }}>
         <div className="field">
@@ -49,11 +51,11 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="acc-user">Benutzer</label>
-          <input id="acc-user" className="input" autoComplete="off" placeholder="leer = API-Key" value={user} onChange={(e) => setUser(e.target.value)} />
+          <label htmlFor="acc-user">{form.userLabel ?? 'Benutzer'}</label>
+          <input id="acc-user" className="input" autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="acc-secret">Passwort oder API-Key</label>
+          <label htmlFor="acc-secret">{form.secretLabel ?? 'Passwort'}</label>
           <input id="acc-secret" className="input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} required />
         </div>
         <button type="submit" className="btn primary" disabled={add.isPending}>
@@ -65,7 +67,47 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
   );
 }
 
+function EditSecret({ account, label, onDone }: { account: Account; label: string; onDone: () => void }) {
+  const [secret, setSecret] = useState('');
+  const save = useMutation({
+    mutationFn: () => api(`/accounts/${account.id}`, { method: 'PATCH', body: { secret } }),
+    onSuccess: onDone,
+  });
+  return (
+    <form
+      className="toolbar"
+      style={{ width: '100%' }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+    >
+      <label htmlFor={`secret-${account.id}`} className="subtitle" style={{ fontSize: 13 }}>
+        Neu: {label}
+      </label>
+      <input
+        id={`secret-${account.id}`}
+        className="input"
+        style={{ flex: 1, minWidth: 200 }}
+        type="password"
+        autoComplete="new-password"
+        value={secret}
+        onChange={(e) => setSecret(e.target.value)}
+        required
+      />
+      <button type="submit" className="btn small primary" disabled={save.isPending}>
+        Speichern und prüfen
+      </button>
+      <button type="button" className="btn small" onClick={onDone}>
+        Abbrechen
+      </button>
+      {save.error && <div className="notice" role="alert">{save.error.message}</div>}
+    </form>
+  );
+}
+
 export function AccountsPage() {
+  const [editing, setEditing] = useState<number | null>(null);
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => api<Account[]>('/accounts') });
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: () => api<PluginList>('/plugins') });
   const act = useMutation({ mutationFn: ({ path, method, body }: { path: string; method?: string; body?: unknown }) => api(path, { method: method ?? 'POST', body }) });
@@ -87,7 +129,7 @@ export function AccountsPage() {
                 <div className="list-row" key={a.id}>
                   <div className="grow">
                     <span className="title">
-                      {a.pluginName ?? a.pluginId} · {a.user || 'API-Key'}
+                      {a.pluginName ?? a.pluginId} · {a.user || 'Sitzungs-Cookie'}
                     </span>
                     <span className="sub">
                       {a.premium === true ? 'Premium' : a.premium === false ? 'Kein Premium' : 'Typ unbekannt'}
@@ -109,12 +151,22 @@ export function AccountsPage() {
                     />
                     Aktiv
                   </label>
+                  <button type="button" className="btn small" onClick={() => setEditing(editing === a.id ? null : a.id)}>
+                    Zugang ändern
+                  </button>
                   <button type="button" className="icon-btn" aria-label="Account prüfen" title="Prüfen" onClick={() => act.mutate({ path: `/accounts/${a.id}/check` })}>
                     <IconRefresh size={16} />
                   </button>
                   <button type="button" className="icon-btn" aria-label="Account löschen" onClick={() => act.mutate({ path: `/accounts/${a.id}`, method: 'DELETE' })}>
                     <IconTrash size={16} />
                   </button>
+                  {editing === a.id && (
+                    <EditSecret
+                      account={a}
+                      label={plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel ?? 'Passwort'}
+                      onDone={() => setEditing(null)}
+                    />
+                  )}
                 </div>
               );
             })}

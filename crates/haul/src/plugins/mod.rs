@@ -26,8 +26,19 @@ struct Meta {
     version: serde_json::Value,
     matches: Vec<MatchSpec>,
     account_required: bool,
+    #[serde(default)]
+    account: Option<AccountForm>,
     has_check: bool,
     has_check_account: bool,
+}
+
+/// Labels and hint for the account form, provided by the plugin.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountForm {
+    pub user_label: Option<String>,
+    pub secret_label: Option<String>,
+    pub help: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -44,6 +55,7 @@ pub struct Plugin {
     pub version: String,
     pub matches: Vec<MatchSpec>,
     pub account_required: bool,
+    pub account: Option<AccountForm>,
     pub has_check: bool,
     pub has_check_account: bool,
     pub builtin: bool,
@@ -357,6 +369,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
         },
         matches: meta.matches,
         account_required: meta.account_required,
+        account: meta.account,
         has_check: meta.has_check,
         has_check_account: meta.has_check_account,
         builtin,

@@ -64,6 +64,7 @@ export interface Plugin {
   version: string;
   matches: { source: string; flags: string }[];
   accountRequired: boolean;
+  account: { userLabel?: string; secretLabel?: string; help?: string } | null;
   hasCheck: boolean;
   hasCheckAccount: boolean;
   builtin: boolean;
