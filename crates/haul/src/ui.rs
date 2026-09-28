@@ -1,5 +1,5 @@
 use axum::http::{header, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
@@ -37,10 +37,15 @@ pub async fn serve(uri: Uri) -> Response {
             index.data,
         )
             .into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            "UI not built. Run `pnpm --filter ui build`.",
-        )
-            .into_response(),
+        None => match std::env::var("HAUL_DEV_UI").ok().filter(|v| !v.is_empty()) {
+            // `pnpm dev`: the UI is served by Vite; send the browser there.
+            Some(dev) => Redirect::temporary(&format!("{}{}", dev.trim_end_matches('/'), uri))
+                .into_response(),
+            None => (
+                StatusCode::NOT_FOUND,
+                "UI not built. Run `pnpm build`, or use `pnpm dev` and open http://localhost:5173.",
+            )
+                .into_response(),
+        },
     }
 }

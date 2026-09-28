@@ -10,9 +10,17 @@ if (!existsSync('.env')) {
 }
 execSync('node scripts/build-plugins.mjs', { stdio: 'inherit' });
 
+console.log('\n  Haul-UI: http://localhost:5173  (Login aus .env, Standard admin / adminadmin)\n');
+
 const { result } = concurrently(
   [
-    { name: 'server', command: 'cargo run -p haul', prefixColor: 'yellow' },
+    {
+      name: 'server',
+      command: 'cargo run -p haul',
+      prefixColor: 'yellow',
+      // Until the UI is built into the binary, :8080 redirects to Vite.
+      env: { HAUL_DEV_UI: process.env.HAUL_DEV_UI ?? 'http://localhost:5173' },
+    },
     { name: 'ui', command: 'pnpm --filter @haul/ui dev', prefixColor: 'cyan' },
   ],
   { killOthersOn: ['failure', 'success'] },
