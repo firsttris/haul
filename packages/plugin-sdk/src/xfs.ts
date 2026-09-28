@@ -46,6 +46,8 @@ export interface XfsConfig {
   namePatterns?: RegExp[];
   sizePatterns?: RegExp[];
   directLinkPatterns?: RegExp[];
+  /** Extra hosts that serve the final files (CDNs), besides `domains` and their subdomains. */
+  downloadHosts?: string[];
   loginPath?: string;
   /** Marks a premium account on `?op=my_account`. Without it, premium = expiry in the future. */
   premiumPattern?: RegExp;
@@ -57,6 +59,7 @@ export interface XfsConfig {
 
 const DEFAULT_OFFLINE = [
   />\s*File Not Found\s*</i,
+  />\s*This file was banned by copyright/i,
   />\s*File Deleted\s*</i,
   /No such file/i,
   /The file (?:was|has been) (?:removed|deleted)/i,
@@ -66,6 +69,8 @@ const DEFAULT_OFFLINE = [
 
 const DEFAULT_NAMES = [
   /class=["']file-info-name["'][^>]*>([^<]+)</i,
+  /<div class=["']name position-relative["']>\s*<h4>([^<>"]+)<\/h4>/i,
+  />File\s*:\s*<font[^>]*>([^<>"]+)</i,
   /<input[^>]+name=["']fname["'][^>]+value=["']([^"']+)["']/i,
   /<div class=["'][^"']*name[^"']*["'][^>]*>\s*<h\d[^>]*>([^<]+)</i,
   /<h1[^>]*class=["'][^"']*file[^"']*["'][^>]*>([^<]+)</i,
@@ -74,15 +79,23 @@ const DEFAULT_NAMES = [
 
 const DEFAULT_SIZES = [
   /<span[^>]+class=["'][^"']*file-size[^"']*["'][^>]*>([^<]+)</i,
+  /class=["']file-size["']>([^<>"]+)</i,
+  /\[<font[^>]*>(\d+[^<>"]+)<\/font>\]/i,
   /\(\s*([\d.,]+\s*(?:B|KB|MB|GB|TB))\s*\)/i,
   /Size\s*:?\s*<[^>]*>\s*([\d.,]+\s*(?:B|KB|MB|GB|TB))/i,
 ];
 
-const DEFAULT_DIRECT = [
-  /href=["'](https?:\/\/[^"']+\/d\/[^"']+)["']/i,
-  /href=["'](https?:\/\/[^"']+\/files\/[^"']+)["']/i,
-  /["'](https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\/d\/[^"']+)["']/i,
-];
+/** Final download URLs, after JD's `getDownloadurlRegexes`: `/d/`, `/files/`, `/dl/` paths on the
+ * site, its subdomains, its CDNs or a bare IP. */
+function directPatterns(hosts: string[]): RegExp[] {
+  const hostRe = `(?:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|(?:[a-z0-9-]+\\.)*(?:${hosts.map(escapeRe).join('|')}))`;
+  const path = `(?::\\d+)?/(?:files|d|cgi-bin/dl\\.cgi|dl)/(?:\\d+/)?[a-z0-9]+/`;
+  return [
+    new RegExp(`"(https?://${hostRe}${path}[^<>"/]*)"`, 'i'),
+    new RegExp(`'(https?://${hostRe}${path}[^<>"'/]*)'`, 'i'),
+    new RegExp(`(https?://${hostRe}${path}[^<>"'/\\s]*)`, 'i'),
+  ];
+}
 
 const DEFAULT_VALID_UNTIL = [
   /Premium(?:[- ]Account)?\s*expires?:?\s*(?:<[^>]+>\s*)*([^<]+)/i,
@@ -129,7 +142,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   const offline = cfg.offlinePatterns ?? DEFAULT_OFFLINE;
   const names = cfg.namePatterns ?? DEFAULT_NAMES;
   const sizes = cfg.sizePatterns ?? DEFAULT_SIZES;
-  const directs = cfg.directLinkPatterns ?? DEFAULT_DIRECT;
+  const directs = cfg.directLinkPatterns ?? directPatterns([...cfg.domains, ...(cfg.downloadHosts ?? [])]);
   const userApi = !!(cfg.apiBase && cfg.userApiKeys);
 
   const cookieHelp =
@@ -170,6 +183,13 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
   function assertOnline(res: HttpResponse) {
     if (res.status === 404 || offline.some((p) => p.test(res.body))) throw new OfflineError();
+    if (/>\s*This server is in maintenance mode/i.test(res.body)) throw new TemporaryError(`${cfg.name}: Server in Wartung`);
+    if (/>\s*Please enter your e-mail/i.test(res.body)) {
+      throw new AccountError(`${cfg.name}: im Account unter ${host}/?op=my_account eine E-Mail-Adresse eintragen`);
+    }
+    if (/You have reached the download.limit|You have to wait|Traffic limit exceeded|not enough traffic/i.test(res.body)) {
+      throw new AccountError(`${cfg.name}: Download-Limit oder Traffic erreicht`);
+    }
     if (res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status}`);
   }
 
@@ -209,7 +229,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   async function accountPage(ctx: Ctx, m: Mode): Promise<HttpResponse | null> {
     // Follow redirects: some sites move the account page; logged out ends on the login form.
     const res = await web(ctx, m).get(`${base}/?op=my_account`);
-    return res.status === 200 && /op=logout|\/logout/i.test(res.body) ? res : null;
+    if (res.status !== 200 || /op=login/.test(res.url)) return null;
+    // Like JD: sites comment out the logout button for expired sessions, so ignore comments and scripts.
+    const visible = res.body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+    return /<a[^<]*href\s*=\s*["'][^"']*(?:[?&]op=logout|\/(?:user_)?logout["'])/i.test(visible) ? res : null;
   }
 
   /** Makes sure the session is logged in and returns the account page. */
@@ -320,34 +343,42 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       await session(ctx, m);
       const http = web(ctx, m);
       const url = fileUrl(link);
-      // With "direct downloads" enabled in the account, the file page redirects right away.
-      const page = await http.get(url, { followRedirects: false });
-      const direct = isDirect(page);
-      if (direct) return { url: direct, maxConnections: cfg.maxConnections };
-      assertOnline(page);
+      const found = (res: HttpResponse): Resolved | null => {
+        const target = isDirect(res) ?? match(res.body, ...directs);
+        if (!target) return null;
+        ctx.log.info(`Direktlink: ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/…`);
+        return { url: target, headers: { Referer: url }, maxConnections: cfg.maxConnections };
+      };
 
-      const form = parseForms(page.body).find((f) => f.fields.op === 'download2' || f.fields.op === 'download1');
-      if (!form) {
-        const inline = match(page.body, ...directs);
-        if (inline) return { url: inline, maxConnections: cfg.maxConnections };
-        if (/premium only|only premium|upgrade your account/i.test(page.body)) {
-          throw new AccountError(`${cfg.name}: Account ist nicht Premium`);
-        }
-        throw new TemporaryError(`${cfg.name}: Download-Formular nicht gefunden`);
+      // With "direct downloads" enabled in the account, the file page redirects right away.
+      let res = await http.get(url, { followRedirects: false });
+      let hit = found(res);
+      if (hit) return hit;
+      assertOnline(res);
+
+      // Otherwise submit the download form (JD: form F1, pyLoad: op=download*) until a link
+      // shows up; some sites need several steps.
+      const steps: string[] = [];
+      for (let step = 0; step < 5; step++) {
+        const forms = parseForms(res.body);
+        const form =
+          forms.find((f) => /name=["']F1["']/i.test(f.html)) ?? forms.find((f) => /^download/.test(f.fields.op ?? ''));
+        if (!form) break;
+        const fields: Record<string, string> = { ...form.fields, referer: form.fields.referer || url };
+        delete fields.method_free;
+        fields.method_premium = 'Premium Download';
+        steps.push(fields.op ?? '?');
+        res = await http.post(form.action ? resolveUrl(url, form.action) : url, fields, { followRedirects: false });
+        hit = found(res);
+        if (hit) return hit;
+        assertOnline(res);
       }
-      const fields: Record<string, string> = { ...form.fields, op: 'download2', id, referer: '' };
-      delete fields.method_free;
-      fields.method_premium = fields.method_premium || '1';
-      const post = await http.post(form.action ? resolveUrl(url, form.action) : url, fields, { followRedirects: false });
-      const redirected = isDirect(post);
-      if (redirected) return { url: redirected, maxConnections: cfg.maxConnections };
-      assertOnline(post);
-      const found = match(post.body, ...directs);
-      if (found) return { url: found, maxConnections: cfg.maxConnections };
-      if (/traffic|bandwidth limit|exceeded/i.test(post.body)) {
-        throw new AccountError(`${cfg.name}: Traffic aufgebraucht`);
+
+      if (/premium only|only premium|available for Premium Users only|upgrade your account/i.test(res.body)) {
+        throw new AccountError(`${cfg.name}: Account ist nicht Premium`);
       }
-      throw new TemporaryError(`${cfg.name}: Direktlink nicht gefunden`);
+      const where = steps.length ? `nach ${steps.join(' → ')}` : 'kein Download-Formular';
+      throw new TemporaryError(`${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status})`);
     },
 
     async checkAccount(ctx): Promise<AccountInfo> {

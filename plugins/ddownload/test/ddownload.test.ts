@@ -24,7 +24,13 @@ const LOGIN_PAGE = `<form name="FL" method="POST" action="/">
 </form>`;
 const LOGGED_OUT = { status: 302, headers: { location: '/login.html' } };
 const FILE_POST = (req: HttpRequest) => {
-  expect(req.form).toMatchObject({ op: 'download2', id: 'abcdefghijkl', rand: 'xyz', method_premium: '1' });
+  expect(req.form).toMatchObject({
+    op: 'download2',
+    id: 'abcdefghijkl',
+    rand: 'xyz',
+    method_premium: 'Premium Download',
+    referer: 'https://ddownload.com/abcdefghijkl',
+  });
   expect(req.form).not.toHaveProperty('method_free');
   return { status: 302, headers: { location: 'https://srv12.ddownload.com/d/HASH/Some.File.part1.rar' } };
 };
@@ -73,7 +79,8 @@ describe('ddownload', () => {
     );
     const r = await plugin.resolve(LINK, ctx);
     expect(r.url).toBe('https://srv12.ddownload.com/d/HASH/Some.File.part1.rar');
-    expect(r.maxConnections).toBe(4);
+    expect(r.maxConnections).toBe(1);
+    expect(r.headers).toEqual({ Referer: 'https://ddownload.com/abcdefghijkl' });
   });
 
   it('explains the cookie login when the captcha blocks the password login', async () => {
@@ -162,6 +169,62 @@ describe('ddownload', () => {
       { id: 1, user: 'bob', secret: 'pw' },
     );
     expect(await plugin.checkAccount!(ctx)).toMatchObject({ valid: true, premium: false });
+  });
+
+  it('walks through several download forms and finds a CDN link in the page', async () => {
+    const step1 = FILE_PAGE.replace('value="download2"', 'value="download1"');
+    const step2 = `<form name="F1" method="POST" action=""><input type="hidden" name="op" value="download2">
+      <input type="hidden" name="id" value="abcdefghijkl"><input type="hidden" name="rand" value="r2"></form>`;
+    const ops: string[] = [];
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': { body: ACCOUNT_PAGE },
+        'GET https://ddownload.com/abcdefghijkl': { body: step1 },
+        'POST https://ddownload.com/abcdefghijkl': (req) => {
+          ops.push(req.form!.op);
+          return req.form!.op === 'download1'
+            ? { body: step2 }
+            : { body: `<a class="btn" href="https://dl3.ucdn.to/files/7/ab12cd/Some.File.part1.rar">Download</a>` };
+        },
+      },
+      { id: 1, user: 'bob', secret: 'pw' },
+    );
+    expect((await plugin.resolve(LINK, ctx)).url).toBe('https://dl3.ucdn.to/files/7/ab12cd/Some.File.part1.rar');
+    expect(ops).toEqual(['download1', 'download2']);
+  });
+
+  it('names the steps when no link shows up', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': { body: ACCOUNT_PAGE },
+        'GET https://ddownload.com/abcdefghijkl': { body: FILE_PAGE },
+        'POST https://ddownload.com/abcdefghijkl': { body: '<p>Something unexpected</p>' },
+      },
+      { id: 1, user: 'bob', secret: 'pw' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      haulKind: 'temporary',
+      message: expect.stringContaining('nach download2'),
+    });
+  });
+
+  it('treats a commented-out logout link as logged out', async () => {
+    const ctx = fakeCtx(
+      { 'GET https://ddownload.com/?op=my_account': { body: '<!-- <a href="/?op=logout">Logout</a> --> Login' } },
+      { id: 1, user: 'bob', secret: 'xfss=OLD' },
+    );
+    await expect(plugin.checkAccount!(ctx)).rejects.toMatchObject({ haulKind: 'account' });
+  });
+
+  it('reports maintenance as temporary', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': { body: ACCOUNT_PAGE },
+        'GET https://ddownload.com/abcdefghijkl': { body: '<strong>Oops!</strong> This server is in maintenance mode.' },
+      },
+      { id: 1, user: 'bob', secret: 'pw' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', message: expect.stringContaining('Wartung') });
   });
 
   it('needs an account', async () => {

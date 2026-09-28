@@ -11,7 +11,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_DISPOSITION, CONTENT_RANGE,
-    COOKIE, RANGE,
+    CONTENT_TYPE, COOKIE, RANGE,
 };
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -71,6 +71,11 @@ impl From<PluginError> for Failure {
 fn http_failure(code: StatusCode) -> Failure {
     match code.as_u16() {
         404 | 410 => Failure::Offline(format!("Datei offline (HTTP {})", code.as_u16())),
+        403 => Failure::Retry("HTTP 403: Direktlink abgelaufen oder Zugriff verweigert".into()),
+        429 | 503 => Failure::Retry(format!(
+            "HTTP {}: Server ausgelastet oder zu viele Verbindungen",
+            code.as_u16()
+        )),
         _ => Failure::Retry(format!("HTTP {}", code.as_u16())),
     }
 }
@@ -317,6 +322,28 @@ async fn execute(
     if !resp.status().is_success() {
         return Err(http_failure(resp.status()));
     }
+    // A hoster that answers the direct link with a web page (error, captcha, login) must not
+    // end up as the downloaded file.
+    let html = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"));
+    if html && resp.headers().get(CONTENT_DISPOSITION).is_none() {
+        let body = resp.text().await.unwrap_or_default();
+        let text: String = body
+            .split('<')
+            .filter_map(|t| t.split_once('>').map(|(_, rest)| rest.trim()))
+            .filter(|t| !t.is_empty())
+            .take(6)
+            .collect::<Vec<_>>()
+            .join(" ");
+        tracing::debug!(id, "direct link returned HTML: {body:.2000}");
+        return Err(Failure::Retry(format!(
+            "Server lieferte eine Webseite statt der Datei: {}",
+            text.chars().take(160).collect::<String>()
+        )));
+    }
     let probe = probe_from(&resp);
     let name = probe
         .name
@@ -422,7 +449,16 @@ async fn execute(
     engine.events.changed(Topic::Downloads);
 
     // 4. Transfer. Without range support the probe response is the download itself.
-    let mut first = if ranges { None } else { Some(resp) };
+    // The probe asked for `bytes=0-`: without range support, or when a fresh download uses a
+    // single connection, it already is the whole transfer. Some hosters (ddownload) allow only
+    // one connection per file, so a second request would be refused.
+    let fresh_single =
+        segs.len() == 1 && segs[0].start == 0 && segs[0].done.load(Ordering::Relaxed) == 0;
+    let mut first = if !ranges || fresh_single {
+        Some(resp)
+    } else {
+        None
+    };
     let seg_cancel = cancel.child_token();
     let mut set = JoinSet::new();
     for seg in &segs {

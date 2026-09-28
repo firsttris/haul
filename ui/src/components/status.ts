@@ -28,7 +28,8 @@ export function describe(d: Download, now = Date.now()): { label: string; tone: 
       return { label: d.error || 'Fehler', tone: 'err' };
     case 'queued':
       if (d.retryAt && d.retryAt > now) {
-        return { label: `Neuer Versuch in ${duration((d.retryAt - now) / 1000)}`, tone: 'wait' };
+        const next = `Neuer Versuch in ${duration((d.retryAt - now) / 1000)}`;
+        return { label: d.error ? `${next} · ${d.error}` : next, tone: 'err' };
       }
       return { label: 'Wartend', tone: 'wait' };
   }

@@ -623,12 +623,14 @@ mod engine_tests {
     use axum::routing::get;
 
     /// Serves `data` at `/file.bin` with Range support, slowly enough to pause mid-way.
-    async fn range_server(data: Arc<Vec<u8>>) -> String {
+    /// `requests` counts the requests to `/file.bin`.
+    async fn range_server(data: Arc<Vec<u8>>, requests: Arc<AtomicU64>) -> String {
         let app = axum::Router::new()
             .route(
                 "/file.bin",
                 get(move |headers: HeaderMap| {
                     let data = data.clone();
+                    requests.fetch_add(1, Ordering::SeqCst);
                     async move {
                         let len = data.len();
                         let (start, end) = headers
@@ -662,7 +664,16 @@ mod engine_tests {
                     }
                 }),
             )
-            .route("/missing.bin", get(|| async { StatusCode::NOT_FOUND }));
+            .route("/missing.bin", get(|| async { StatusCode::NOT_FOUND }))
+            .route(
+                "/page.bin",
+                get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                        "<html><body><h1>Oops!</h1><p>Link expired</p></body></html>",
+                    )
+                }),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -706,7 +717,7 @@ mod engine_tests {
                 .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
                 .collect(),
         );
-        let base = range_server(data.clone()).await;
+        let base = range_server(data.clone(), Arc::default()).await;
         let dir = tempfile::tempdir().unwrap();
         let e = engine(dir.path()).await;
 
@@ -750,5 +761,47 @@ mod engine_tests {
         let m = wait_for(&e, missing, status::FAILED).await;
         assert_eq!(m.online, "offline");
         e.shutdown().await;
+    }
+
+    /// Hosters like ddownload allow one connection per file: then the probe request itself
+    /// must carry the whole download, without a second request.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn single_connection_uses_one_request() {
+        let data: Arc<Vec<u8>> = Arc::new((0..6 * 1024 * 1024u32).map(|i| i as u8).collect());
+        let requests = Arc::new(AtomicU64::new(0));
+        let base = range_server(data.clone(), requests.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let mut s = e.settings();
+        s.connections_per_file = 1;
+        e.update_settings(s).await.unwrap();
+
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin\n{base}/page.bin"),
+                package_name: Some("One".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids = e.package_ids(pkg).await.unwrap();
+        wait_for(&e, ids[0], status::FINISHED).await;
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert!(std::fs::read(dir.path().join("done/One/file.bin")).unwrap() == *data);
+
+        // A web page instead of the file is an error, not a finished download.
+        for _ in 0..100 {
+            let d = db::get_download(&e.db, ids[1]).await.unwrap().unwrap();
+            if let Some(err) = d.error {
+                assert!(err.contains("Webseite statt der Datei"), "{err}");
+                assert!(err.contains("Link expired"), "{err}");
+                assert_ne!(d.status, status::FINISHED);
+                e.shutdown().await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("HTML response was not reported");
     }
 }
