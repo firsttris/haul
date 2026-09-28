@@ -25,12 +25,18 @@ use crate::plugins::PluginManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // For development: read `.env` from the working directory (or a parent). Variables that
+    // are already set in the environment win, so Docker/systemd configuration is unaffected.
+    let dotenv = dotenvy::dotenv();
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn")),
         )
         .init();
 
+    if let Ok(path) = &dotenv {
+        tracing::info!("loaded {}", path.display());
+    }
     let cfg = Config::from_env()?;
     for dir in [
         &cfg.config_dir,

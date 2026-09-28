@@ -159,11 +159,15 @@ Voraussetzungen: Rust (stable), Node 22, pnpm.
 
 ```sh
 pnpm install
-pnpm build                    # Plugins + UI (ui/dist wird ins Binary eingebettet)
-APP_SECRET=dev HAUL_CONFIG_DIR=./.data/config HAUL_TMP_DIR=./.data/tmp HAUL_DONE_DIR=./.data/done \
-  HAUL_BUILTIN_PLUGINS=./plugins/dist cargo run -p haul
-pnpm dev:ui                   # Vite auf :5173, leitet /api an :8080 weiter
+pnpm dev
 ```
+
+`pnpm dev` legt beim ersten Mal `.env` aus [`.env.example`](.env.example) an, baut die Plugins und
+startet Server (`:8080`) und UI mit Hot Reload (`:5173`) zusammen. Öffnen:
+http://localhost:5173, Login `admin` / `adminadmin`. Daten landen in `./.data`.
+
+Einstellungen stehen in `.env`; der Server liest sie beim Start selbst, also funktioniert auch
+`cargo run -p haul` allein. Gesetzte Umgebungsvariablen haben Vorrang.
 
 Tests und Checks:
 

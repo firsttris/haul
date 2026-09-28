@@ -4,15 +4,18 @@
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "cargo run -p haul",
+    "dev:ui": "pnpm --filter @haul/ui dev",
     "build": "pnpm build:plugins && pnpm --filter @haul/ui build",
     "build:plugins": "node scripts/build-plugins.mjs",
-    "dev:ui": "pnpm --filter @haul/ui dev",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
     "typescript": "~5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "concurrently": "^9.2.1"
   }
 }
