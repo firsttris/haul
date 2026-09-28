@@ -96,7 +96,14 @@ impl Resolved {
             serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
             serde_json::Value::Object(map) if !map.is_empty() => Some(
                 map.iter()
-                    .map(|(k, v)| format!("{k}={}", v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())))
+                    .map(|(k, v)| {
+                        format!(
+                            "{k}={}",
+                            v.as_str()
+                                .map(str::to_string)
+                                .unwrap_or_else(|| v.to_string())
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("; "),
             ),
@@ -125,7 +132,11 @@ pub struct AccountCreds {
 
 impl AccountCreds {
     pub fn from_account(a: &Account, secret: String) -> Self {
-        Self { id: a.id, user: a.user.clone(), secret }
+        Self {
+            id: a.id,
+            user: a.user.clone(),
+            secret,
+        }
     }
 }
 
@@ -143,13 +154,20 @@ fn build_clients(jar: Option<Arc<Jar>>) -> HttpClients {
         let mut b = Client::builder()
             .user_agent(USER_AGENT)
             .connect_timeout(Duration::from_secs(20))
-            .redirect(if follow { reqwest::redirect::Policy::limited(10) } else { reqwest::redirect::Policy::none() });
+            .redirect(if follow {
+                reqwest::redirect::Policy::limited(10)
+            } else {
+                reqwest::redirect::Policy::none()
+            });
         if let Some(jar) = &jar {
             b = b.cookie_provider(jar.clone());
         }
         b.build().expect("http client")
     };
-    HttpClients { follow: build(true), no_follow: build(false) }
+    HttpClients {
+        follow: build(true),
+        no_follow: build(false),
+    }
 }
 
 fn to_regex(m: &MatchSpec) -> Result<Regex> {
@@ -199,7 +217,10 @@ impl PluginManager {
                     }
                     Err(e) => {
                         tracing::warn!(file = %file.display(), "plugin failed to load: {e:#}");
-                        errors.push(LoadError { file, error: format!("{e:#}") });
+                        errors.push(LoadError {
+                            file,
+                            error: format!("{e:#}"),
+                        });
                     }
                 }
             }
@@ -219,11 +240,21 @@ impl PluginManager {
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Plugin>> {
-        self.plugins.read().unwrap().iter().find(|p| p.id == id).cloned()
+        self.plugins
+            .read()
+            .unwrap()
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
     }
 
     pub fn find_for(&self, url: &str) -> Option<Arc<Plugin>> {
-        self.plugins.read().unwrap().iter().find(|p| p.matches(url)).cloned()
+        self.plugins
+            .read()
+            .unwrap()
+            .iter()
+            .find(|p| p.matches(url))
+            .cloned()
     }
 
     /// Clients for plain HTTP downloads without a plugin.
@@ -233,7 +264,10 @@ impl PluginManager {
 
     /// Clients with the cookie jar of `plugin` + `account`.
     pub fn clients_for(&self, plugin: &str, account: Option<i64>) -> HttpClients {
-        let key = format!("{plugin}:{}", account.map(|a| a.to_string()).unwrap_or_default());
+        let key = format!(
+            "{plugin}:{}",
+            account.map(|a| a.to_string()).unwrap_or_default()
+        );
         self.clients
             .lock()
             .unwrap()
@@ -244,7 +278,10 @@ impl PluginManager {
 
     /// Drops the cookie jar of an account, e.g. after its credentials changed.
     pub fn forget_account(&self, plugin: &str, account: i64) {
-        self.clients.lock().unwrap().remove(&format!("{plugin}:{account}"));
+        self.clients
+            .lock()
+            .unwrap()
+            .remove(&format!("{plugin}:{account}"));
     }
 
     async fn call<T: serde::de::DeserializeOwned>(
@@ -257,8 +294,12 @@ impl PluginManager {
         let env = serde_json::json!({ "pluginId": plugin.id, "account": account });
         let clients = self.clients_for(&plugin.id, account.map(|a| a.id));
         let value = host::invoke(&plugin.id, &plugin.code, method, args, env, clients).await?;
-        serde_json::from_value(value)
-            .map_err(|e| PluginError::fatal(format!("{} returned an unexpected value from {method}: {e}", plugin.id)))
+        serde_json::from_value(value).map_err(|e| {
+            PluginError::fatal(format!(
+                "{} returned an unexpected value from {method}: {e}",
+                plugin.id
+            ))
+        })
     }
 
     pub async fn check(
@@ -267,7 +308,8 @@ impl PluginManager {
         link: &str,
         account: Option<&AccountCreds>,
     ) -> std::result::Result<CheckResult, PluginError> {
-        self.call(plugin, "check", serde_json::json!([link]), account).await
+        self.call(plugin, "check", serde_json::json!([link]), account)
+            .await
     }
 
     pub async fn resolve(
@@ -276,7 +318,8 @@ impl PluginManager {
         link: &str,
         account: Option<&AccountCreds>,
     ) -> std::result::Result<Resolved, PluginError> {
-        self.call(plugin, "resolve", serde_json::json!([link]), account).await
+        self.call(plugin, "resolve", serde_json::json!([link]), account)
+            .await
     }
 
     pub async fn check_account(
@@ -284,17 +327,27 @@ impl PluginManager {
         plugin: &Plugin,
         account: &AccountCreds,
     ) -> std::result::Result<AccountInfo, PluginError> {
-        self.call(plugin, "checkAccount", serde_json::json!([]), Some(account)).await
+        self.call(plugin, "checkAccount", serde_json::json!([]), Some(account))
+            .await
     }
 }
 
 async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
     let code = tokio::fs::read_to_string(file).await?;
     let meta: Meta = serde_json::from_str(&host::read_meta(&code).await?)?;
-    if meta.id.is_empty() || !meta.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+    if meta.id.is_empty()
+        || !meta
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
         return Err(anyhow!("invalid plugin id {:?}", meta.id));
     }
-    let regexes = meta.matches.iter().map(to_regex).collect::<Result<Vec<_>>>()?;
+    let regexes = meta
+        .matches
+        .iter()
+        .map(to_regex)
+        .collect::<Result<Vec<_>>>()?;
     Ok(Plugin {
         id: meta.id,
         name: meta.name,

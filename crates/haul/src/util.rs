@@ -1,7 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 /// Turns an arbitrary string into something safe to use as a single path component.
@@ -35,8 +38,13 @@ pub fn sanitize_rel_dir(dir: &str) -> String {
 /// Best-effort file name from a URL's last path segment.
 pub fn filename_from_url(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
-    let last = parsed.path_segments()?.rfind(|s| !s.is_empty())?.to_string();
-    let decoded = percent_encoding::percent_decode_str(&last).decode_utf8_lossy().to_string();
+    let last = parsed
+        .path_segments()?
+        .rfind(|s| !s.is_empty())?
+        .to_string();
+    let decoded = percent_encoding::percent_decode_str(&last)
+        .decode_utf8_lossy()
+        .to_string();
     Some(sanitize_filename(&decoded))
 }
 
@@ -72,13 +80,17 @@ mod tests {
     fn filenames() {
         assert_eq!(sanitize_filename("../a/b?.rar"), "_a_b_.rar");
         assert_eq!(sanitize_rel_dir("../Filme//2025/./x"), "Filme/2025/x");
-        assert_eq!(filename_from_url("https://x.org/a/Some%20File.iso?x=1").unwrap(), "Some File.iso");
+        assert_eq!(
+            filename_from_url("https://x.org/a/Some%20File.iso?x=1").unwrap(),
+            "Some File.iso"
+        );
         assert_eq!(
             filename_from_disposition("attachment; filename=\"a b.zip\"").unwrap(),
             "a b.zip"
         );
         assert_eq!(
-            filename_from_disposition("attachment; filename=x; filename*=UTF-8''%C3%A4.zip").unwrap(),
+            filename_from_disposition("attachment; filename=x; filename*=UTF-8''%C3%A4.zip")
+                .unwrap(),
             "ä.zip"
         );
     }

@@ -10,7 +10,9 @@ pub struct Limiter {
 
 impl Limiter {
     pub fn new(kib_per_sec: u32) -> Self {
-        let l = Self { inner: RwLock::new(None) };
+        let l = Self {
+            inner: RwLock::new(None),
+        };
         l.set_limit(kib_per_sec);
         l
     }
@@ -24,7 +26,9 @@ impl Limiter {
     /// Waits until `bytes` may pass. Returns immediately without a limit.
     pub async fn consume(&self, bytes: usize) {
         let current = self.inner.read().unwrap().clone();
-        let Some((limiter, burst)) = current else { return };
+        let Some((limiter, burst)) = current else {
+            return;
+        };
         let mut cells = bytes.div_ceil(1024) as u32;
         while cells > 0 {
             let n = cells.min(burst);

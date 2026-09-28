@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use rquickjs::prelude::{Async, Func};
-use rquickjs::{async_with, AsyncContext, AsyncRuntime, CatchResultExt, Context, Function, Promise, Runtime};
+use rquickjs::{
+    async_with, AsyncContext, AsyncRuntime, CatchResultExt, Context, Function, Promise, Runtime,
+};
 use serde::{Deserialize, Serialize};
 
 const PRELUDE: &str = include_str!("prelude.js");
@@ -52,11 +54,17 @@ struct HttpResp {
 
 async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
     let req: HttpReq = serde_json::from_str(raw)?;
-    let client = if req.follow_redirects { &clients.follow } else { &clients.no_follow };
+    let client = if req.follow_redirects {
+        &clients.follow
+    } else {
+        &clients.no_follow
+    };
     let method = reqwest::Method::from_bytes(req.method.as_bytes())?;
     let mut rb = client
         .request(method, &req.url)
-        .timeout(Duration::from_millis(req.timeout_ms.unwrap_or(60_000).min(300_000)));
+        .timeout(Duration::from_millis(
+            req.timeout_ms.unwrap_or(60_000).min(300_000),
+        ));
     for (k, v) in &req.headers {
         rb = rb.header(k, v);
     }
@@ -76,7 +84,11 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
         headers
             .entry(k.as_str().to_string())
             .and_modify(|e| {
-                e.push_str(if k == reqwest::header::SET_COOKIE { "\n" } else { ", " });
+                e.push_str(if k == reqwest::header::SET_COOKIE {
+                    "\n"
+                } else {
+                    ", "
+                });
                 e.push_str(&v)
             })
             .or_insert(v);
@@ -88,7 +100,12 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
             return Err(anyhow!("response body larger than {MAX_BODY} bytes"));
         }
     }
-    Ok(HttpResp { status, url, headers, body: String::from_utf8_lossy(&body).into_owned() })
+    Ok(HttpResp {
+        status,
+        url,
+        headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    })
 }
 
 /// Error categories a plugin can signal by throwing the SDK's error classes.
@@ -113,7 +130,10 @@ pub struct PluginError {
 
 impl PluginError {
     pub fn fatal(message: impl Into<String>) -> Self {
-        Self { kind: ErrorKind::Fatal, message: message.into() }
+        Self {
+            kind: ErrorKind::Fatal,
+            message: message.into(),
+        }
     }
 }
 
@@ -165,10 +185,15 @@ pub async fn invoke(
     let raw = match tokio::time::timeout(CALL_TIMEOUT, fut).await {
         Ok(Ok(raw)) => raw,
         Ok(Err(e)) => return Err(PluginError::fatal(format!("plugin error: {e}"))),
-        Err(_) => return Err(PluginError { kind: ErrorKind::Temporary, message: "plugin timed out".into() }),
+        Err(_) => {
+            return Err(PluginError {
+                kind: ErrorKind::Temporary,
+                message: "plugin timed out".into(),
+            })
+        }
     };
-    let res: InvokeResult =
-        serde_json::from_str(&raw).map_err(|e| PluginError::fatal(format!("bad plugin result: {e}")))?;
+    let res: InvokeResult = serde_json::from_str(&raw)
+        .map_err(|e| PluginError::fatal(format!("bad plugin result: {e}")))?;
     if res.ok {
         Ok(res.value.unwrap_or(serde_json::Value::Null))
     } else {
@@ -268,11 +293,17 @@ mod tests {
         let s = eval_isolated("function f(){ return '31323334'; }", "f()").unwrap();
         assert_eq!(s, "31323334");
         assert!(eval_isolated("while(true){}", "1").is_err());
-        assert!(eval_isolated("function f(){ return typeof __host_http; }", "f()").unwrap() == "undefined");
+        assert!(
+            eval_isolated("function f(){ return typeof __host_http; }", "f()").unwrap()
+                == "undefined"
+        );
     }
 
     fn clients() -> HttpClients {
-        HttpClients { follow: Client::new(), no_follow: Client::new() }
+        HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+        }
     }
 
     const PLUGIN: &str = r#"
@@ -290,7 +321,8 @@ mod tests {
 
     #[tokio::test]
     async fn meta_and_invoke() {
-        let meta: serde_json::Value = serde_json::from_str(&read_meta(PLUGIN).await.unwrap()).unwrap();
+        let meta: serde_json::Value =
+            serde_json::from_str(&read_meta(PLUGIN).await.unwrap()).unwrap();
         assert_eq!(meta["id"], "t");
         assert_eq!(meta["matches"][0]["flags"], "i");
         let v = invoke(
@@ -304,9 +336,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(v["url"], "http://t.example/x?u=bob");
-        let e = invoke("t", PLUGIN, "check", serde_json::json!(["x"]), serde_json::json!({}), clients())
-            .await
-            .unwrap_err();
+        let e = invoke(
+            "t",
+            PLUGIN,
+            "check",
+            serde_json::json!(["x"]),
+            serde_json::json!({}),
+            clients(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(e.kind, ErrorKind::Offline);
     }
 }
@@ -318,16 +357,23 @@ mod bundled {
     /// Runs the esbuild bundle of the ddownload plugin in QuickJS (skipped if not built).
     #[tokio::test]
     async fn ddownload_bundle_runs_in_quickjs() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/dist/ddownload.js");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugins/dist/ddownload.js"
+        );
         let Ok(code) = std::fs::read_to_string(path) else {
             eprintln!("plugins/dist/ddownload.js not built, skipping");
             return;
         };
-        let meta: serde_json::Value = serde_json::from_str(&read_meta(&code).await.unwrap()).unwrap();
+        let meta: serde_json::Value =
+            serde_json::from_str(&read_meta(&code).await.unwrap()).unwrap();
         assert_eq!(meta["id"], "ddownload");
         assert_eq!(meta["accountRequired"], true);
         assert_eq!(meta["hasCheckAccount"], true);
-        let clients = HttpClients { follow: Client::new(), no_follow: Client::new() };
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+        };
         let err = invoke(
             "ddownload",
             &code,

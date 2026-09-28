@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+
+# ---- 1. UI and plugins ---------------------------------------------------------------
+FROM node:22-bookworm-slim AS web
+WORKDIR /src
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY plugins/ddownload/package.json plugins/ddownload/
+COPY ui/package.json ui/
+RUN pnpm install --frozen-lockfile
+COPY scripts scripts
+COPY packages packages
+COPY plugins plugins
+COPY ui ui
+RUN pnpm build
+
+# ---- 2. Server binary (UI embedded via rust-embed) ------------------------------------
+FROM rust:1-bookworm AS server
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+COPY --from=web /src/ui/dist ui/dist
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p haul && cp target/release/haul /haul
+
+# ---- 3. Runtime ----------------------------------------------------------------------
+FROM debian:bookworm-slim
+# unrar lives in non-free; p7zip handles zip/7z and split archives.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates p7zip-full unrar tini \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=server /haul /usr/local/bin/haul
+COPY --from=web /src/plugins/dist /app/plugins
+
+ENV HAUL_CONFIG_DIR=/config \
+    HAUL_TMP_DIR=/downloads/tmp \
+    HAUL_DONE_DIR=/downloads/done \
+    HAUL_BUILTIN_PLUGINS=/app/plugins \
+    HAUL_LISTEN=0.0.0.0:8080 \
+    # Inside the container Click'n'Load must listen on all interfaces so Docker can forward it.
+    # Publish it only on the host's loopback: "127.0.0.1:9666:9666".
+    HAUL_CNL_LISTEN=0.0.0.0:9666
+
+VOLUME ["/config", "/downloads/tmp", "/downloads/done"]
+EXPOSE 8080 9666
+HEALTHCHECK --interval=30s --timeout=5s CMD ["/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /api/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ok <&3"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["haul"]

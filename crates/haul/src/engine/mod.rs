@@ -67,7 +67,12 @@ pub struct AddLinks {
 }
 
 impl Engine {
-    pub async fn new(db: Db, cfg: Config, plugins: Arc<PluginManager>, events: Events) -> Result<Arc<Self>> {
+    pub async fn new(
+        db: Db,
+        cfg: Config,
+        plugins: Arc<PluginManager>,
+        events: Events,
+    ) -> Result<Arc<Self>> {
         let settings = Settings::load(&db).await?;
         let limiter = Limiter::new(settings.speed_limit_kib);
         // Anything that was running when the process stopped goes back to the queue;
@@ -78,7 +83,9 @@ impl Engine {
             .bind(status::DOWNLOADING)
             .execute(&db)
             .await?;
-        sqlx::query("UPDATE packages SET extract = 'pending' WHERE extract = 'running'").execute(&db).await?;
+        sqlx::query("UPDATE packages SET extract = 'pending' WHERE extract = 'running'")
+            .execute(&db)
+            .await?;
         Ok(Arc::new(Self {
             secrets: SecretBox::new(&cfg.app_secret),
             db,
@@ -201,9 +208,19 @@ impl Engine {
             return false;
         }
         let cancel = self.shutdown.child_token();
-        let progress = Arc::new(Progress { done: AtomicU64::new(0), size: AtomicI64::new(-1) });
+        let progress = Arc::new(Progress {
+            done: AtomicU64::new(0),
+            size: AtomicI64::new(-1),
+        });
         let (tx, rx) = watch::channel(false);
-        active.insert(id, Active { cancel: cancel.clone(), progress: progress.clone(), exited: rx });
+        active.insert(
+            id,
+            Active {
+                cancel: cancel.clone(),
+                progress: progress.clone(),
+                exited: rx,
+            },
+        );
         drop(active);
         let this = self.clone();
         tokio::spawn(async move {
@@ -239,7 +256,13 @@ impl Engine {
                 let active = self.active.lock().unwrap();
                 active
                     .iter()
-                    .map(|(id, a)| (*id, a.progress.done.load(Ordering::Relaxed), a.progress.size.load(Ordering::Relaxed)))
+                    .map(|(id, a)| {
+                        (
+                            *id,
+                            a.progress.done.load(Ordering::Relaxed),
+                            a.progress.size.load(Ordering::Relaxed),
+                        )
+                    })
                     .collect()
             };
             let mut items = Vec::with_capacity(snapshot.len());
@@ -249,7 +272,11 @@ impl Engine {
                 let (prev_done, prev_speed) = last.get(&id).copied().unwrap_or((done, 0.0));
                 let delta = done.saturating_sub(prev_done) as f64;
                 // Exponential moving average keeps the number readable.
-                let speed = if prev_speed == 0.0 { delta } else { prev_speed * 0.6 + delta * 0.4 };
+                let speed = if prev_speed == 0.0 {
+                    delta
+                } else {
+                    prev_speed * 0.6 + delta * 0.4
+                };
                 next.insert(id, (done, speed));
                 total += speed as u64;
                 items.push(ProgressItem {
@@ -261,7 +288,10 @@ impl Engine {
             }
             last = next;
             if !items.is_empty() || !last.is_empty() {
-                self.events.send(Event::Progress { items, total_speed: total });
+                self.events.send(Event::Progress {
+                    items,
+                    total_speed: total,
+                });
             }
         }
     }
@@ -270,7 +300,10 @@ impl Engine {
     /// is kept in the UI; this is a cheap fallback for `/api/stats`).
     pub fn live_bytes(&self) -> HashMap<i64, u64> {
         let active = self.active.lock().unwrap();
-        active.iter().map(|(id, a)| (*id, a.progress.done.load(Ordering::Relaxed))).collect()
+        active
+            .iter()
+            .map(|(id, a)| (*id, a.progress.done.load(Ordering::Relaxed)))
+            .collect()
     }
 
     pub async fn pick_account(&self, plugin_id: &str) -> Result<Option<AccountCreds>> {
@@ -378,21 +411,33 @@ impl Engine {
                 let acc = self.pick_account(&p.id).await.ok().flatten();
                 match self.plugins.check(p, &d.url, acc.as_ref()).await {
                     Ok(r) => (
-                        if r.online.unwrap_or(true) { "online" } else { "offline" },
+                        if r.online.unwrap_or(true) {
+                            "online"
+                        } else {
+                            "offline"
+                        },
                         r.name.map(|n| util::sanitize_filename(&n)),
                         r.size,
                         None,
                     ),
-                    Err(e) if e.kind == ErrorKind::Offline => ("offline", None, None, Some(e.message)),
+                    Err(e) if e.kind == ErrorKind::Offline => {
+                        ("offline", None, None, Some(e.message))
+                    }
                     Err(e) => ("unknown", None, None, Some(e.message)),
                 }
             }
             Some(_) => ("unknown", None, None, None),
-            None => match worker::probe_direct(&self.plugins.direct_clients().follow, &d.url).await {
+            None => match worker::probe_direct(&self.plugins.direct_clients().follow, &d.url).await
+            {
                 Ok(p) => ("online", p.name, p.size, None),
                 Err(e) => {
                     let offline = e.to_string().contains("404") || e.to_string().contains("410");
-                    (if offline { "offline" } else { "unknown" }, None, None, Some(format!("{e:#}")))
+                    (
+                        if offline { "offline" } else { "unknown" },
+                        None,
+                        None,
+                        Some(format!("{e:#}")),
+                    )
                 }
             },
         };
@@ -413,7 +458,10 @@ impl Engine {
 
     /// Moves a package from the Linksammler into the queue.
     pub async fn start_package(&self, id: i64) -> Result<()> {
-        sqlx::query("UPDATE packages SET collector = 0 WHERE id = ?").bind(id).execute(&self.db).await?;
+        sqlx::query("UPDATE packages SET collector = 0 WHERE id = ?")
+            .bind(id)
+            .execute(&self.db)
+            .await?;
         sqlx::query("UPDATE downloads SET status = ? WHERE package_id = ? AND status = ? AND online != 'offline'")
             .bind(status::QUEUED)
             .bind(id)
@@ -427,14 +475,15 @@ impl Engine {
 
     pub async fn pause(&self, ids: &[i64]) -> Result<()> {
         for &id in ids {
-            let res = sqlx::query("UPDATE downloads SET status = ? WHERE id = ? AND status IN (?, ?, ?)")
-                .bind(status::PAUSED)
-                .bind(id)
-                .bind(status::QUEUED)
-                .bind(status::RESOLVING)
-                .bind(status::DOWNLOADING)
-                .execute(&self.db)
-                .await?;
+            let res =
+                sqlx::query("UPDATE downloads SET status = ? WHERE id = ? AND status IN (?, ?, ?)")
+                    .bind(status::PAUSED)
+                    .bind(id)
+                    .bind(status::QUEUED)
+                    .bind(status::RESOLVING)
+                    .bind(status::DOWNLOADING)
+                    .execute(&self.db)
+                    .await?;
             if res.rows_affected() > 0 {
                 self.stop_worker(id).await;
             }
@@ -472,10 +521,12 @@ impl Engine {
     }
 
     pub async fn package_ids(&self, package_id: i64) -> Result<Vec<i64>> {
-        Ok(sqlx::query_scalar("SELECT id FROM downloads WHERE package_id = ?")
-            .bind(package_id)
-            .fetch_all(&self.db)
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT id FROM downloads WHERE package_id = ?")
+                .bind(package_id)
+                .fetch_all(&self.db)
+                .await?,
+        )
     }
 
     /// Removes downloads and their partial files. Finished files stay on disk.
@@ -488,7 +539,10 @@ impl Engine {
                 .await?;
             self.stop_worker(id).await;
             let _ = tokio::fs::remove_file(self.tmp_path(id)).await;
-            sqlx::query("DELETE FROM downloads WHERE id = ?").bind(id).execute(&self.db).await?;
+            sqlx::query("DELETE FROM downloads WHERE id = ?")
+                .bind(id)
+                .execute(&self.db)
+                .await?;
         }
         sqlx::query("DELETE FROM packages WHERE NOT EXISTS (SELECT 1 FROM downloads d WHERE d.package_id = packages.id)")
             .execute(&self.db)
@@ -517,8 +571,14 @@ pub fn parse_links(text: &str) -> Vec<String> {
 
 /// `Foo.part1.rar`, `Foo.part2.rar` → `Foo`; mixed files → `first (+n)`.
 pub fn guess_package_name(names: &[String]) -> String {
-    let re = regex::Regex::new(r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$").unwrap();
-    let stems: Vec<String> = names.iter().map(|n| re.replace(n, "").to_string()).collect();
+    let re = regex::Regex::new(
+        r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$",
+    )
+    .unwrap();
+    let stems: Vec<String> = names
+        .iter()
+        .map(|n| re.replace(n, "").to_string())
+        .collect();
     if let Some(first) = stems.first() {
         if !first.is_empty() && stems.iter().all(|s| s == first) {
             return first.clone();
@@ -536,12 +596,159 @@ mod tests {
 
     #[test]
     fn links_and_names() {
-        let l = parse_links("foo https://a.com/x.rar\nhttps://a.com/x.rar, http://b.org/y ftp://c <https://d.io/z>");
-        assert_eq!(l, vec!["https://a.com/x.rar", "http://b.org/y", "https://d.io/z"]);
+        let l = parse_links(
+            "foo https://a.com/x.rar\nhttps://a.com/x.rar, http://b.org/y ftp://c <https://d.io/z>",
+        );
+        assert_eq!(
+            l,
+            vec!["https://a.com/x.rar", "http://b.org/y", "https://d.io/z"]
+        );
         assert_eq!(
             guess_package_name(&["Foto.part1.rar".into(), "Foto.part2.rar".into()]),
             "Foto"
         );
-        assert_eq!(guess_package_name(&["a.iso".into(), "b.iso".into()]), "a (+1)");
+        assert_eq!(
+            guess_package_name(&["a.iso".into(), "b.iso".into()]),
+            "a (+1)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{header, HeaderMap, StatusCode};
+    use axum::response::Response;
+    use axum::routing::get;
+
+    /// Serves `data` at `/file.bin` with Range support, slowly enough to pause mid-way.
+    async fn range_server(data: Arc<Vec<u8>>) -> String {
+        let app = axum::Router::new()
+            .route(
+                "/file.bin",
+                get(move |headers: HeaderMap| {
+                    let data = data.clone();
+                    async move {
+                        let len = data.len();
+                        let (start, end) = headers
+                            .get(header::RANGE)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.strip_prefix("bytes="))
+                            .and_then(|v| v.split_once('-'))
+                            .map(|(a, b)| (a.parse().unwrap_or(0), b.parse().unwrap_or(len - 1)))
+                            .unwrap_or((0, len - 1));
+                        let slice = data[start..=end].to_vec();
+                        let stream = futures::stream::iter(
+                            slice
+                                .chunks(64 * 1024)
+                                .map(|c| c.to_vec())
+                                .collect::<Vec<_>>(),
+                        )
+                        .then(|c| async move {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                            Ok::<_, std::io::Error>(c)
+                        });
+                        Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
+                            .header(header::CONTENT_LENGTH, end - start + 1)
+                            .header(
+                                header::CONTENT_DISPOSITION,
+                                "attachment; filename=\"file.bin\"",
+                            )
+                            .body(Body::from_stream(stream))
+                            .unwrap()
+                    }
+                }),
+            )
+            .route("/missing.bin", get(|| async { StatusCode::NOT_FOUND }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    async fn engine(dir: &std::path::Path) -> Arc<Engine> {
+        let cfg = Config {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            cnl_listen: None,
+            config_dir: dir.join("config"),
+            tmp_dir: dir.join("tmp"),
+            done_dir: dir.join("done"),
+            builtin_plugins: None,
+            app_secret: "test".into(),
+            initial_user: None,
+        };
+        std::fs::create_dir_all(&cfg.config_dir).unwrap();
+        let db = db::connect(&cfg.db_path()).await.unwrap();
+        let plugins = Arc::new(PluginManager::new(vec![]));
+        let e = Engine::new(db, cfg, plugins, Events::new()).await.unwrap();
+        tokio::spawn(e.clone().run());
+        e
+    }
+
+    async fn wait_for(e: &Engine, id: i64, want: &str) -> Download {
+        for _ in 0..600 {
+            let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+            if d.status == want {
+                return d;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("download {id} never reached {want}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn segmented_download_with_pause_and_resume() {
+        let data: Arc<Vec<u8>> = Arc::new(
+            (0..24 * 1024 * 1024u32)
+                .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+                .collect(),
+        );
+        let base = range_server(data.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin\n{base}/missing.bin"),
+                package_name: Some("Pkg".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids = e.package_ids(pkg).await.unwrap();
+        let (file, missing) = (ids[0], ids[1]);
+
+        wait_for(&e, file, status::DOWNLOADING).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        e.pause(&[file]).await.unwrap();
+        let paused = db::get_download(&e.db, file).await.unwrap().unwrap();
+        assert_eq!(paused.status, status::PAUSED);
+        let segments: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM segments WHERE download_id = ?")
+                .bind(file)
+                .fetch_one(&e.db)
+                .await
+                .unwrap();
+        assert_eq!(segments, 4, "24 MiB with 4 connections → 4 segments");
+        assert!(
+            paused.bytes_done > 0 && paused.bytes_done < data.len() as i64,
+            "{}",
+            paused.bytes_done
+        );
+
+        e.resume(&[file]).await.unwrap();
+        let done = wait_for(&e, file, status::FINISHED).await;
+        assert_eq!(done.size, Some(data.len() as i64));
+        let written = std::fs::read(dir.path().join("done/Pkg/file.bin")).unwrap();
+        assert!(written == *data, "file content differs");
+        assert!(!e.tmp_path(file).exists());
+
+        let m = wait_for(&e, missing, status::FAILED).await;
+        assert_eq!(m.online, "offline");
+        e.shutdown().await;
     }
 }

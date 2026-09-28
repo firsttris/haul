@@ -42,7 +42,11 @@ pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
 
 async fn run_tool(mut cmd: Command) -> Result<(bool, String)> {
     let out = cmd.stdin(std::process::Stdio::null()).output().await?;
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     Ok((out.status.success(), text))
 }
 
@@ -54,22 +58,41 @@ async fn extract_one(archive: &Path, dest: &Path, passwords: &[String]) -> Resul
     let mut last = String::new();
     for pw in &candidates {
         let mut cmd = Command::new(&seven);
-        cmd.arg("x").arg("-y").arg(format!("-o{}", dest.display())).arg(format!("-p{pw}")).arg(archive);
+        cmd.arg("x")
+            .arg("-y")
+            .arg(format!("-o{}", dest.display()))
+            .arg(format!("-p{pw}"))
+            .arg(archive);
         match run_tool(cmd).await {
             Ok((true, _)) => return Ok(()),
             Ok((false, out)) => last = out,
             Err(e) => last = format!("{seven}: {e}"),
         }
-        if archive.extension().is_some_and(|e| e.eq_ignore_ascii_case("rar")) {
+        if archive
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("rar"))
+        {
             let mut cmd = Command::new(&unrar);
-            cmd.arg("x").arg("-o+").arg(if pw.is_empty() { "-p-".to_string() } else { format!("-p{pw}") });
+            cmd.arg("x").arg("-o+").arg(if pw.is_empty() {
+                "-p-".to_string()
+            } else {
+                format!("-p{pw}")
+            });
             cmd.arg(archive).arg(format!("{}/", dest.display()));
             if let Ok((true, _)) = run_tool(cmd).await {
                 return Ok(());
             }
         }
     }
-    let tail: String = last.lines().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ");
+    let tail: String = last
+        .lines()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" ");
     Err(anyhow!("Entpacken fehlgeschlagen: {tail}"))
 }
 
@@ -78,7 +101,9 @@ impl Engine {
         if !self.settings().auto_extract {
             return;
         }
-        let Ok(downloads) = db::package_downloads(&self.db, package_id).await else { return };
+        let Ok(downloads) = db::package_downloads(&self.db, package_id).await else {
+            return;
+        };
         if downloads.iter().any(|d| d.status != status::FINISHED) {
             return;
         }
@@ -98,7 +123,9 @@ impl Engine {
     }
 
     pub async fn extract_package(&self, package_id: i64) -> Result<()> {
-        let pkg = db::get_package(&self.db, package_id).await?.ok_or_else(|| anyhow!("Paket nicht gefunden"))?;
+        let pkg = db::get_package(&self.db, package_id)
+            .await?
+            .ok_or_else(|| anyhow!("Paket nicht gefunden"))?;
         let names: Vec<String> = db::package_downloads(&self.db, package_id)
             .await?
             .into_iter()
@@ -153,7 +180,6 @@ impl Engine {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,14 +187,25 @@ mod tests {
     #[test]
     fn archive_sets() {
         let names: Vec<String> = [
-            "a.part1.rar", "a.part2.rar", "b.part01.rar", "b.part02.rar", "c.zip", "d.7z.001", "d.7z.002",
-            "e.rar", "e.r00", "movie.mkv",
+            "a.part1.rar",
+            "a.part2.rar",
+            "b.part01.rar",
+            "b.part02.rar",
+            "c.zip",
+            "d.7z.001",
+            "d.7z.002",
+            "e.rar",
+            "e.r00",
+            "movie.mkv",
         ]
         .iter()
         .map(|s| s.to_string())
         .collect();
         let (first, all) = find_archives(&names);
-        assert_eq!(first, vec!["a.part1.rar", "b.part01.rar", "c.zip", "d.7z.001", "e.rar"]);
+        assert_eq!(
+            first,
+            vec!["a.part1.rar", "b.part01.rar", "c.zip", "d.7z.001", "e.rar"]
+        );
         assert_eq!(all.len(), 9);
     }
 }

@@ -14,7 +14,10 @@ pub async fn connect(path: &Path) -> Result<Db> {
         .journal_mode(SqliteJournalMode::Wal)
         .foreign_keys(true)
         .busy_timeout(std::time::Duration::from_secs(10));
-    let pool = SqlitePoolOptions::new().max_connections(8).connect_with(opts).await?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(opts)
+        .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)
 }
@@ -92,29 +95,42 @@ pub struct Account {
 }
 
 pub async fn get_download(db: &Db, id: i64) -> Result<Option<Download>> {
-    Ok(sqlx::query_as("SELECT * FROM downloads WHERE id = ?").bind(id).fetch_optional(db).await?)
+    Ok(sqlx::query_as("SELECT * FROM downloads WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?)
 }
 
 pub async fn get_package(db: &Db, id: i64) -> Result<Option<Package>> {
-    Ok(sqlx::query_as("SELECT * FROM packages WHERE id = ?").bind(id).fetch_optional(db).await?)
+    Ok(sqlx::query_as("SELECT * FROM packages WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?)
 }
 
 pub async fn package_downloads(db: &Db, package_id: i64) -> Result<Vec<Download>> {
-    Ok(sqlx::query_as("SELECT * FROM downloads WHERE package_id = ? ORDER BY id")
-        .bind(package_id)
-        .fetch_all(db)
-        .await?)
+    Ok(
+        sqlx::query_as("SELECT * FROM downloads WHERE package_id = ? ORDER BY id")
+            .bind(package_id)
+            .fetch_all(db)
+            .await?,
+    )
 }
 
 pub async fn get_account(db: &Db, id: i64) -> Result<Option<Account>> {
-    Ok(sqlx::query_as("SELECT * FROM accounts WHERE id = ?").bind(id).fetch_optional(db).await?)
+    Ok(sqlx::query_as("SELECT * FROM accounts WHERE id = ?")
+        .bind(id)
+        .fetch_optional(db)
+        .await?)
 }
 
 pub async fn get_setting(db: &Db, key: &str) -> Result<Option<String>> {
-    Ok(sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
-        .bind(key)
-        .fetch_optional(db)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(db)
+            .await?,
+    )
 }
 
 pub async fn set_setting(db: &Db, key: &str, value: &str) -> Result<()> {

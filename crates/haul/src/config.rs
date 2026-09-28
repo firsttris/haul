@@ -42,7 +42,9 @@ impl Config {
             listen,
             cnl_listen,
             tmp_dir: PathBuf::from(var("HAUL_TMP_DIR").unwrap_or_else(|| "/downloads/tmp".into())),
-            done_dir: PathBuf::from(var("HAUL_DONE_DIR").unwrap_or_else(|| "/downloads/done".into())),
+            done_dir: PathBuf::from(
+                var("HAUL_DONE_DIR").unwrap_or_else(|| "/downloads/done".into()),
+            ),
             builtin_plugins: var("HAUL_BUILTIN_PLUGINS").map(PathBuf::from),
             config_dir,
             app_secret,

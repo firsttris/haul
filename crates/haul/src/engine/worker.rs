@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_DISPOSITION, CONTENT_RANGE, COOKIE, RANGE};
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_DISPOSITION, CONTENT_RANGE,
+    COOKIE, RANGE,
+};
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::task::JoinSet;
@@ -153,7 +156,12 @@ pub async fn probe_direct(client: &Client, url: &str) -> Result<Probe> {
     Ok(p)
 }
 
-pub async fn run(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, progress: &Arc<Progress>) {
+pub async fn run(
+    engine: &Arc<Engine>,
+    id: i64,
+    cancel: &CancellationToken,
+    progress: &Arc<Progress>,
+) {
     let outcome = execute(engine, id, cancel, progress).await;
     let result = match outcome {
         Ok(()) | Err(Failure::Cancelled) => Ok(()),
@@ -165,18 +173,30 @@ pub async fn run(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
 }
 
 async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
-    let Some(d) = db::get_download(&engine.db, id).await? else { return Ok(()) };
+    let Some(d) = db::get_download(&engine.db, id).await? else {
+        return Ok(());
+    };
     let max = engine.settings().max_retries as i64;
     let running = [status::RESOLVING, status::DOWNLOADING];
     let (new_status, online, retry_at, attempts, msg) = match f {
         Failure::Offline(m) => (status::FAILED, "offline", None, d.attempts, m),
         Failure::Fail(m) => (status::FAILED, d.online.as_str(), None, d.attempts, m),
-        Failure::Retry(m) if d.attempts + 1 > max => {
-            (status::FAILED, d.online.as_str(), None, d.attempts + 1, format!("{m} (nach {} Versuchen)", d.attempts + 1))
-        }
+        Failure::Retry(m) if d.attempts + 1 > max => (
+            status::FAILED,
+            d.online.as_str(),
+            None,
+            d.attempts + 1,
+            format!("{m} (nach {} Versuchen)", d.attempts + 1),
+        ),
         Failure::Retry(m) => {
             let backoff = (10_000i64 << d.attempts.min(6)).min(600_000);
-            (status::QUEUED, d.online.as_str(), Some(now_ms() + backoff), d.attempts + 1, m)
+            (
+                status::QUEUED,
+                d.online.as_str(),
+                Some(now_ms() + backoff),
+                d.attempts + 1,
+                m,
+            )
         }
         Failure::Cancelled => return Ok(()),
     };
@@ -198,22 +218,35 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
     Ok(())
 }
 
-async fn cancellable<T>(cancel: &CancellationToken, fut: impl std::future::Future<Output = T>) -> Result<T, Failure> {
+async fn cancellable<T>(
+    cancel: &CancellationToken,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T, Failure> {
     tokio::select! {
         _ = cancel.cancelled() => Err(Failure::Cancelled),
         v = fut => Ok(v),
     }
 }
 
-async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, progress: &Arc<Progress>) -> Result<(), Failure> {
-    let d = db::get_download(&engine.db, id).await?.ok_or(Failure::Cancelled)?;
-    let pkg = db::get_package(&engine.db, d.package_id).await?.ok_or(Failure::Cancelled)?;
-    let marked = sqlx::query("UPDATE downloads SET status = ?, error = NULL WHERE id = ? AND status = ?")
-        .bind(status::RESOLVING)
-        .bind(id)
-        .bind(status::QUEUED)
-        .execute(&engine.db)
-        .await?;
+async fn execute(
+    engine: &Arc<Engine>,
+    id: i64,
+    cancel: &CancellationToken,
+    progress: &Arc<Progress>,
+) -> Result<(), Failure> {
+    let d = db::get_download(&engine.db, id)
+        .await?
+        .ok_or(Failure::Cancelled)?;
+    let pkg = db::get_package(&engine.db, d.package_id)
+        .await?
+        .ok_or(Failure::Cancelled)?;
+    let marked =
+        sqlx::query("UPDATE downloads SET status = ?, error = NULL WHERE id = ? AND status = ?")
+            .bind(status::RESOLVING)
+            .bind(id)
+            .bind(status::QUEUED)
+            .execute(&engine.db)
+            .await?;
     if marked.rows_affected() == 0 {
         return Err(Failure::Cancelled);
     }
@@ -222,34 +255,65 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
     // 1. Resolve the link to a direct URL.
     let (resolved, client, max_conns) = match engine.plugins.find_for(&d.url) {
         Some(plugin) => {
-            let acc = engine.pick_account(&plugin.id).await.map_err(|e| Failure::Fail(format!("{e:#}")))?;
+            let acc = engine
+                .pick_account(&plugin.id)
+                .await
+                .map_err(|e| Failure::Fail(format!("{e:#}")))?;
             if plugin.account_required && acc.is_none() {
-                return Err(Failure::Fail(format!("Kein aktiver Account für {}", plugin.name)));
+                return Err(Failure::Fail(format!(
+                    "Kein aktiver Account für {}",
+                    plugin.name
+                )));
             }
-            let r = cancellable(cancel, engine.plugins.resolve(&plugin, &d.url, acc.as_ref())).await??;
-            let clients = engine.plugins.clients_for(&plugin.id, acc.as_ref().map(|a| a.id));
+            let r = cancellable(
+                cancel,
+                engine.plugins.resolve(&plugin, &d.url, acc.as_ref()),
+            )
+            .await??;
+            let clients = engine
+                .plugins
+                .clients_for(&plugin.id, acc.as_ref().map(|a| a.id));
             let conns = r.max_connections;
             (r, clients.follow, conns)
         }
         None => (
-            Resolved { url: d.url.clone(), headers: Default::default(), cookies: None, name: None, size: None, max_connections: None },
+            Resolved {
+                url: d.url.clone(),
+                headers: Default::default(),
+                cookies: None,
+                name: None,
+                size: None,
+                max_connections: None,
+            },
             engine.plugins.direct_clients().follow,
             None,
         ),
     };
     let mut headers = HeaderMap::new();
     for (k, v) in &resolved.headers {
-        if let (Ok(k), Ok(v)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v)) {
+        if let (Ok(k), Ok(v)) = (
+            HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(v),
+        ) {
             headers.insert(k, v);
         }
     }
-    if let Some(c) = resolved.cookie_header().and_then(|c| HeaderValue::from_str(&c).ok()) {
+    if let Some(c) = resolved
+        .cookie_header()
+        .and_then(|c| HeaderValue::from_str(&c).ok())
+    {
         headers.insert(COOKIE, c);
     }
-    let source = Arc::new(Source { client, url: resolved.url.clone(), headers });
+    let source = Arc::new(Source {
+        client,
+        url: resolved.url.clone(),
+        headers,
+    });
 
     // 2. Probe: size, range support, file name.
-    let resp = cancellable(cancel, source.get(0, None).send()).await?.map_err(net_failure)?;
+    let resp = cancellable(cancel, source.get(0, None).send())
+        .await?
+        .map_err(net_failure)?;
     if !resp.status().is_success() {
         return Err(http_failure(resp.status()));
     }
@@ -261,18 +325,25 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
         .or_else(|| (d.online == "online").then(|| d.name.clone()))
         .or_else(|| util::filename_from_url(resp.url().as_str()))
         .unwrap_or_else(|| d.name.clone());
-    let total = probe.size.or(resolved.size).filter(|s| *s >= 0).map(|s| s as u64);
+    let total = probe
+        .size
+        .or(resolved.size)
+        .filter(|s| *s >= 0)
+        .map(|s| s as u64);
     let ranges = probe.ranges && total.is_some();
 
     // 3. Segments: reuse persisted ones to resume, otherwise plan fresh.
     let path = engine.tmp_path(id);
     tokio::fs::create_dir_all(&engine.cfg.tmp_dir).await?;
-    let existing: Vec<Segment> = sqlx::query_as("SELECT idx, start, \"end\", done FROM segments WHERE download_id = ? ORDER BY idx")
-        .bind(id)
-        .fetch_all(&engine.db)
-        .await?;
+    let existing: Vec<Segment> = sqlx::query_as(
+        "SELECT idx, start, \"end\", done FROM segments WHERE download_id = ? ORDER BY idx",
+    )
+    .bind(id)
+    .fetch_all(&engine.db)
+    .await?;
     let file_len = tokio::fs::metadata(&path).await.map(|m| m.len()).ok();
-    let reuse = ranges && !existing.is_empty() && d.size.map(|s| s as u64) == total && file_len == total;
+    let reuse =
+        ranges && !existing.is_empty() && d.size.map(|s| s as u64) == total && file_len == total;
     let segs: Vec<Arc<Seg>> = if reuse {
         existing
             .into_iter()
@@ -287,14 +358,26 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
             })
             .collect()
     } else {
-        let conns = engine.settings().connections_per_file.min(max_conns.unwrap_or(u32::MAX)).max(1) as u64;
+        let conns = engine
+            .settings()
+            .connections_per_file
+            .min(max_conns.unwrap_or(u32::MAX))
+            .max(1) as u64;
         let plan = plan_segments(total, ranges, conns);
-        let file = tokio::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&path).await?;
+        let file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .await?;
         if let Some(t) = total {
             file.set_len(t).await?;
         }
         let mut tx = engine.db.begin().await?;
-        sqlx::query("DELETE FROM segments WHERE download_id = ?").bind(id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM segments WHERE download_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         for (i, (start, end)) in plan.iter().enumerate() {
             sqlx::query("INSERT INTO segments(download_id, idx, start, \"end\", done) VALUES(?, ?, ?, ?, 0)")
                 .bind(id)
@@ -308,14 +391,22 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
         plan.into_iter()
             .enumerate()
             .map(|(i, (start, end))| {
-                Arc::new(Seg { idx: i as i64, start, end, done: AtomicU64::new(0), safe: AtomicU64::new(0) })
+                Arc::new(Seg {
+                    idx: i as i64,
+                    start,
+                    end,
+                    done: AtomicU64::new(0),
+                    safe: AtomicU64::new(0),
+                })
             })
             .collect()
     };
 
     let already: u64 = segs.iter().map(|s| s.done.load(Ordering::Relaxed)).sum();
     progress.done.store(already, Ordering::Relaxed);
-    progress.size.store(total.map(|t| t as i64).unwrap_or(-1), Ordering::Relaxed);
+    progress
+        .size
+        .store(total.map(|t| t as i64).unwrap_or(-1), Ordering::Relaxed);
     let res = sqlx::query("UPDATE downloads SET status = ?, name = ?, size = ?, bytes_done = ? WHERE id = ? AND status = ?")
         .bind(status::DOWNLOADING)
         .bind(&name)
@@ -335,7 +426,10 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
     let seg_cancel = cancel.child_token();
     let mut set = JoinSet::new();
     for seg in &segs {
-        if seg.end.is_some_and(|e| seg.start + seg.done.load(Ordering::Relaxed) >= e) {
+        if seg
+            .end
+            .is_some_and(|e| seg.start + seg.done.load(Ordering::Relaxed) >= e)
+        {
             continue;
         }
         let ctx = SegCtx {
@@ -384,7 +478,9 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
     let written: u64 = segs.iter().map(|s| s.done.load(Ordering::Relaxed)).sum();
     if let Some(t) = total {
         if written != t {
-            return Err(Failure::Retry(format!("unvollständig: {written} von {t} Bytes")));
+            return Err(Failure::Retry(format!(
+                "unvollständig: {written} von {t} Bytes"
+            )));
         }
     }
 
@@ -405,7 +501,10 @@ async fn execute(engine: &Arc<Engine>, id: i64, cancel: &CancellationToken, prog
     .bind(id)
     .execute(&engine.db)
     .await?;
-    sqlx::query("DELETE FROM segments WHERE download_id = ?").bind(id).execute(&engine.db).await?;
+    sqlx::query("DELETE FROM segments WHERE download_id = ?")
+        .bind(id)
+        .execute(&engine.db)
+        .await?;
     tracing::info!(id, file = %dest.display(), "download finished");
     let e = engine.clone();
     tokio::spawn(async move { e.on_download_finished(pkg.id).await });
@@ -443,7 +542,11 @@ async fn persist_segments(engine: &Engine, id: i64, segs: &[Arc<Seg>]) -> Result
             .execute(&mut *tx)
             .await?;
     }
-    sqlx::query("UPDATE downloads SET bytes_done = ? WHERE id = ?").bind(sum as i64).bind(id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE downloads SET bytes_done = ? WHERE id = ?")
+        .bind(sum as i64)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -460,7 +563,10 @@ struct SegCtx {
 
 async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Failure> {
     let seg = &ctx.seg;
-    let mut file = tokio::fs::OpenOptions::new().write(true).open(&ctx.path).await?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .open(&ctx.path)
+        .await?;
     let mut attempt = 0;
     loop {
         let pos = seg.start + seg.done.load(Ordering::Relaxed);
@@ -470,10 +576,14 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
         let resp = match first.take() {
             Some(r) => r,
             None => {
-                let r = cancellable(&ctx.cancel, ctx.source.get(pos, seg.end).send()).await?.map_err(net_failure);
+                let r = cancellable(&ctx.cancel, ctx.source.get(pos, seg.end).send())
+                    .await?
+                    .map_err(net_failure);
                 match r {
                     Ok(r) if r.status() == StatusCode::PARTIAL_CONTENT => Ok(r),
-                    Ok(r) if r.status().is_success() => Err(Failure::Retry("Server ignoriert Range-Anfrage".into())),
+                    Ok(r) if r.status().is_success() => {
+                        Err(Failure::Retry("Server ignoriert Range-Anfrage".into()))
+                    }
                     Ok(r) => Err(http_failure(r.status())),
                     Err(e) => Err(e),
                 }?
@@ -482,7 +592,8 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
         file.seek(SeekFrom::Start(pos)).await?;
         let result = pump(&ctx, resp, &mut file).await;
         file.flush().await?;
-        seg.safe.store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
+        seg.safe
+            .store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
         let err = match result {
             Ok(()) => match seg.end {
                 None => return Ok(()),
@@ -495,7 +606,11 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
             Failure::Retry(msg) if ctx.ranges && attempt < SEGMENT_RETRIES => {
                 attempt += 1;
                 tracing::debug!(seg = seg.idx, attempt, "segment retry: {msg}");
-                cancellable(&ctx.cancel, tokio::time::sleep(Duration::from_secs(2 * attempt as u64))).await?;
+                cancellable(
+                    &ctx.cancel,
+                    tokio::time::sleep(Duration::from_secs(2 * attempt as u64)),
+                )
+                .await?;
             }
             other => return Err(other),
         }
@@ -508,7 +623,11 @@ async fn pump(ctx: &SegCtx, resp: Response, file: &mut tokio::fs::File) -> Resul
     let mut unflushed = 0u64;
     let mut last_flush = Instant::now();
     loop {
-        let next = cancellable(&ctx.cancel, tokio::time::timeout(READ_TIMEOUT, stream.next())).await?;
+        let next = cancellable(
+            &ctx.cancel,
+            tokio::time::timeout(READ_TIMEOUT, stream.next()),
+        )
+        .await?;
         let chunk = match next {
             Err(_) => return Err(Failure::Retry("Zeitüberschreitung beim Lesen".into())),
             Ok(None) => return Ok(()),
@@ -531,11 +650,15 @@ async fn pump(ctx: &SegCtx, resp: Response, file: &mut tokio::fs::File) -> Resul
         unflushed += n;
         if unflushed >= FLUSH_BYTES || last_flush.elapsed() > Duration::from_secs(2) {
             file.flush().await?;
-            seg.safe.store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
+            seg.safe
+                .store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
             unflushed = 0;
             last_flush = Instant::now();
         }
-        if seg.end.is_some_and(|e| seg.start + seg.done.load(Ordering::Relaxed) >= e) {
+        if seg
+            .end
+            .is_some_and(|e| seg.start + seg.done.load(Ordering::Relaxed) >= e)
+        {
             return Ok(());
         }
     }

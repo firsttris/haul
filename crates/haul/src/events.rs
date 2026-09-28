@@ -10,7 +10,10 @@ pub enum Event {
     Changed { topic: Topic },
     /// Live byte counters of running downloads, sent about once a second.
     #[serde(rename_all = "camelCase")]
-    Progress { items: Vec<ProgressItem>, total_speed: u64 },
+    Progress {
+        items: Vec<ProgressItem>,
+        total_speed: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -39,7 +42,9 @@ pub struct Events {
 
 impl Events {
     pub fn new() -> Self {
-        Self { tx: broadcast::channel(256).0 }
+        Self {
+            tx: broadcast::channel(256).0,
+        }
     }
 
     pub fn send(&self, e: Event) {

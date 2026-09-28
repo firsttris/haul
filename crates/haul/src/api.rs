@@ -33,7 +33,10 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self { status, message: message.into() }
+        Self {
+            status,
+            message: message.into(),
+        }
     }
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
@@ -53,7 +56,11 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(serde_json::json!({ "error": self.message }))).into_response()
+        (
+            self.status,
+            Json(serde_json::json!({ "error": self.message })),
+        )
+            .into_response()
     }
 }
 
@@ -62,7 +69,10 @@ pub type ApiResult<T> = Result<T, ApiError>;
 pub fn router(app: Arc<App>) -> Router {
     let protected = Router::new()
         .route("/packages", get(list_packages))
-        .route("/packages/{id}", patch(update_package).delete(delete_package))
+        .route(
+            "/packages/{id}",
+            patch(update_package).delete(delete_package),
+        )
         .route("/packages/{id}/start", post(start_package))
         .route("/packages/{id}/pause", post(pause_package))
         .route("/packages/{id}/resume", post(resume_package))
@@ -78,7 +88,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/stats", get(stats))
         .route("/events", get(events))
         .route("/accounts", get(list_accounts).post(create_account))
-        .route("/accounts/{id}", patch(update_account).delete(delete_account))
+        .route(
+            "/accounts/{id}",
+            patch(update_account).delete(delete_account),
+        )
         .route("/accounts/{id}/check", post(check_account))
         .route("/plugins", get(list_plugins))
         .route("/plugins/reload", post(reload_plugins))
@@ -86,10 +99,16 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/settings/api-token", post(auth::rotate_token))
         .route("/auth/password", post(auth::change_password))
         .nest("/cnl", crate::cnl::router(app.engine.clone()))
-        .route_layer(middleware::from_fn_with_state(app.clone(), auth::require_auth));
+        .route_layer(middleware::from_fn_with_state(
+            app.clone(),
+            auth::require_auth,
+        ));
 
     Router::new()
-        .route("/health", get(|| async { Json(serde_json::json!({ "status": "ok" })) }))
+        .route(
+            "/health",
+            get(|| async { Json(serde_json::json!({ "status": "ok" })) }),
+        )
         .route("/auth/state", get(auth::state))
         .route("/auth/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
@@ -114,13 +133,17 @@ struct ListQuery {
     view: Option<String>,
 }
 
-async fn list_packages(State(app): State<Arc<App>>, Query(q): Query<ListQuery>) -> ApiResult<Json<Vec<PackageView>>> {
+async fn list_packages(
+    State(app): State<Arc<App>>,
+    Query(q): Query<ListQuery>,
+) -> ApiResult<Json<Vec<PackageView>>> {
     let collector = q.view.as_deref() == Some("collector");
     let db = &app.engine.db;
-    let packages: Vec<Package> = sqlx::query_as("SELECT * FROM packages WHERE collector = ? ORDER BY id")
-        .bind(collector)
-        .fetch_all(db)
-        .await?;
+    let packages: Vec<Package> =
+        sqlx::query_as("SELECT * FROM packages WHERE collector = ? ORDER BY id")
+            .bind(collector)
+            .fetch_all(db)
+            .await?;
     let downloads: Vec<Download> = sqlx::query_as(
         "SELECT d.* FROM downloads d JOIN packages p ON p.id = d.package_id WHERE p.collector = ? ORDER BY d.id",
     )
@@ -130,7 +153,11 @@ async fn list_packages(State(app): State<Arc<App>>, Query(q): Query<ListQuery>) 
     let live = app.engine.live_bytes();
     let mut views: Vec<PackageView> = packages
         .into_iter()
-        .map(|p| PackageView { has_passwords: p.passwords.is_some(), package: p, downloads: Vec::new() })
+        .map(|p| PackageView {
+            has_passwords: p.passwords.is_some(),
+            package: p,
+            downloads: Vec::new(),
+        })
         .collect();
     for mut d in downloads {
         if let Some(b) = live.get(&d.id) {
@@ -143,8 +170,15 @@ async fn list_packages(State(app): State<Arc<App>>, Query(q): Query<ListQuery>) 
     Ok(Json(views))
 }
 
-async fn add_links(State(app): State<Arc<App>>, Json(req): Json<AddLinks>) -> ApiResult<Json<serde_json::Value>> {
-    let id = app.engine.add_links(req).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+async fn add_links(
+    State(app): State<Arc<App>>,
+    Json(req): Json<AddLinks>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let id = app
+        .engine
+        .add_links(req)
+        .await
+        .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     Ok(Json(serde_json::json!({ "packageId": id })))
 }
 
@@ -156,11 +190,21 @@ struct PackageUpdate {
     passwords: Option<String>,
 }
 
-async fn update_package(State(app): State<Arc<App>>, Path(id): Path<i64>, Json(u): Json<PackageUpdate>) -> ApiResult<StatusCode> {
+async fn update_package(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+    Json(u): Json<PackageUpdate>,
+) -> ApiResult<StatusCode> {
     let db = &app.engine.db;
-    db::get_package(db, id).await?.ok_or_else(ApiError::not_found)?;
+    db::get_package(db, id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
     if let Some(name) = u.name.filter(|n| !n.trim().is_empty()) {
-        sqlx::query("UPDATE packages SET name = ? WHERE id = ?").bind(name.trim()).bind(id).execute(db).await?;
+        sqlx::query("UPDATE packages SET name = ? WHERE id = ?")
+            .bind(name.trim())
+            .bind(id)
+            .execute(db)
+            .await?;
     }
     if let Some(dir) = u.target_dir {
         sqlx::query("UPDATE packages SET target_dir = ? WHERE id = ?")
@@ -183,7 +227,10 @@ async fn update_package(State(app): State<Arc<App>>, Path(id): Path<i64>, Json(u
 async fn delete_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let ids = app.engine.package_ids(id).await?;
     app.engine.delete(&ids).await?;
-    sqlx::query("DELETE FROM packages WHERE id = ?").bind(id).execute(&app.engine.db).await?;
+    sqlx::query("DELETE FROM packages WHERE id = ?")
+        .bind(id)
+        .execute(&app.engine.db)
+        .await?;
     app.engine.events.changed(Topic::Downloads);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -213,7 +260,10 @@ async fn check_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiR
     Ok(StatusCode::ACCEPTED)
 }
 
-async fn extract_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+async fn extract_package(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     let engine = app.engine.clone();
     tokio::spawn(async move {
         let _ = engine.extract_package(id).await;
@@ -221,7 +271,10 @@ async fn extract_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Ap
     Ok(StatusCode::ACCEPTED)
 }
 
-async fn delete_download(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+async fn delete_download(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     app.engine.delete(&[id]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -231,13 +284,19 @@ async fn pause_download(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn resume_download(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+async fn resume_download(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     app.engine.resume(&[id]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn pause_all(State(app): State<Arc<App>>) -> ApiResult<StatusCode> {
-    let ids = app.engine.ids_with_status(&[status::QUEUED, status::RESOLVING, status::DOWNLOADING]).await?;
+    let ids = app
+        .engine
+        .ids_with_status(&[status::QUEUED, status::RESOLVING, status::DOWNLOADING])
+        .await?;
     app.engine.pause(&ids).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -309,11 +368,12 @@ struct PremiumSummary {
 async fn stats(State(app): State<Arc<App>>) -> ApiResult<Json<Stats>> {
     let db = &app.engine.db;
     let settings = app.engine.settings();
-    let (queued, queued_bytes): (i64, i64) =
-        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size - bytes_done), 0) FROM downloads WHERE status = ?")
-            .bind(status::QUEUED)
-            .fetch_one(db)
-            .await?;
+    let (queued, queued_bytes): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(size - bytes_done), 0) FROM downloads WHERE status = ?",
+    )
+    .bind(status::QUEUED)
+    .fetch_one(db)
+    .await?;
     let day_start = now_ms() - now_ms().rem_euclid(86_400_000);
     let (finished_today, finished_today_bytes): (i64, i64) = sqlx::query_as(
         "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM downloads WHERE status = ? AND finished_at >= ?",
@@ -345,18 +405,28 @@ async fn stats(State(app): State<Arc<App>>) -> ApiResult<Json<Stats>> {
         storage,
         premium: premium
             .into_iter()
-            .map(|(plugin_id, traffic_left, valid_until)| PremiumSummary { plugin_id, traffic_left, valid_until })
+            .map(|(plugin_id, traffic_left, valid_until)| PremiumSummary {
+                plugin_id,
+                traffic_left,
+                valid_until,
+            })
             .collect(),
     }))
 }
 
-async fn events(State(app): State<Arc<App>>) -> Sse<impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
+async fn events(
+    State(app): State<Arc<App>>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
     let rx = app.engine.events.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
-        Ok(e) => Some(Ok(axum::response::sse::Event::default().json_data(&e).unwrap_or_default())),
+        Ok(e) => Some(Ok(axum::response::sse::Event::default()
+            .json_data(&e)
+            .unwrap_or_default())),
         // A slow client missed events: tell it to refetch everything.
-        Err(BroadcastStreamRecvError::Lagged(_)) => Some(Ok(axum::response::sse::Event::default()
-            .data(r#"{"type":"changed","topic":"downloads"}"#))),
+        Err(BroadcastStreamRecvError::Lagged(_)) => {
+            Some(Ok(axum::response::sse::Event::default()
+                .data(r#"{"type":"changed","topic":"downloads"}"#)))
+        }
     });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
@@ -372,10 +442,15 @@ struct AccountView {
 }
 
 async fn list_accounts(State(app): State<Arc<App>>) -> ApiResult<Json<Vec<AccountView>>> {
-    let rows: Vec<Account> = sqlx::query_as("SELECT * FROM accounts ORDER BY plugin_id, id").fetch_all(&app.engine.db).await?;
+    let rows: Vec<Account> = sqlx::query_as("SELECT * FROM accounts ORDER BY plugin_id, id")
+        .fetch_all(&app.engine.db)
+        .await?;
     Ok(Json(
         rows.into_iter()
-            .map(|a| AccountView { plugin_name: app.engine.plugins.get(&a.plugin_id).map(|p| p.name.clone()), account: a })
+            .map(|a| AccountView {
+                plugin_name: app.engine.plugins.get(&a.plugin_id).map(|p| p.name.clone()),
+                account: a,
+            })
             .collect(),
     ))
 }
@@ -389,7 +464,10 @@ struct NewAccount {
     secret: String,
 }
 
-async fn create_account(State(app): State<Arc<App>>, Json(n): Json<NewAccount>) -> ApiResult<Json<serde_json::Value>> {
+async fn create_account(
+    State(app): State<Arc<App>>,
+    Json(n): Json<NewAccount>,
+) -> ApiResult<Json<serde_json::Value>> {
     if app.engine.plugins.get(&n.plugin_id).is_none() {
         return Err(ApiError::bad_request("unbekanntes Plugin"));
     }
@@ -418,15 +496,29 @@ struct AccountUpdate {
     secret: Option<String>,
 }
 
-async fn update_account(State(app): State<Arc<App>>, Path(id): Path<i64>, Json(u): Json<AccountUpdate>) -> ApiResult<StatusCode> {
+async fn update_account(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+    Json(u): Json<AccountUpdate>,
+) -> ApiResult<StatusCode> {
     let db = &app.engine.db;
-    let acc = db::get_account(db, id).await?.ok_or_else(ApiError::not_found)?;
+    let acc = db::get_account(db, id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
     if let Some(e) = u.enabled {
-        sqlx::query("UPDATE accounts SET enabled = ? WHERE id = ?").bind(e).bind(id).execute(db).await?;
+        sqlx::query("UPDATE accounts SET enabled = ? WHERE id = ?")
+            .bind(e)
+            .bind(id)
+            .execute(db)
+            .await?;
     }
     let mut recheck = false;
     if let Some(user) = u.user {
-        sqlx::query("UPDATE accounts SET user = ? WHERE id = ?").bind(user.trim()).bind(id).execute(db).await?;
+        sqlx::query("UPDATE accounts SET user = ? WHERE id = ?")
+            .bind(user.trim())
+            .bind(id)
+            .execute(db)
+            .await?;
         recheck = true;
     }
     if let Some(secret) = u.secret.filter(|s| !s.is_empty()) {
@@ -449,7 +541,10 @@ async fn delete_account(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api
     if let Some(acc) = db::get_account(&app.engine.db, id).await? {
         app.engine.plugins.forget_account(&acc.plugin_id, id);
     }
-    sqlx::query("DELETE FROM accounts WHERE id = ?").bind(id).execute(&app.engine.db).await?;
+    sqlx::query("DELETE FROM accounts WHERE id = ?")
+        .bind(id)
+        .execute(&app.engine.db)
+        .await?;
     app.engine.events.changed(Topic::Accounts);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -470,21 +565,34 @@ fn spawn_account_check(app: &App, id: i64) {
 
 pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
     let db = &engine.db;
-    let Some(acc) = db::get_account(db, id).await? else { return Ok(()) };
+    let Some(acc) = db::get_account(db, id).await? else {
+        return Ok(());
+    };
     let Some(plugin) = engine.plugins.get(&acc.plugin_id) else {
         anyhow::bail!("Plugin {} nicht geladen", acc.plugin_id);
     };
     if !plugin.has_check_account {
         return Ok(());
     }
-    sqlx::query("UPDATE accounts SET status = 'checking' WHERE id = ?").bind(id).execute(db).await?;
+    sqlx::query("UPDATE accounts SET status = 'checking' WHERE id = ?")
+        .bind(id)
+        .execute(db)
+        .await?;
     engine.events.changed(Topic::Accounts);
     let creds = AccountCreds::from_account(&acc, engine.secrets.decrypt(&acc.secret)?);
     let result = engine.plugins.check_account(&plugin, &creds).await;
     let (status, premium, traffic, until, error) = match result {
         Ok(i) if i.valid => ("valid", i.premium, i.traffic_left, i.valid_until, i.message),
-        Ok(i) => ("invalid", i.premium, None, None, Some(i.message.unwrap_or_else(|| "Login fehlgeschlagen".into()))),
-        Err(e) if e.kind == crate::plugins::ErrorKind::Account => ("invalid", None, None, None, Some(e.message)),
+        Ok(i) => (
+            "invalid",
+            i.premium,
+            None,
+            None,
+            Some(i.message.unwrap_or_else(|| "Login fehlgeschlagen".into())),
+        ),
+        Err(e) if e.kind == crate::plugins::ErrorKind::Account => {
+            ("invalid", None, None, None, Some(e.message))
+        }
         Err(e) => ("error", None, None, None, Some(e.message)),
     };
     sqlx::query(
@@ -512,7 +620,10 @@ struct PluginList {
 }
 
 async fn list_plugins(State(app): State<Arc<App>>) -> Json<PluginList> {
-    Json(PluginList { plugins: app.engine.plugins.list(), errors: app.engine.plugins.errors() })
+    Json(PluginList {
+        plugins: app.engine.plugins.list(),
+        errors: app.engine.plugins.errors(),
+    })
 }
 
 async fn reload_plugins(State(app): State<Arc<App>>) -> Json<PluginList> {
@@ -540,11 +651,16 @@ async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsVie
         tmp_dir: cfg.tmp_dir.display().to_string(),
         done_dir: cfg.done_dir.display().to_string(),
         plugin_dir: cfg.user_plugins().display().to_string(),
-        api_token_set: db::get_setting(&app.engine.db, "auth.api_token").await?.is_some(),
+        api_token_set: db::get_setting(&app.engine.db, "auth.api_token")
+            .await?
+            .is_some(),
         version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
-async fn put_settings(State(app): State<Arc<App>>, Json(s): Json<Settings>) -> ApiResult<Json<Settings>> {
+async fn put_settings(
+    State(app): State<Arc<App>>,
+    Json(s): Json<Settings>,
+) -> ApiResult<Json<Settings>> {
     Ok(Json(app.engine.update_settings(s).await?))
 }

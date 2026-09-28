@@ -18,7 +18,9 @@ pub struct SecretBox {
 impl SecretBox {
     pub fn new(app_secret: &str) -> Self {
         let key = Sha256::digest(format!("haul-accounts:{app_secret}").as_bytes());
-        Self { cipher: Aes256Gcm::new_from_slice(&key).expect("32 byte key") }
+        Self {
+            cipher: Aes256Gcm::new_from_slice(&key).expect("32 byte key"),
+        }
     }
 
     pub fn encrypt(&self, plain: &str) -> Result<String> {
@@ -67,7 +69,11 @@ pub fn hash_password(password: &str) -> Result<String> {
 
 pub fn verify_password(password: &str, hash: &str) -> bool {
     PasswordHash::new(hash)
-        .map(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok())
+        .map(|h| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &h)
+                .is_ok()
+        })
         .unwrap_or(false)
 }
 

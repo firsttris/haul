@@ -26,14 +26,23 @@ use crate::plugins::PluginManager;
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn")),
+        )
         .init();
 
     let cfg = Config::from_env()?;
-    for dir in [&cfg.config_dir, &cfg.tmp_dir, &cfg.done_dir, &cfg.user_plugins()] {
+    for dir in [
+        &cfg.config_dir,
+        &cfg.tmp_dir,
+        &cfg.done_dir,
+        &cfg.user_plugins(),
+    ] {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let db = db::connect(&cfg.db_path()).await.context("opening database")?;
+    let db = db::connect(&cfg.db_path())
+        .await
+        .context("opening database")?;
 
     let mut plugin_dirs = Vec::new();
     if let Some(builtin) = &cfg.builtin_plugins {
@@ -44,11 +53,17 @@ async fn main() -> Result<()> {
     plugins.reload().await;
 
     let engine = Engine::new(db, cfg.clone(), plugins, Events::new()).await?;
-    let app = Arc::new(App { engine: engine.clone() });
+    let app = Arc::new(App {
+        engine: engine.clone(),
+    });
     auth::ensure_initial_user(&app).await?;
 
-    let router = Router::new().nest("/api", api::router(app.clone())).fallback(ui::serve);
-    let listener = TcpListener::bind(cfg.listen).await.with_context(|| format!("binding {}", cfg.listen))?;
+    let router = Router::new()
+        .nest("/api", api::router(app.clone()))
+        .fallback(ui::serve);
+    let listener = TcpListener::bind(cfg.listen)
+        .await
+        .with_context(|| format!("binding {}", cfg.listen))?;
     tracing::info!("web UI on http://{}", cfg.listen);
 
     if let Some(addr) = cfg.cnl_listen {
@@ -67,7 +82,9 @@ async fn main() -> Result<()> {
     }
 
     let scheduler = tokio::spawn(engine.clone().run());
-    axum::serve(listener, router).with_graceful_shutdown(shutdown_signal()).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     tracing::info!("shutting down, saving download progress");
     engine.shutdown().await;
     let _ = scheduler.await;
@@ -79,7 +96,8 @@ async fn shutdown_signal() {
         let _ = tokio::signal::ctrl_c().await;
     };
     let term = async {
-        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
             s.recv().await;
         }
     };

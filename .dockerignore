@@ -1,0 +1,7 @@
+target
+node_modules
+**/node_modules
+ui/dist
+plugins/dist
+.git
+*.db

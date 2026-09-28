@@ -1,0 +1,17 @@
+# systemd user service for haul-cnl.
+#   install -Dm644 haul-cnl.service ~/.config/systemd/user/haul-cnl.service
+#   mkdir -p ~/.config/haul && printf 'HAUL_SERVER=http://server.local:8080\nHAUL_TOKEN=...\n' > ~/.config/haul/cnl.env
+#   chmod 600 ~/.config/haul/cnl.env
+#   systemctl --user enable --now haul-cnl
+[Unit]
+Description=Haul Click'n'Load forwarder
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/haul/cnl.env
+ExecStart=%h/.local/bin/haul-cnl
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
