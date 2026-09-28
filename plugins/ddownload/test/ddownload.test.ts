@@ -105,6 +105,7 @@ describe('ddownload', () => {
         'GET https://ddownload.com/?op=my_account': LOGGED_OUT,
         'GET https://ddownload.com/login.html': { body: LOGIN_PAGE },
         'POST https://ddownload.com/': { body: 'Incorrect Login or Password' },
+        'GET https://ddownload.com/abcdefghijkl': { body: FILE_PAGE },
       },
       { id: 1, user: 'bob', secret: 'wrong' },
     );
@@ -225,6 +226,54 @@ describe('ddownload', () => {
       { id: 1, user: 'bob', secret: 'pw' },
     );
     await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', message: expect.stringContaining('Wartung') });
+  });
+
+  it('trusts a logged-in file page without checking the account again (like JD)', async () => {
+    // Premium file page: logged in, plus the hidden free-user template texts XFS pages carry.
+    const page = `<a href="/?op=logout">Logout</a>
+      <script>var msg = "You have to wait 45 seconds till next download";</script>
+      <!-- <div>You have reached the download-limit</div> -->
+      ${FILE_PAGE}`;
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: page },
+        'POST https://ddownload.com/abcdefghijkl': FILE_POST,
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    const results = await Promise.all([1, 2, 3, 4, 5].map(() => plugin.resolve(LINK, ctx)));
+    expect(results.every((r) => r.url.startsWith('https://srv12.ddownload.com/d/'))).toBe(true);
+    expect(ctx.requests.some((r) => r.url.includes('op=my_account'))).toBe(false);
+  });
+
+  it('quotes a real limit message from the site', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': {
+          body: '<a href="/?op=logout">x</a><div class="alert alert-danger">You have reached the download limit: 50 GB</div>',
+        },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      haulKind: 'account',
+      message: 'ddownload: You have reached the download limit: 50 GB',
+    });
+  });
+
+  it('quotes the site error box when nothing else fits', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { body: '<a href="/?op=logout">x</a><b class="err">Wrong IP</b>' },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      haulKind: 'temporary',
+      message: expect.stringContaining('Seite: „Wrong IP“'),
+    });
   });
 
   it('needs an account', async () => {

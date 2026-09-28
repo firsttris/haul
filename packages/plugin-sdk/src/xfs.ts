@@ -181,16 +181,51 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     };
   }
 
+  /** The page without scripts, styles and comments (like JD's `correctBR`): XFS templates carry
+   * texts for free users and commented-out buttons that are not shown to premium users. */
+  function visible(html: string): string {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+  }
+
+  function loggedIn(res: HttpResponse): boolean {
+    return /<a[^<]*href\s*=\s*["'][^"']*(?:[?&]op=logout|\/(?:user_)?logout["'])/i.test(visible(res.body));
+  }
+
+  function isCloudflare(res: HttpResponse): boolean {
+    return (res.status === 403 || res.status === 503) && /cf-chl|Just a moment|challenge-platform/i.test(res.body);
+  }
+
+  /** Errors that are certain wherever they show up. */
   function assertOnline(res: HttpResponse) {
-    if (res.status === 404 || offline.some((p) => p.test(res.body))) throw new OfflineError();
-    if (/>\s*This server is in maintenance mode/i.test(res.body)) throw new TemporaryError(`${cfg.name}: Server in Wartung`);
-    if (/>\s*Please enter your e-mail/i.test(res.body)) {
+    const html = visible(res.body);
+    if (res.status === 404 || offline.some((p) => p.test(html))) throw new OfflineError();
+    if (isCloudflare(res)) throw new TemporaryError(`${cfg.name}: Cloudflare-Prüfung, später erneut`);
+    if (/>\s*This server is in maintenance mode/i.test(html)) throw new TemporaryError(`${cfg.name}: Server in Wartung`);
+    if (/>\s*Please enter your e-mail/i.test(html)) {
       throw new AccountError(`${cfg.name}: im Account unter ${host}/?op=my_account eine E-Mail-Adresse eintragen`);
     }
-    if (/You have reached the download.limit|You have to wait|Traffic limit exceeded|not enough traffic/i.test(res.body)) {
-      throw new AccountError(`${cfg.name}: Download-Limit oder Traffic erreicht`);
-    }
     if (res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status}`);
+  }
+
+  /** Last resort when no link was found, like JD's `checkErrorsLastResort`: limits and the
+   * site's own error box, quoted so the user sees what the hoster said. */
+  function lastResort(res: HttpResponse, steps: string[]): never {
+    const html = visible(res.body);
+    const limit =
+      match(html, />\s*(You have reached the maximum limit \d+ files in \d+ hours)/i) ??
+      match(html, /((?:You have reached the download[- ]limit|You have to wait)[^<>]+)/i);
+    if (limit) throw new AccountError(`${cfg.name}: ${limit}`);
+    if (/premium only|only premium|available for Premium Users only|upgrade your account/i.test(html)) {
+      throw new AccountError(`${cfg.name}: Account ist nicht Premium`);
+    }
+    const siteError = match(html, /class=["'][^"']*(?:\berr\b|alert-danger)[^"']*["'][^>]*>\s*([^<]{3,})</i);
+    const where = steps.length ? `nach ${steps.join(' → ')}` : 'kein Download-Formular';
+    throw new TemporaryError(
+      `${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status}${siteError ? `, Seite: „${siteError}“` : ''})`,
+    );
   }
 
   function isDirect(res: HttpResponse): string | null {
@@ -229,10 +264,11 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   async function accountPage(ctx: Ctx, m: Mode): Promise<HttpResponse | null> {
     // Follow redirects: some sites move the account page; logged out ends on the login form.
     const res = await web(ctx, m).get(`${base}/?op=my_account`);
+    if (isCloudflare(res)) throw new TemporaryError(`${cfg.name}: Cloudflare-Prüfung, später erneut`);
+    if (res.status === 429 || res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status} beim Prüfen der Anmeldung`);
     if (res.status !== 200 || /op=login/.test(res.url)) return null;
     // Like JD: sites comment out the logout button for expired sessions, so ignore comments and scripts.
-    const visible = res.body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
-    return /<a[^<]*href\s*=\s*["'][^"']*(?:[?&]op=logout|\/(?:user_)?logout["'])/i.test(visible) ? res : null;
+    return loggedIn(res) ? res : null;
   }
 
   /** Makes sure the session is logged in and returns the account page. */
@@ -340,7 +376,6 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         return { url: r.url, name: r.name, size: r.size !== undefined ? Number(r.size) : undefined, maxConnections: cfg.maxConnections };
       }
 
-      await session(ctx, m);
       const http = web(ctx, m);
       const url = fileUrl(link);
       const found = (res: HttpResponse): Resolved | null => {
@@ -350,17 +385,26 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         return { url: target, headers: { Referer: url }, maxConnections: cfg.maxConnections };
       };
 
-      // With "direct downloads" enabled in the account, the file page redirects right away.
+      // Like JD (validateCookies=false): trust the session and open the file right away. With
+      // "direct downloads" enabled in the account, the file page redirects to the file.
       let res = await http.get(url, { followRedirects: false });
       let hit = found(res);
       if (hit) return hit;
       assertOnline(res);
+      if (!loggedIn(res)) {
+        // Logged out (first use, or the session expired): log in / verify the cookie, retry once.
+        await session(ctx, m);
+        res = await http.get(url, { followRedirects: false });
+        hit = found(res);
+        if (hit) return hit;
+        assertOnline(res);
+      }
 
       // Otherwise submit the download form (JD: form F1, pyLoad: op=download*) until a link
       // shows up; some sites need several steps.
       const steps: string[] = [];
       for (let step = 0; step < 5; step++) {
-        const forms = parseForms(res.body);
+        const forms = parseForms(visible(res.body));
         const form =
           forms.find((f) => /name=["']F1["']/i.test(f.html)) ?? forms.find((f) => /^download/.test(f.fields.op ?? ''));
         if (!form) break;
@@ -373,12 +417,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         if (hit) return hit;
         assertOnline(res);
       }
-
-      if (/premium only|only premium|available for Premium Users only|upgrade your account/i.test(res.body)) {
-        throw new AccountError(`${cfg.name}: Account ist nicht Premium`);
-      }
-      const where = steps.length ? `nach ${steps.join(' → ')}` : 'kein Download-Formular';
-      throw new TemporaryError(`${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status})`);
+      lastResort(res, steps);
     },
 
     async checkAccount(ctx): Promise<AccountInfo> {
