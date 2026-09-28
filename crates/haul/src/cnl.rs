@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use anyhow::{anyhow, Result};
-use axum::extract::{Form, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::extract::{Form, Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -151,6 +152,52 @@ async fn flash_addcrypted2(
     }
 }
 
+fn allow_cross_origin(headers: &mut HeaderMap) {
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    // Chrome's Private/Local Network Access: an https page may only talk to 127.0.0.1
+    // if the preflight answers with this header.
+    headers.insert(
+        "access-control-allow-private-network",
+        HeaderValue::from_static("true"),
+    );
+}
+
+/// Sites send Click'n'Load with `fetch` from their own origin, so the browser first sends a
+/// CORS preflight. Answer it and mark every response as readable cross-origin. That is safe:
+/// the responses carry nothing but "success", and links only ever land in the collector.
+async fn cors(req: Request, next: Next) -> Response {
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .or_else(|| req.headers().get(header::REFERER))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
+    tracing::info!(method = %req.method(), path = %req.uri().path(), %origin, "Click'n'Load request");
+    let mut resp = if req.method() == Method::OPTIONS {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        next.run(req).await
+    };
+    allow_cross_origin(resp.headers_mut());
+    resp
+}
+
 /// The CNL routes. Served without auth on the local CNL port and behind the API token
 /// under `/api/cnl` for `haul-cnl`.
 pub fn router<S: Clone + Send + Sync + 'static>(engine: Arc<Engine>) -> Router<S> {
@@ -161,6 +208,7 @@ pub fn router<S: Clone + Send + Sync + 'static>(engine: Arc<Engine>) -> Router<S
         .route("/flash/", get(|| async { "JDownloader\r\n" }))
         .route("/flash/add", post(flash_add))
         .route("/flash/addcrypted2", post(flash_addcrypted2))
+        .layer(middleware::from_fn(cors))
         .with_state(engine)
 }
 
@@ -170,6 +218,41 @@ mod tests {
     use aes::cipher::BlockEncryptMut;
 
     type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
+
+    #[tokio::test]
+    async fn answers_cors_preflight() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let app: Router = Router::new()
+            .route("/flash/addcrypted2", post(|| async { "success\r\n" }))
+            .layer(middleware::from_fn(cors));
+        let req = axum::http::Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/flash/addcrypted2")
+            .header(header::ORIGIN, "https://filecrypt.cc")
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-private-network", "true")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(resp.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert_eq!(
+            resp.headers()["access-control-allow-private-network"],
+            "true"
+        );
+
+        let req = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/flash/addcrypted2")
+            .header(header::ORIGIN, "https://filecrypt.cc")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+    }
 
     #[test]
     fn cnl2_roundtrip() {

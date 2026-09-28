@@ -30,7 +30,36 @@ function NumberField({
   );
 }
 
+type CnlCheck = { ok: boolean; text: string } | null;
+
+/** Checks from *this* browser whether something answers on 127.0.0.1:9666, like a web page would. */
+async function checkCnl(): Promise<CnlCheck> {
+  try {
+    const res = await fetch('http://127.0.0.1:9666/jdcheck.js', { cache: 'no-store' });
+    const body = await res.text();
+    if (!body.includes('jdownloader=true')) {
+      return { ok: false, text: `Auf Port 9666 antwortet etwas anderes als Haul (HTTP ${res.status}).` };
+    }
+    const version = /version='([^']*)'/.exec(body)?.[1];
+    return {
+      ok: true,
+      text:
+        version === 'haul-cnl'
+          ? 'Port 9666 erreichbar: haul-cnl läuft und leitet an den Server weiter.'
+          : 'Port 9666 erreichbar: Haul selbst lauscht auf diesem Rechner.',
+    };
+  } catch {
+    return {
+      ok: false,
+      text:
+        'Port 9666 ist von diesem Browser aus nicht erreichbar. Läuft Haul auf einem anderen Rechner, ' +
+        'auf diesem Rechner haul-cnl starten (oder den SSH-Tunnel). Fragt der Browser nach Zugriff aufs lokale Netzwerk, erlauben.',
+    };
+  }
+}
+
 function ApiToken({ isSet }: { isSet: boolean }) {
+  const [check, setCheck] = useState<CnlCheck>(null);
   const [token, setToken] = useState<string | null>(null);
   const qc = useQueryClient();
   const rotate = useMutation({
@@ -60,7 +89,15 @@ function ApiToken({ isSet }: { isSet: boolean }) {
         </div>
       )}
       <pre className="code">{`# Zum Testen ohne haul-cnl:\nssh -N -L 9666:localhost:9666 ${location.hostname}`}</pre>
-      <div>
+      {check && (
+        <div className={check.ok ? 'notice info' : 'notice'} role="status">
+          {check.text}
+        </div>
+      )}
+      <div className="toolbar">
+        <button type="button" className="btn small" onClick={async () => setCheck(await checkCnl())}>
+          Click'n'Load im Browser testen
+        </button>
         <button type="button" className="btn small" onClick={() => rotate.mutate()} disabled={rotate.isPending}>
           {isSet ? 'Neues Token erstellen' : 'Token erstellen'}
         </button>

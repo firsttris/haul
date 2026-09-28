@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use axum::body::Bytes;
-use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::extract::{Path, Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -82,6 +83,46 @@ async fn crossdomain() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/xml")],
         "<?xml version=\"1.0\"?>\n<cross-domain-policy><allow-access-from domain=\"*\" /></cross-domain-policy>\n",
     )
+}
+
+/// Answers the browser's CORS / Private Network Access preflight; sites send Click'n'Load
+/// with `fetch` from their own https origin.
+async fn cors(req: Request, next: Next) -> Response {
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .or_else(|| req.headers().get(header::REFERER))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
+    tracing::info!("{} {} von {origin}", req.method(), req.uri().path());
+    let mut resp = if req.method() == Method::OPTIONS {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        next.run(req).await
+    };
+    let h = resp.headers_mut();
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, OPTIONS"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("*"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    h.insert(
+        "access-control-allow-private-network",
+        HeaderValue::from_static("true"),
+    );
+    resp
 }
 
 async fn forward(
@@ -170,6 +211,7 @@ async fn run(cfg: Config) -> Result<()> {
         .route("/flash", get(|| async { "JDownloader\r\n" }))
         .route("/flash/", get(|| async { "JDownloader\r\n" }))
         .route("/flash/{action}", post(forward))
+        .layer(middleware::from_fn(cors))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(listen)
         .await

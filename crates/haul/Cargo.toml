@@ -41,4 +41,5 @@ time = "0.3"
 url = "2"
 
 [dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 tempfile = "3"

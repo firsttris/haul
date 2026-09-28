@@ -74,6 +74,15 @@ Empfangene Links landen im Linksammler, mit der Quellseite, und starten nie auto
 `jk`-Snippet von CNL2 läuft in einer eigenen QuickJS-Instanz ohne Host-Funktionen, mit Speicher-
 und Zeitlimit. Port 9666 immer nur an `127.0.0.1` binden.
 
+**Funktioniert der Klick nicht?**
+
+1. Unter *Einstellungen* auf *Click'n'Load im Browser testen* klicken. Die Meldung sagt, ob auf
+   `127.0.0.1:9666` des Browser-Rechners Haul oder `haul-cnl` antwortet.
+2. Chrome fragt bei manchen Seiten nach Zugriff aufs lokale Netzwerk; das erlauben.
+3. Im Log von Haul bzw. `haul-cnl` steht jede Anfrage (`Click'n'Load request …`). Steht dort
+   nichts, erreicht der Browser den Port nicht.
+4. Die Links landen im **Linksammler**, nicht direkt in den Downloads.
+
 ## Architektur
 
 ```
