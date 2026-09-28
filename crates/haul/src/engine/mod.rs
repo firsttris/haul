@@ -1,0 +1,547 @@
+//! Queue manager: decides which downloads run, keeps live progress and exposes the
+//! operations the API needs (add, pause, resume, delete, online check).
+
+mod extract;
+mod limiter;
+mod worker;
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+
+use anyhow::{anyhow, Result};
+use futures::StreamExt;
+use tokio::sync::{watch, Notify};
+use tokio_util::sync::CancellationToken;
+
+use crate::config::Config;
+use crate::crypto::SecretBox;
+use crate::db::{self, status, Db, Download, Settings};
+use crate::events::{Event, Events, ProgressItem, Topic};
+use crate::plugins::{AccountCreds, ErrorKind, PluginManager};
+use crate::util::{self, now_ms};
+
+pub use limiter::Limiter;
+
+/// Live counters of a running download, shared between worker and progress ticker.
+#[derive(Default)]
+pub struct Progress {
+    pub done: AtomicU64,
+    /// -1 while unknown.
+    pub size: AtomicI64,
+}
+
+struct Active {
+    cancel: CancellationToken,
+    progress: Arc<Progress>,
+    /// Flips to true when the worker task has exited.
+    exited: watch::Receiver<bool>,
+}
+
+pub struct Engine {
+    pub db: Db,
+    pub cfg: Config,
+    pub plugins: Arc<PluginManager>,
+    pub events: Events,
+    pub secrets: SecretBox,
+    settings: RwLock<Settings>,
+    active: Mutex<HashMap<i64, Active>>,
+    wake: Notify,
+    limiter: Limiter,
+    shutdown: CancellationToken,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AddLinks {
+    pub links: String,
+    pub package_name: Option<String>,
+    pub target_dir: Option<String>,
+    /// Queue immediately instead of keeping the links in the Linksammler.
+    pub start: bool,
+    pub source: Option<String>,
+    pub source_page: Option<String>,
+    pub passwords: Option<String>,
+}
+
+impl Engine {
+    pub async fn new(db: Db, cfg: Config, plugins: Arc<PluginManager>, events: Events) -> Result<Arc<Self>> {
+        let settings = Settings::load(&db).await?;
+        let limiter = Limiter::new(settings.speed_limit_kib);
+        // Anything that was running when the process stopped goes back to the queue;
+        // segment progress in the database makes it resume where it left off.
+        sqlx::query("UPDATE downloads SET status = ? WHERE status IN (?, ?)")
+            .bind(status::QUEUED)
+            .bind(status::RESOLVING)
+            .bind(status::DOWNLOADING)
+            .execute(&db)
+            .await?;
+        sqlx::query("UPDATE packages SET extract = 'pending' WHERE extract = 'running'").execute(&db).await?;
+        Ok(Arc::new(Self {
+            secrets: SecretBox::new(&cfg.app_secret),
+            db,
+            cfg,
+            plugins,
+            events,
+            settings: RwLock::new(settings),
+            active: Mutex::new(HashMap::new()),
+            wake: Notify::new(),
+            limiter,
+            shutdown: CancellationToken::new(),
+        }))
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings.read().unwrap().clone()
+    }
+
+    pub async fn update_settings(&self, s: Settings) -> Result<Settings> {
+        let s = s.clamp();
+        s.save(&self.db).await?;
+        self.limiter.set_limit(s.speed_limit_kib);
+        *self.settings.write().unwrap() = s.clone();
+        self.events.changed(Topic::Settings);
+        self.wake.notify_one();
+        Ok(s)
+    }
+
+    pub fn wake(&self) {
+        self.wake.notify_one();
+    }
+
+    pub fn active_count(&self) -> usize {
+        self.active.lock().unwrap().len()
+    }
+
+    pub fn tmp_path(&self, id: i64) -> PathBuf {
+        self.cfg.tmp_dir.join(format!("{id}.part"))
+    }
+
+    pub fn package_dir(&self, pkg: &db::Package) -> PathBuf {
+        let rel = util::sanitize_rel_dir(&pkg.target_dir);
+        if rel.is_empty() {
+            self.cfg.done_dir.clone()
+        } else {
+            self.cfg.done_dir.join(rel)
+        }
+    }
+
+    /// Scheduler loop plus the progress ticker. Runs until shutdown.
+    pub async fn run(self: Arc<Self>) {
+        let ticker = tokio::spawn(self.clone().progress_loop());
+        let this = self.clone();
+        tokio::spawn(async move { this.resume_pending_extractions().await });
+        loop {
+            if let Err(e) = self.fill_slots().await {
+                tracing::error!("scheduler: {e:#}");
+            }
+            tokio::select! {
+                _ = self.shutdown.cancelled() => break,
+                _ = self.wake.notified() => {}
+                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+            }
+        }
+        ticker.abort();
+    }
+
+    /// Stops all workers and waits until they have written their progress.
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        let waits: Vec<_> = {
+            let active = self.active.lock().unwrap();
+            active
+                .values()
+                .map(|a| {
+                    a.cancel.cancel();
+                    a.exited.clone()
+                })
+                .collect()
+        };
+        for mut w in waits {
+            let _ = tokio::time::timeout(Duration::from_secs(10), w.wait_for(|x| *x)).await;
+        }
+    }
+
+    async fn fill_slots(self: &Arc<Self>) -> Result<()> {
+        if self.shutdown.is_cancelled() {
+            return Ok(());
+        }
+        let max = self.settings().max_parallel as usize;
+        let running = self.active_count();
+        if running >= max {
+            return Ok(());
+        }
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT d.id FROM downloads d JOIN packages p ON p.id = d.package_id
+             WHERE d.status = ? AND (d.retry_at IS NULL OR d.retry_at <= ?)
+             ORDER BY p.id, d.id LIMIT ?",
+        )
+        .bind(status::QUEUED)
+        .bind(now_ms())
+        .bind((max - running + 8) as i64)
+        .fetch_all(&self.db)
+        .await?;
+        let mut started = 0;
+        for id in ids {
+            if running + started >= max {
+                break;
+            }
+            if self.start_worker(id) {
+                started += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn start_worker(self: &Arc<Self>, id: i64) -> bool {
+        let mut active = self.active.lock().unwrap();
+        if active.contains_key(&id) {
+            return false;
+        }
+        let cancel = self.shutdown.child_token();
+        let progress = Arc::new(Progress { done: AtomicU64::new(0), size: AtomicI64::new(-1) });
+        let (tx, rx) = watch::channel(false);
+        active.insert(id, Active { cancel: cancel.clone(), progress: progress.clone(), exited: rx });
+        drop(active);
+        let this = self.clone();
+        tokio::spawn(async move {
+            worker::run(&this, id, &cancel, &progress).await;
+            this.active.lock().unwrap().remove(&id);
+            let _ = tx.send(true);
+            this.events.changed(Topic::Downloads);
+            this.wake.notify_one();
+        });
+        true
+    }
+
+    /// Cancels a running worker and waits until it has persisted its state.
+    async fn stop_worker(&self, id: i64) {
+        let exited = {
+            let active = self.active.lock().unwrap();
+            active.get(&id).map(|a| {
+                a.cancel.cancel();
+                a.exited.clone()
+            })
+        };
+        if let Some(mut rx) = exited {
+            let _ = tokio::time::timeout(Duration::from_secs(15), rx.wait_for(|x| *x)).await;
+        }
+    }
+
+    async fn progress_loop(self: Arc<Self>) {
+        let mut last: HashMap<i64, (u64, f64)> = HashMap::new();
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            let snapshot: Vec<(i64, u64, i64)> = {
+                let active = self.active.lock().unwrap();
+                active
+                    .iter()
+                    .map(|(id, a)| (*id, a.progress.done.load(Ordering::Relaxed), a.progress.size.load(Ordering::Relaxed)))
+                    .collect()
+            };
+            let mut items = Vec::with_capacity(snapshot.len());
+            let mut next = HashMap::new();
+            let mut total = 0u64;
+            for (id, done, size) in snapshot {
+                let (prev_done, prev_speed) = last.get(&id).copied().unwrap_or((done, 0.0));
+                let delta = done.saturating_sub(prev_done) as f64;
+                // Exponential moving average keeps the number readable.
+                let speed = if prev_speed == 0.0 { delta } else { prev_speed * 0.6 + delta * 0.4 };
+                next.insert(id, (done, speed));
+                total += speed as u64;
+                items.push(ProgressItem {
+                    id,
+                    bytes_done: done,
+                    size: (size >= 0).then_some(size as u64),
+                    speed: speed as u64,
+                });
+            }
+            last = next;
+            if !items.is_empty() || !last.is_empty() {
+                self.events.send(Event::Progress { items, total_speed: total });
+            }
+        }
+    }
+
+    /// Current total speed in bytes/s (sum of the last progress tick's per-download speed
+    /// is kept in the UI; this is a cheap fallback for `/api/stats`).
+    pub fn live_bytes(&self) -> HashMap<i64, u64> {
+        let active = self.active.lock().unwrap();
+        active.iter().map(|(id, a)| (*id, a.progress.done.load(Ordering::Relaxed))).collect()
+    }
+
+    pub async fn pick_account(&self, plugin_id: &str) -> Result<Option<AccountCreds>> {
+        let acc: Option<db::Account> = sqlx::query_as(
+            "SELECT * FROM accounts WHERE plugin_id = ? AND enabled = 1 AND status != 'invalid'
+             ORDER BY traffic_left IS NULL, traffic_left DESC, id LIMIT 1",
+        )
+        .bind(plugin_id)
+        .fetch_optional(&self.db)
+        .await?;
+        match acc {
+            Some(a) => {
+                let secret = self.secrets.decrypt(&a.secret)?;
+                Ok(Some(AccountCreds::from_account(&a, secret)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    // ---- operations used by the API ------------------------------------------------
+
+    pub async fn add_links(self: &Arc<Self>, req: AddLinks) -> Result<i64> {
+        let links = parse_links(&req.links);
+        if links.is_empty() {
+            return Err(anyhow!("keine gültigen Links gefunden"));
+        }
+        let names: Vec<String> = links
+            .iter()
+            .map(|l| util::filename_from_url(l).unwrap_or_else(|| "download".into()))
+            .collect();
+        let name = req
+            .package_name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| guess_package_name(&names));
+        let target_dir = req
+            .target_dir
+            .filter(|d| !d.trim().is_empty())
+            .map(|d| util::sanitize_rel_dir(&d))
+            .unwrap_or_else(|| util::sanitize_filename(&name));
+        let now = now_ms();
+        let mut tx = self.db.begin().await?;
+        let pkg_id: i64 = sqlx::query_scalar(
+            "INSERT INTO packages(name, target_dir, source, source_page, passwords, collector, created_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        )
+        .bind(&name)
+        .bind(&target_dir)
+        .bind(req.source.as_deref().unwrap_or("manual"))
+        .bind(&req.source_page)
+        .bind(req.passwords.as_deref().filter(|p| !p.trim().is_empty()))
+        .bind(!req.start)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
+        for (link, fname) in links.iter().zip(names) {
+            let plugin = self.plugins.find_for(link).map(|p| p.id.clone());
+            sqlx::query(
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+            )
+            .bind(pkg_id)
+            .bind(link)
+            .bind(plugin)
+            .bind(if req.start { status::QUEUED } else { status::COLLECTED })
+            .bind(fname)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.events.changed(Topic::Downloads);
+        if req.start {
+            self.wake();
+        } else {
+            let this = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = this.check_package(pkg_id).await {
+                    tracing::warn!("online check: {e:#}");
+                }
+            });
+        }
+        Ok(pkg_id)
+    }
+
+    /// Online check for all downloads of a package: plugin `check` or an HTTP probe.
+    pub async fn check_package(self: &Arc<Self>, package_id: i64) -> Result<()> {
+        let downloads = db::package_downloads(&self.db, package_id).await?;
+        futures::stream::iter(downloads)
+            .for_each_concurrent(4, |d| {
+                let this = self.clone();
+                async move {
+                    if let Err(e) = this.check_download(&d).await {
+                        tracing::debug!(id = d.id, "check failed: {e:#}");
+                    }
+                }
+            })
+            .await;
+        self.events.changed(Topic::Downloads);
+        Ok(())
+    }
+
+    async fn check_download(&self, d: &Download) -> Result<()> {
+        let plugin = self.plugins.find_for(&d.url);
+        let (online, name, size, err) = match &plugin {
+            Some(p) if p.has_check => {
+                let acc = self.pick_account(&p.id).await.ok().flatten();
+                match self.plugins.check(p, &d.url, acc.as_ref()).await {
+                    Ok(r) => (
+                        if r.online.unwrap_or(true) { "online" } else { "offline" },
+                        r.name.map(|n| util::sanitize_filename(&n)),
+                        r.size,
+                        None,
+                    ),
+                    Err(e) if e.kind == ErrorKind::Offline => ("offline", None, None, Some(e.message)),
+                    Err(e) => ("unknown", None, None, Some(e.message)),
+                }
+            }
+            Some(_) => ("unknown", None, None, None),
+            None => match worker::probe_direct(&self.plugins.direct_clients().follow, &d.url).await {
+                Ok(p) => ("online", p.name, p.size, None),
+                Err(e) => {
+                    let offline = e.to_string().contains("404") || e.to_string().contains("410");
+                    (if offline { "offline" } else { "unknown" }, None, None, Some(format!("{e:#}")))
+                }
+            },
+        };
+        sqlx::query(
+            "UPDATE downloads SET online = ?, name = COALESCE(?, name), size = COALESCE(?, size),
+             plugin_id = ?, error = CASE WHEN status IN ('collected','queued') THEN ? ELSE error END WHERE id = ?",
+        )
+        .bind(online)
+        .bind(name)
+        .bind(size)
+        .bind(plugin.map(|p| p.id.clone()))
+        .bind(err)
+        .bind(d.id)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Moves a package from the Linksammler into the queue.
+    pub async fn start_package(&self, id: i64) -> Result<()> {
+        sqlx::query("UPDATE packages SET collector = 0 WHERE id = ?").bind(id).execute(&self.db).await?;
+        sqlx::query("UPDATE downloads SET status = ? WHERE package_id = ? AND status = ? AND online != 'offline'")
+            .bind(status::QUEUED)
+            .bind(id)
+            .bind(status::COLLECTED)
+            .execute(&self.db)
+            .await?;
+        self.events.changed(Topic::Downloads);
+        self.wake();
+        Ok(())
+    }
+
+    pub async fn pause(&self, ids: &[i64]) -> Result<()> {
+        for &id in ids {
+            let res = sqlx::query("UPDATE downloads SET status = ? WHERE id = ? AND status IN (?, ?, ?)")
+                .bind(status::PAUSED)
+                .bind(id)
+                .bind(status::QUEUED)
+                .bind(status::RESOLVING)
+                .bind(status::DOWNLOADING)
+                .execute(&self.db)
+                .await?;
+            if res.rows_affected() > 0 {
+                self.stop_worker(id).await;
+            }
+        }
+        self.events.changed(Topic::Downloads);
+        Ok(())
+    }
+
+    pub async fn resume(&self, ids: &[i64]) -> Result<()> {
+        for &id in ids {
+            sqlx::query(
+                "UPDATE downloads SET status = ?, attempts = 0, retry_at = NULL, error = NULL
+                 WHERE id = ? AND status IN (?, ?)",
+            )
+            .bind(status::QUEUED)
+            .bind(id)
+            .bind(status::PAUSED)
+            .bind(status::FAILED)
+            .execute(&self.db)
+            .await?;
+        }
+        self.events.changed(Topic::Downloads);
+        self.wake();
+        Ok(())
+    }
+
+    pub async fn ids_with_status(&self, statuses: &[&str]) -> Result<Vec<i64>> {
+        let placeholders = vec!["?"; statuses.len()].join(",");
+        let sql = format!("SELECT id FROM downloads WHERE status IN ({placeholders})");
+        let mut q = sqlx::query_scalar(&sql);
+        for s in statuses {
+            q = q.bind(*s);
+        }
+        Ok(q.fetch_all(&self.db).await?)
+    }
+
+    pub async fn package_ids(&self, package_id: i64) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar("SELECT id FROM downloads WHERE package_id = ?")
+            .bind(package_id)
+            .fetch_all(&self.db)
+            .await?)
+    }
+
+    /// Removes downloads and their partial files. Finished files stay on disk.
+    pub async fn delete(&self, ids: &[i64]) -> Result<()> {
+        for &id in ids {
+            sqlx::query("UPDATE downloads SET status = ? WHERE id = ?")
+                .bind(status::PAUSED)
+                .bind(id)
+                .execute(&self.db)
+                .await?;
+            self.stop_worker(id).await;
+            let _ = tokio::fs::remove_file(self.tmp_path(id)).await;
+            sqlx::query("DELETE FROM downloads WHERE id = ?").bind(id).execute(&self.db).await?;
+        }
+        sqlx::query("DELETE FROM packages WHERE NOT EXISTS (SELECT 1 FROM downloads d WHERE d.package_id = packages.id)")
+            .execute(&self.db)
+            .await?;
+        self.events.changed(Topic::Downloads);
+        Ok(())
+    }
+
+    pub async fn clear_finished(&self) -> Result<()> {
+        let ids = self.ids_with_status(&[status::FINISHED]).await?;
+        self.delete(&ids).await
+    }
+}
+
+/// Extracts http(s) links from free text, one per whitespace-separated token, deduplicated.
+pub fn parse_links(text: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    text.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>')
+        .map(|t| t.trim_matches(|c: char| c == ',' || c == ';'))
+        .filter(|t| t.starts_with("http://") || t.starts_with("https://"))
+        .filter(|t| url::Url::parse(t).is_ok())
+        .filter(|t| seen.insert(t.to_string()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// `Foo.part1.rar`, `Foo.part2.rar` → `Foo`; mixed files → `first (+n)`.
+pub fn guess_package_name(names: &[String]) -> String {
+    let re = regex::Regex::new(r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$").unwrap();
+    let stems: Vec<String> = names.iter().map(|n| re.replace(n, "").to_string()).collect();
+    if let Some(first) = stems.first() {
+        if !first.is_empty() && stems.iter().all(|s| s == first) {
+            return first.clone();
+        }
+    }
+    match stems.first() {
+        Some(first) if !first.is_empty() => format!("{first} (+{})", stems.len() - 1),
+        _ => "Neues Paket".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_and_names() {
+        let l = parse_links("foo https://a.com/x.rar\nhttps://a.com/x.rar, http://b.org/y ftp://c <https://d.io/z>");
+        assert_eq!(l, vec!["https://a.com/x.rar", "http://b.org/y", "https://d.io/z"]);
+        assert_eq!(
+            guess_package_name(&["Foto.part1.rar".into(), "Foto.part2.rar".into()]),
+            "Foto"
+        );
+        assert_eq!(guess_package_name(&["a.iso".into(), "b.iso".into()]), "a (+1)");
+    }
+}

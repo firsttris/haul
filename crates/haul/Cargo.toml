@@ -1,0 +1,43 @@
+[package]
+name = "haul"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aes = "0.8"
+aes-gcm = "0.10"
+anyhow.workspace = true
+argon2 = "0.5"
+async-stream = "0.3"
+axum = { workspace = true, features = ["macros"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+base64 = "0.22"
+cbc = "0.1"
+futures = "0.3"
+governor = "0.10"
+hex = "0.4"
+libc = "0.2"
+mime_guess = "2"
+percent-encoding = "2"
+rand = "0.8"
+regex = "1"
+reqwest.workspace = true
+rquickjs = { version = "0.9", features = ["futures", "parallel", "macro"] }
+rust-embed = "8"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+thiserror = "2"
+tokio.workspace = true
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+time = "0.3"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"

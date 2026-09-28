@@ -1,0 +1,7 @@
+/target
+node_modules/
+/ui/dist
+/plugins/dist
+*.db
+*.db-*
+.env
