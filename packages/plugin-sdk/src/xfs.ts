@@ -383,9 +383,14 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         if (!f || f.status !== 200) return { online: false };
         return { online: true, name: f.name, size: f.size !== undefined ? Number(f.size) : undefined };
       }
-      const res = await web(ctx, m?.kind === 'cookie' ? m : null).get(fileUrl(link));
-      if (res.status === 404 || offline.some((p) => p.test(res.body))) return { online: false };
-      return { online: true, name: match(res.body, ...names), size: parseSize(match(res.body, ...sizes)) };
+      // The core calls this without an account (like JD's link check): the public file page shows
+      // name and size. Never follow redirects here; a redirect may be the file itself.
+      const res = await web(ctx, m?.kind === 'cookie' ? m : null).get(fileUrl(link), { followRedirects: false });
+      const html = visible(res.body);
+      if (res.status === 404 || offline.some((p) => p.test(html))) return { online: false };
+      const name = match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);
+      if (!name) ctx.log.warn(`${cfg.name}: kein Dateiname auf der Dateiseite gefunden (HTTP ${res.status}, ${match(res.body, /<title>\s*([^<]*)</i) ?? 'ohne Titel'})`);
+      return { online: true, name, size: parseSize(match(html, ...sizes)) };
     },
 
     async resolve(link, ctx): Promise<Resolved> {
@@ -403,9 +408,19 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
       const http = web(ctx, m);
       const url = fileUrl(link);
+      // File name and size from the pages on the way (JD: scanInfo). Links from crypters like
+      // filecrypt carry only the file id, and the CDN may not send a name either.
+      let fileName: string | undefined;
+      let fileSize: number | undefined;
+      const scan = (page: HttpResponse) => {
+        const html = visible(page.body);
+        fileName ??=
+          match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);
+        fileSize ??= parseSize(match(html, ...sizes));
+      };
       const direct = (target: string): Resolved => {
-        ctx.log.info(`Direktlink: ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/…`);
-        return { url: target, headers: { Referer: url }, maxConnections: cfg.maxConnections };
+        ctx.log.info(`Direktlink: ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/… (${fileName ?? 'Name unbekannt'})`);
+        return { url: target, name: fileName, size: fileSize, headers: { Referer: url }, maxConnections: cfg.maxConnections };
       };
 
       // Like JD (validateCookies=false): trust the session and open the file right away.
@@ -416,6 +431,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       for (let round = 0; round < 10; round++) {
         // The server answered with the file itself (JD: looksLikeDownloadableContent).
         if (res.file) return direct(res.url);
+        if (!redirectOf(res)) scan(res);
         const target = redirectOf(res);
         if (target) {
           // A redirect to a download server or CDN, or to a download path, is the file

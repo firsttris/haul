@@ -473,12 +473,10 @@ impl Engine {
         let plugin = self.plugins.find_for(&d.url);
         let (online, name, size, err) = match &plugin {
             Some(p) if p.has_check => {
-                let acc = self.pick_account(&p.id).await.ok().flatten();
-                let result = self.plugins.check(p, &d.url, acc.as_ref()).await;
-                if let Some(a) = &acc {
-                    self.save_session(&p.id, a.id).await;
-                }
-                match result {
+                // Like JD's and pyLoad's link check: anonymous, without the premium session.
+                // Logged in, hosters like ddownload redirect the file page straight to the file
+                // ("direct downloads"), so name and size never show up.
+                match self.plugins.check(p, &d.url, None).await {
                     Ok(r) => (
                         if r.online.unwrap_or(true) {
                             "online"
@@ -629,13 +627,16 @@ impl Engine {
 /// Extracts http(s) links from free text, one per whitespace-separated token, deduplicated.
 pub fn parse_links(text: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
-    text.split(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>')
-        .map(|t| t.trim_matches(|c: char| c == ',' || c == ';'))
-        .filter(|t| t.starts_with("http://") || t.starts_with("https://"))
-        .filter(|t| url::Url::parse(t).is_ok())
-        .filter(|t| seen.insert(t.to_string()))
-        .map(str::to_string)
-        .collect()
+    // Control characters separate too: decrypted Click'n'Load payloads end in padding bytes.
+    text.split(|c: char| {
+        c.is_whitespace() || c.is_control() || c == '"' || c == '\'' || c == '<' || c == '>'
+    })
+    .map(|t| t.trim_matches(|c: char| c == ',' || c == ';'))
+    .filter(|t| t.starts_with("http://") || t.starts_with("https://"))
+    .filter(|t| url::Url::parse(t).is_ok())
+    .filter(|t| seen.insert(t.to_string()))
+    .map(str::to_string)
+    .collect()
 }
 
 /// `Foo.part1.rar`, `Foo.part2.rar` → `Foo`; mixed files → `first (+n)`.
@@ -734,6 +735,21 @@ mod engine_tests {
                 }),
             )
             .route("/missing.bin", get(|| async { StatusCode::NOT_FOUND }))
+            // Like a hoster link from a crypter: only the file id, redirecting to a CDN URL
+            // that carries the name but no Content-Disposition.
+            .route(
+                "/ry772kx58yfh",
+                get(|| async { axum::response::Redirect::to("/d/HASH/Movie.2026.part1.rar") }),
+            )
+            .route(
+                "/d/HASH/Movie.2026.part1.rar",
+                get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/octet-stream")],
+                        "Rar!\u{1a}\u{7}\u{1}\u{0}",
+                    )
+                }),
+            )
             .route(
                 "/page.bin",
                 get(|| async {
@@ -873,5 +889,42 @@ mod engine_tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("HTML response was not reported");
+    }
+
+    /// The file id from a crypter link is only a placeholder: even when the online check
+    /// marked the link online, the real name from the download wins (here: the CDN URL).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn placeholder_name_is_replaced() {
+        let base = range_server(Arc::new(vec![0u8; 16]), Arc::default()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/ry772kx58yfh"),
+                package_name: Some("Crypt".into()),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        // Let the automatic online check finish, then put the download into the state from the
+        // log: online, but named after the file id.
+        for _ in 0..100 {
+            if db::get_download(&e.db, id).await.unwrap().unwrap().online != "unknown" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        sqlx::query("UPDATE downloads SET online = 'online', name = 'ry772kx58yfh' WHERE id = ?")
+            .bind(id)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        e.start_package(pkg).await.unwrap();
+        let d = wait_for(&e, id, status::FINISHED).await;
+        assert_eq!(d.name, "Movie.2026.part1.rar");
+        assert!(dir.path().join("done/Crypt/Movie.2026.part1.rar").exists());
+        e.shutdown().await;
     }
 }

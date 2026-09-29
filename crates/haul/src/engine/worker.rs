@@ -349,13 +349,21 @@ async fn execute(
         )));
     }
     let probe = probe_from(&resp);
+    // The name the link was added with is only a placeholder when it is just the last path
+    // segment of the link (e.g. the file id of `https://ddownload.com/ry772kx58yfh`).
+    let placeholder = util::filename_from_url(&d.url);
+    let known_name = (placeholder.as_deref() != Some(d.name.as_str()) || has_extension(&d.name))
+        .then(|| d.name.clone());
+    let url_name = util::filename_from_url(resp.url().as_str()).filter(|n| has_extension(n));
     let name = probe
         .name
         .clone()
         .or_else(|| resolved.name.as_deref().map(util::sanitize_filename))
-        .or_else(|| (d.online == "online").then(|| d.name.clone()))
+        .or(url_name)
+        .or(known_name)
         .or_else(|| util::filename_from_url(resp.url().as_str()))
         .unwrap_or_else(|| d.name.clone());
+    tracing::info!(id, %name, "file name");
     let total = probe
         .size
         .or(resolved.size)
@@ -551,6 +559,15 @@ async fn execute(
     Ok(())
 }
 
+/// `movie.part1.rar` yes, `ry772kx58yfh` (a hoster's file id) no.
+fn has_extension(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty()
+            && (1..=5).contains(&ext.len())
+            && ext.chars().all(|c| c.is_ascii_alphanumeric())
+    })
+}
+
 /// Splits `total` bytes into up to `conns` ranges of at least `MIN_SEGMENT`.
 fn plan_segments(total: Option<u64>, ranges: bool, conns: u64) -> Vec<(u64, Option<u64>)> {
     match total {
@@ -737,6 +754,15 @@ async fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extensions() {
+        assert!(has_extension("Movie.2026.part1.rar"));
+        assert!(has_extension("a.7z"));
+        assert!(!has_extension("ry772kx58yfh"));
+        assert!(!has_extension(".hidden"));
+        assert!(!has_extension("name.with space"));
+    }
 
     #[test]
     fn plans() {

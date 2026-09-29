@@ -295,6 +295,39 @@ describe('ddownload', () => {
     expect((await plugin.checkAccount!(ctx)).valid).toBe(true);
   });
 
+  it('passes on the file name from the page for id-only links (filecrypt)', async () => {
+    const idLink = 'https://ddownload.com/ry772kx58yfh';
+    const page = `<a href="/?op=logout">x</a>
+      <div class="dk-dl-name">Spider-Man.2026.part2.rar</div><span class="dk-dl-size">2,0 GB</span>
+      <form name="F1" method="POST" action=""><input type="hidden" name="op" value="download2">
+      <input type="hidden" name="id" value="ry772kx58yfh"></form>`;
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/ry772kx58yfh': { body: page },
+        'POST https://ddownload.com/ry772kx58yfh': { status: 302, headers: { location: 'https://eu-sirius11.zeuscdn.org:183/x9Tk2' } },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    expect(await plugin.resolve(idLink, ctx)).toMatchObject({
+      url: 'https://eu-sirius11.zeuscdn.org:183/x9Tk2',
+      name: 'Spider-Man.2026.part2.rar',
+      size: 2 * 1024 ** 3,
+    });
+  });
+
+  it('falls back to the hidden fname field of the download form', async () => {
+    const page = `<a href="/?op=logout">x</a><form name="F1" method="POST" action="">
+      <input type="hidden" name="op" value="download2"><input type="hidden" name="fname" value="Film.part3.rar"></form>`;
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: page },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: 'https://cdn.zeuscdn.org/abc' } },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    expect((await plugin.resolve(LINK, ctx)).name).toBe('Film.part3.rar');
+  });
+
   it('flags a free account', async () => {
     const ctx = fakeCtx(
       { 'GET https://ddownload.com/?op=my_account': { body: '<a href="/?op=logout">Logout</a> Free account' } },
