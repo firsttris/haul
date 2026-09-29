@@ -89,17 +89,10 @@ export interface FileEntry {
   error: string | null;
 }
 
-export interface MoveTarget {
-  name: string;
-  path: string;
-  available: boolean;
-}
-
 export interface FolderView {
   path: string;
   root: string;
   entries: FileEntry[];
-  targets: MoveTarget[];
   extracting: number | null;
   error: string | null;
 }
@@ -111,7 +104,6 @@ export interface Settings {
   maxRetries: number;
   autoExtract: boolean;
   deleteArchives: boolean;
-  autoMoveTarget: string | null;
 }
 
 export interface SettingsView extends Settings {
@@ -121,7 +113,6 @@ export interface SettingsView extends Settings {
   apiTokenSet: boolean;
   version: string;
   extractors: string[];
-  moveTargets: MoveTarget[];
 }
 
 export interface AuthState {

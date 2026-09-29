@@ -156,8 +156,6 @@ pub struct Settings {
     pub max_retries: u32,
     pub auto_extract: bool,
     pub delete_archives: bool,
-    /// Name of a move target: finished packages go there (after extraction, if any).
-    pub auto_move_target: Option<String>,
 }
 
 impl Default for Settings {
@@ -169,7 +167,6 @@ impl Default for Settings {
             max_retries: 5,
             auto_extract: true,
             delete_archives: false,
-            auto_move_target: None,
         }
     }
 }

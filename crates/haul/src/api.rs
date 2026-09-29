@@ -96,8 +96,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/files", get(list_files))
         .route("/files/delete", post(delete_files))
         .route("/files/delete-archives", post(delete_archives))
-        .route("/files/extract", post(extract_folder))
-        .route("/files/move", post(move_file))
+        .route("/files/extract", post(extract_files))
+        .route("/files/move", post(move_files))
+        .route("/files/mkdir", post(make_folder))
+        .route("/files/folders", get(list_folders))
         .route("/plugins", get(list_plugins))
         .route("/plugins/reload", post(reload_plugins))
         .route("/settings", get(get_settings).put(put_settings))
@@ -656,35 +658,13 @@ struct FileView {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TargetView {
-    name: String,
-    path: String,
-    available: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct FolderView {
     path: String,
     root: String,
     entries: Vec<FileView>,
-    targets: Vec<TargetView>,
     /// Extraction running in the listed folder itself, in percent.
     extracting: Option<u8>,
     error: Option<String>,
-}
-
-fn targets(app: &App) -> Vec<TargetView> {
-    app.engine
-        .cfg
-        .move_targets
-        .iter()
-        .map(|t| TargetView {
-            name: t.name.clone(),
-            path: t.path.display().to_string(),
-            available: t.path.is_dir(),
-        })
-        .collect()
 }
 
 fn bad(e: anyhow::Error) -> ApiError {
@@ -760,7 +740,6 @@ async fn list_files(
         path,
         root: root.display().to_string(),
         entries,
-        targets: targets(&app),
     }))
 }
 
@@ -804,60 +783,110 @@ async fn delete_files(
 
 async fn delete_archives(
     State(app): State<Arc<App>>,
-    Json(b): Json<PathQuery>,
+    Json(b): Json<PathsBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let dir = crate::files::resolve_entry(&app.engine.cfg.done_dir, &b.path).map_err(bad)?;
-    if !dir.is_dir() {
-        return Err(ApiError::bad_request("kein Ordner"));
-    }
-    if app.engine.extract_progress_of(&b.path).is_some() {
-        return Err(ApiError::bad_request("wird gerade entpackt"));
-    }
-    let (_, all) = crate::engine::extract::find_archives(&crate::files::file_names(&dir));
-    for name in &all {
-        tokio::fs::remove_file(dir.join(name)).await?;
+    let root = &app.engine.cfg.done_dir;
+    let dirs = b
+        .paths
+        .iter()
+        .map(|p| crate::files::resolve(root, p))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(bad)?;
+    let mut deleted = 0;
+    for (path, dir) in b.paths.iter().zip(dirs) {
+        if !dir.is_dir() {
+            continue;
+        }
+        if app.engine.extract_progress_of(path).is_some() {
+            return Err(ApiError::bad_request(format!(
+                "{path}: wird gerade entpackt"
+            )));
+        }
+        let (_, all) = crate::engine::extract::find_archives(&crate::files::file_names(&dir));
+        for name in &all {
+            tokio::fs::remove_file(dir.join(name)).await?;
+        }
+        deleted += all.len();
     }
     app.engine.events.changed(Topic::Files);
-    Ok(Json(serde_json::json!({ "deleted": all.len() })))
+    Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
-async fn extract_folder(
+async fn extract_files(
     State(app): State<Arc<App>>,
-    Json(b): Json<PathQuery>,
+    Json(b): Json<PathsBody>,
 ) -> ApiResult<StatusCode> {
-    app.engine.extract_folder(&b.path).map_err(bad)?;
+    app.engine.extract_paths(&b.paths).map_err(bad)?;
     app.engine.events.changed(Topic::Files);
     Ok(StatusCode::ACCEPTED)
 }
 
 #[derive(Deserialize)]
 struct MoveBody {
-    path: String,
-    target: String,
+    paths: Vec<String>,
+    /// Destination folder, relative to the done folder ("" = top level).
+    to: String,
 }
 
-async fn move_file(
-    State(app): State<Arc<App>>,
-    Json(b): Json<MoveBody>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let engine = &app.engine;
-    let src = crate::files::resolve_entry(&engine.cfg.done_dir, &b.path).map_err(bad)?;
-    let target = engine
-        .cfg
-        .move_targets
-        .iter()
-        .find(|t| t.name == b.target)
-        .ok_or_else(|| ApiError::bad_request("unbekanntes Ziel"))?;
-    if engine.extract_progress_of(&b.path).is_some() {
-        return Err(ApiError::bad_request("wird gerade entpackt"));
+async fn move_files(State(app): State<Arc<App>>, Json(b): Json<MoveBody>) -> ApiResult<StatusCode> {
+    let root = &app.engine.cfg.done_dir;
+    let dest = crate::files::resolve(root, &b.to).map_err(bad)?;
+    if !dest.is_dir() {
+        return Err(ApiError::bad_request("Ziel ist kein Ordner"));
     }
-    let dest = crate::files::move_into(&src, &target.path)
-        .await
+    let sources = b
+        .paths
+        .iter()
+        .map(|p| crate::files::resolve_entry(root, p))
+        .collect::<anyhow::Result<Vec<_>>>()
         .map_err(bad)?;
-    tracing::info!(from = %b.path, to = %dest.display(), "moved to '{}'", target.name);
-    engine.events.changed(Topic::Files);
+    for (path, src) in b.paths.iter().zip(sources) {
+        if app.engine.extract_progress_of(path).is_some() {
+            return Err(ApiError::bad_request(format!(
+                "{path}: wird gerade entpackt"
+            )));
+        }
+        crate::files::move_within(&src, &dest)
+            .await
+            .map_err(|e| bad(anyhow::anyhow!("{path}: {e:#}")))?;
+        tracing::info!(from = %path, to = %b.to, "moved inside done folder");
+    }
+    app.engine.events.changed(Topic::Files);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct MkdirBody {
+    /// Parent folder, relative to the done folder.
+    #[serde(default)]
+    path: String,
+    name: String,
+}
+
+async fn make_folder(
+    State(app): State<Arc<App>>,
+    Json(b): Json<MkdirBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let root = &app.engine.cfg.done_dir;
+    let parent = crate::files::resolve(root, &b.path).map_err(bad)?;
+    let name = crate::files::valid_name(&b.name).map_err(bad)?;
+    let dir = parent.join(name);
+    if dir.exists() {
+        return Err(ApiError::bad_request(format!(
+            "„{name}“ gibt es hier schon"
+        )));
+    }
+    tokio::fs::create_dir(&dir).await?;
+    app.engine.events.changed(Topic::Files);
     Ok(Json(
-        serde_json::json!({ "to": dest.display().to_string() }),
+        serde_json::json!({ "path": crate::files::relative(root, &dir) }),
+    ))
+}
+
+async fn list_folders(State(app): State<Arc<App>>) -> ApiResult<Json<Vec<String>>> {
+    let root = app.engine.cfg.done_dir.clone();
+    Ok(Json(
+        tokio::task::spawn_blocking(move || crate::files::all_folders(&root)).await?,
     ))
 }
 
@@ -894,7 +923,6 @@ struct SettingsView {
     version: &'static str,
     /// Installed extractors (7-Zip, unrar, unar), best first.
     extractors: Vec<String>,
-    move_targets: Vec<TargetView>,
 }
 
 async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsView>> {
@@ -908,7 +936,6 @@ async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsVie
             .await?
             .is_some(),
         version: env!("CARGO_PKG_VERSION"),
-        move_targets: targets(&app),
         extractors: crate::engine::extract::available_tools()
             .iter()
             .map(|t| t.describe())
@@ -920,16 +947,5 @@ async fn put_settings(
     State(app): State<Arc<App>>,
     Json(s): Json<Settings>,
 ) -> ApiResult<Json<Settings>> {
-    if let Some(name) = s.auto_move_target.as_deref().filter(|n| !n.is_empty()) {
-        if !app.engine.cfg.move_targets.iter().any(|t| t.name == name) {
-            return Err(ApiError::bad_request(format!(
-                "Ziel '{name}' ist nicht in HAUL_MOVE_TARGETS"
-            )));
-        }
-    }
-    let s = Settings {
-        auto_move_target: s.auto_move_target.clone().filter(|n| !n.is_empty()),
-        ..s
-    };
     Ok(Json(app.engine.update_settings(s).await?))
 }

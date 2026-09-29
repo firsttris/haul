@@ -18,39 +18,6 @@ pub struct Config {
     pub initial_user: Option<(String, String)>,
     /// User-Agent sent to hosters; default: a current desktop browser.
     pub user_agent: Option<String>,
-    /// Named folders the "Fertig" view can move things into (`HAUL_MOVE_TARGETS`).
-    pub move_targets: Vec<MoveTarget>,
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct MoveTarget {
-    pub name: String,
-    pub path: PathBuf,
-}
-
-/// `Renamer=/media/inbox;Archiv=/mnt/archiv` → targets. Only absolute paths.
-pub fn parse_move_targets(value: &str) -> Result<Vec<MoveTarget>> {
-    value
-        .split([';', '\n'])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|entry| {
-            let (name, path) = entry.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("HAUL_MOVE_TARGETS: '{entry}' ist nicht Name=/pfad")
-            })?;
-            let path = PathBuf::from(path.trim());
-            if !path.is_absolute() {
-                anyhow::bail!(
-                    "HAUL_MOVE_TARGETS: {} muss ein absoluter Pfad sein",
-                    path.display()
-                );
-            }
-            Ok(MoveTarget {
-                name: name.trim().to_string(),
-                path,
-            })
-        })
-        .collect()
 }
 
 impl Config {
@@ -85,7 +52,6 @@ impl Config {
             app_secret,
             initial_user,
             user_agent: var("HAUL_USER_AGENT"),
-            move_targets: parse_move_targets(&var("HAUL_MOVE_TARGETS").unwrap_or_default())?,
         })
     }
 }
@@ -97,21 +63,5 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         self.config_dir.join("haul.db")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn move_targets() {
-        let t = parse_move_targets(" Renamer = /media/inbox ; Archiv=/mnt/archiv;").unwrap();
-        assert_eq!(t.len(), 2);
-        assert_eq!(t[0].name, "Renamer");
-        assert_eq!(t[0].path, PathBuf::from("/media/inbox"));
-        assert!(parse_move_targets("X=relative/path").is_err());
-        assert!(parse_move_targets("nur-ein-name").is_err());
-        assert!(parse_move_targets("").unwrap().is_empty());
     }
 }

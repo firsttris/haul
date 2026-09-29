@@ -158,6 +158,20 @@ pub async fn delete(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// A single file or folder name typed by the user: no separators, not `.`/`..`.
+pub fn valid_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.len() > 255
+        || name.contains(['/', '\\', '\0'])
+    {
+        bail!("ungültiger Name");
+    }
+    Ok(name)
+}
+
 /// `dir/name`, or `dir/name (1)` … when taken.
 pub fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
@@ -176,38 +190,47 @@ pub fn free_name(dir: &Path, name: &str) -> PathBuf {
         .unwrap()
 }
 
-/// Moves a file or folder into `target_dir`; falls back to copy + delete across file systems.
-pub async fn move_into(src: &Path, target_dir: &Path) -> Result<PathBuf> {
+/// Moves `src` into `dest_dir` (both inside the done folder, so a rename). A taken name
+/// gets a suffix; a folder cannot go into itself.
+pub async fn move_within(src: &Path, dest_dir: &Path) -> Result<PathBuf> {
+    if dest_dir.starts_with(src) {
+        bail!("ein Ordner kann nicht in sich selbst verschoben werden");
+    }
+    if src.parent() == Some(dest_dir) {
+        return Ok(src.to_path_buf());
+    }
     let name = src
         .file_name()
         .ok_or_else(|| anyhow!("ungültiger Pfad"))?
         .to_string_lossy()
         .to_string();
-    tokio::fs::create_dir_all(target_dir).await?;
-    let dest = free_name(target_dir, &name);
-    if tokio::fs::rename(src, &dest).await.is_err() {
-        let (s, d) = (src.to_path_buf(), dest.clone());
-        tokio::task::spawn_blocking(move || copy_recursive(&s, &d)).await??;
-        delete(src).await?;
-    }
+    let dest = free_name(dest_dir, &name);
+    tokio::fs::rename(src, &dest).await?;
     Ok(dest)
 }
 
-fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
-    let meta = src.symlink_metadata()?;
-    if meta.is_dir() {
-        std::fs::create_dir_all(dest)?;
-        for e in std::fs::read_dir(src)? {
-            let e = e?;
-            copy_recursive(&e.path(), &dest.join(e.file_name()))?;
+/// Every folder below `root` (relative, sorted), as move destinations.
+pub fn all_folders(root: &Path) -> Vec<String> {
+    // Walk the real path, so `relative` can strip it (the configured root may be relative).
+    let root = &root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            if e.path().symlink_metadata().is_ok_and(|m| m.is_dir()) {
+                out.push(relative(root, &e.path()));
+                stack.push(e.path());
+            }
         }
-    } else if meta.file_type().is_symlink() {
-        // Keep links as links instead of copying what they point to.
-        std::os::unix::fs::symlink(std::fs::read_link(src)?, dest)?;
-    } else {
-        std::fs::copy(src, dest)?;
+        if out.len() > 5000 {
+            break;
+        }
     }
-    Ok(())
+    out.sort_by_key(|p| p.to_lowercase());
+    out
 }
 
 #[cfg(test)]
@@ -241,6 +264,31 @@ mod tests {
         assert!(resolve_entry(&root, "Pkg").is_ok());
     }
 
+    #[tokio::test]
+    async fn moves_inside_the_done_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("A/sub")).unwrap();
+        std::fs::create_dir_all(root.join("B")).unwrap();
+        std::fs::write(root.join("A/film.mkv"), "x").unwrap();
+        std::fs::write(root.join("B/film.mkv"), "y").unwrap();
+        let dest = move_within(&root.join("A/film.mkv"), &root.join("B"))
+            .await
+            .unwrap();
+        assert_eq!(dest, root.join("B/film (1).mkv"));
+        assert!(move_within(&root.join("A"), &root.join("A/sub"))
+            .await
+            .is_err());
+        assert!(move_within(&root.join("A"), &root.join("A")).await.is_err());
+        assert_eq!(all_folders(root), ["A", "A/sub", "B"]);
+        // A non-canonical root, like the relative ./.data/done in development.
+        assert_eq!(all_folders(&root.join("A/..")), ["A", "A/sub", "B"]);
+        assert!(valid_name("Neu").is_ok());
+        for bad in ["", " ", ".", "..", "a/b", "a\\b"] {
+            assert!(valid_name(bad).is_err(), "{bad:?}");
+        }
+    }
+
     #[test]
     fn lists_folders_first_with_sizes_and_kinds() {
         let tmp = tempfile::tempdir().unwrap();
@@ -259,19 +307,5 @@ mod tests {
         let inner = list(root, &root.join("B")).unwrap();
         assert_eq!(inner[1].path, "B/Movie.part1.rar");
         assert_eq!(inner[1].kind, Some("archive"));
-    }
-
-    #[tokio::test]
-    async fn moves_with_free_names() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (src, target) = (tmp.path().join("done/Pkg"), tmp.path().join("inbox"));
-        std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(src.join("f.mkv"), "x").unwrap();
-        std::fs::create_dir_all(target.join("Pkg")).unwrap();
-        let dest = move_into(&src, &target).await.unwrap();
-        assert_eq!(dest, target.join("Pkg (1)"));
-        assert!(dest.join("f.mkv").exists() && !src.exists());
-        assert!(copy_recursive(&dest, &tmp.path().join("copy")).is_ok());
-        assert!(tmp.path().join("copy/f.mkv").exists());
     }
 }

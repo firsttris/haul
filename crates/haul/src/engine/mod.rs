@@ -789,7 +789,6 @@ mod engine_tests {
             app_secret: "test".into(),
             initial_user: None,
             user_agent: None,
-            move_targets: vec![],
         };
         std::fs::create_dir_all(&cfg.config_dir).unwrap();
         let db = db::connect(&cfg.db_path()).await.unwrap();

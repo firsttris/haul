@@ -887,7 +887,7 @@ pre.code {
 }
 .frow {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 200px 80px 90px 450px;
+  grid-template-columns: 32px minmax(200px, 1fr) 260px 90px 100px;
   gap: 16px;
   align-items: center;
   padding: 0 20px;
@@ -908,8 +908,51 @@ pre.code {
 .fname {
   min-width: 0;
 }
-.frow .actions {
-  justify-content: flex-end;
+.frow.selected {
+  background: #1a1d21;
+}
+.row-check {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.file-label {
+  display: block;
+  cursor: pointer;
+  min-height: 40px;
+  line-height: 40px;
+}
+.files-toolbar {
+  min-height: 44px;
+}
+.folder-list {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line-3);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 4px;
+}
+.folder-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.folder-choice:hover {
+  background: var(--active);
+}
+.folder-choice.on {
+  background: #2a2418;
+  color: var(--text-strong);
+}
+.folder-choice input {
+  accent-color: var(--accent);
 }
 .fname .file-name {
   font-size: 13px;

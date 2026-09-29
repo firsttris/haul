@@ -35,6 +35,9 @@ fn set_key(name: &str) -> Option<(String, bool)> {
     (lower.ends_with(".zip") || lower.ends_with(".7z")).then(|| (lower.clone(), true))
 }
 
+/// First volume and all volumes of one archive set.
+pub type ArchiveSet = (String, Vec<String>);
+
 /// The archive set of `name` among `names`: its first volume and all volumes.
 /// Clicking any part (`part3.rar`, `.r01`, `.7z.002`) extracts the whole set.
 pub fn archive_set(names: &[String], name: &str) -> Option<(String, Vec<String>)> {
@@ -296,10 +299,8 @@ impl Engine {
         if self.settings().auto_extract && !archives.is_empty() {
             if let Err(e) = self.extract_package(package_id).await {
                 tracing::warn!(package_id, "extract: {e:#}");
-                return;
             }
         }
-        self.auto_move(&dir).await;
     }
 
     pub(super) async fn resume_pending_extractions(self: Arc<Self>) {
@@ -402,63 +403,88 @@ impl Engine {
         result
     }
 
-    /// "Entpacken" in the Fertig view. A folder: all archive sets in it (through its package if
-    /// it has one, which keeps passwords and status). A file: the archive set it belongs to,
-    /// whichever volume was picked. Runs in the background.
-    pub fn extract_folder(self: &Arc<Self>, rel: &str) -> Result<()> {
-        let path = files::resolve(&self.cfg.done_dir, rel)?;
-        let (dir, set) = if path.is_dir() {
-            (path, None)
-        } else {
-            let dir = path
-                .parent()
-                .ok_or_else(|| anyhow!("ungültiger Pfad"))?
-                .to_path_buf();
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let set = archive_set(&files::file_names(&dir), &name)
-                .ok_or_else(|| anyhow!("{name} ist kein Archiv oder der erste Teil fehlt"))?;
-            (dir, Some(set))
-        };
-        let folder = files::relative(&self.cfg.done_dir, &dir);
-        if self.extract_progress_of(&folder).is_some() {
-            anyhow::bail!("in diesem Ordner wird bereits entpackt");
+    /// "Entpacken" in the Fertig view for the selected entries. A folder: all archive sets in it
+    /// (through its package if it has one, which keeps passwords and status). A file: the set
+    /// it belongs to, whichever volume was picked; several volumes of one set run once. Runs in
+    /// the background, one job after the other.
+    pub fn extract_paths(self: &Arc<Self>, paths: &[String]) -> Result<()> {
+        let mut jobs: Vec<(PathBuf, Option<ArchiveSet>)> = Vec::new();
+        for rel in paths {
+            let path = files::resolve(&self.cfg.done_dir, rel)?;
+            let job = if path.is_dir() {
+                (path, None)
+            } else {
+                let dir = path
+                    .parent()
+                    .ok_or_else(|| anyhow!("ungültiger Pfad"))?
+                    .to_path_buf();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let set = archive_set(&files::file_names(&dir), &name)
+                    .ok_or_else(|| anyhow!("{name} ist kein Archiv oder der erste Teil fehlt"))?;
+                (dir, Some(set))
+            };
+            // A whole folder covers its sets; a set is only needed once.
+            let covered = jobs.iter().any(|(d, s)| {
+                *d == job.0
+                    && (s.is_none() || s.as_ref().map(|x| &x.0) == job.1.as_ref().map(|x| &x.0))
+            });
+            if !covered {
+                if job.1.is_none() {
+                    jobs.retain(|(d, _)| *d != job.0);
+                }
+                jobs.push(job);
+            }
+        }
+        if jobs.is_empty() {
+            anyhow::bail!("nichts zum Entpacken ausgewählt");
+        }
+        for (dir, _) in &jobs {
+            if self
+                .extract_progress_of(&files::relative(&self.cfg.done_dir, dir))
+                .is_some()
+            {
+                anyhow::bail!("in {} wird bereits entpackt", dir.display());
+            }
         }
         let this = self.clone();
         tokio::spawn(async move {
-            let package = this.package_for_dir(&dir).await;
-            let result = match (package, set) {
-                (Some(id), None) => this.extract_package(id).await,
-                (package, set) => {
-                    let passwords = match package {
-                        Some(id) => db::get_package(&this.db, id)
+            for (dir, set) in jobs {
+                let folder = files::relative(&this.cfg.done_dir, &dir);
+                let package = this.package_for_dir(&dir).await;
+                let result = match (package, set) {
+                    (Some(id), None) => this.extract_package(id).await,
+                    (package, set) => {
+                        let passwords = match package {
+                            Some(id) => db::get_package(&this.db, id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .and_then(|p| p.passwords)
+                                .map(|p| {
+                                    p.lines()
+                                        .map(str::trim)
+                                        .filter(|l| !l.is_empty())
+                                        .map(str::to_string)
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            None => Vec::new(),
+                        };
+                        this.extract_dir(&dir, &folder, package, &passwords, set)
                             .await
-                            .ok()
-                            .flatten()
-                            .and_then(|p| p.passwords)
-                            .map(|p| {
-                                p.lines()
-                                    .map(str::trim)
-                                    .filter(|l| !l.is_empty())
-                                    .map(str::to_string)
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        None => Vec::new(),
-                    };
-                    this.extract_dir(&dir, &folder, package, &passwords, set)
-                        .await
-                }
-            };
-            let mut errors = this.folder_errors.lock().unwrap();
-            match result {
-                Ok(()) => errors.remove(&folder),
-                Err(e) => errors.insert(folder.clone(), format!("{e:#}")),
-            };
-            drop(errors);
-            this.events.changed(Topic::Files);
+                    }
+                };
+                let mut errors = this.folder_errors.lock().unwrap();
+                match result {
+                    Ok(()) => errors.remove(&folder),
+                    Err(e) => errors.insert(folder.clone(), format!("{e:#}")),
+                };
+                drop(errors);
+                this.events.changed(Topic::Files);
+            }
         });
         Ok(())
     }
@@ -474,27 +500,6 @@ impl Engine {
             .into_iter()
             .find(|p| self.package_dir(p).canonicalize().is_ok_and(|d| d == dir))
             .map(|p| p.id)
-    }
-
-    /// Moves a finished package folder to the configured automatic target, if any.
-    async fn auto_move(&self, dir: &Path) {
-        let Some(name) = self.settings().auto_move_target else {
-            return;
-        };
-        let Some(target) = self.cfg.move_targets.iter().find(|t| t.name == name) else {
-            tracing::warn!(
-                "automatisches Verschieben: Ziel '{name}' ist nicht in HAUL_MOVE_TARGETS"
-            );
-            return;
-        };
-        if !dir.exists() || dir == self.cfg.done_dir {
-            return;
-        }
-        match files::move_into(dir, &target.path).await {
-            Ok(dest) => tracing::info!(to = %dest.display(), "package moved to '{name}'"),
-            Err(e) => tracing::warn!("moving {} to '{name}': {e:#}", dir.display()),
-        }
-        self.events.changed(Topic::Files);
     }
 }
 
