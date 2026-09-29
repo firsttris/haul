@@ -722,15 +722,18 @@ mod replace_tests {
             pm.find_for("https://send.cm/d/abcdefghijkl").unwrap().id,
             "send"
         );
-        // Folder links of both forms reach the MEGA plugin (Rust regex, not JS).
+        // Links in the forms the plugins know reach them (Rust regex, not JS).
         for link in [
             "https://mega.nz/folder/F0lder12#a2V5a2V5a2V5a2V5a2V5aw",
             "https://mega.nz/file/AbCdEfGh#key",
             "https://mega.co.nz/#!AbCdEfGh!key",
             "https://drive.google.com/drive/folders/1xyz",
             "https://send.now/s/bob",
+            "https://send.now/d/1pLfI",
         ] {
             assert!(pm.find_for(link).is_some(), "{link}");
         }
+        // Send's short link goes to Send, not to the plain HTTP download.
+        assert_eq!(pm.find_for("https://send.now/d/1pLfI").unwrap().id, "send");
     }
 }

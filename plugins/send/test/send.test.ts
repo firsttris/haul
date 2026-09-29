@@ -263,4 +263,53 @@ describe('send', () => {
       expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
     });
   });
+
+  describe('short links and the security verification (send.now 2026-09)', () => {
+    // The page as send.now serves it (trimmed): form F1 = download1 with a Turnstile widget.
+    const CHALLENGE = `<title> Download Challenge</title>
+      <input type="hidden" id="turnstile_callback" name="turnstile_callback" >
+      <form name="F1" method="POST" action="">
+      <input type="hidden" name="op" value="download1">
+      <input type="hidden" name="id" value="abcdefghijkl">
+      <input type="hidden" name="rand" value="">
+      <input type="hidden" name="referer" value="">
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAABrUKnK1CqelgBZ7" data-callback="javascriptCallback"></div>
+      <input type="submit"  class="btn btn-primary btn-block btn-lg tx-bold" name="download_a" value="CONTINUE">
+      </form>`;
+
+    it('recognises short links', () => {
+      expect(plugin.matches.some((re) => re.test('https://send.now/d/1pLfI'))).toBe(true);
+    });
+
+    it('turns a short link into the file id, has the user solve Turnstile and continues', async () => {
+      const posts: HttpRequest[] = [];
+      const ctx = fakeCtx({
+        'GET https://send.now/d/1pLfI': { body: CHALLENGE },
+        'GET https://send.now/abcdefghijkl': { body: CHALLENGE },
+        'POST https://send.now/abcdefghijkl': (req) => {
+          posts.push(req);
+          if (req.form?.op === 'download1') return { body: PAGE2() };
+          return { status: 302, headers: { location: CDN } };
+        },
+      });
+      ctx.captchaToken = 'TURNSTILE-TOKEN';
+      expect((await plugin.resolve('https://send.now/d/1pLfI', ctx)).url).toBe(CDN);
+      expect(ctx.captchas).toEqual([{ kind: 'turnstile', siteKey: '0x4AAAAAABrUKnK1CqelgBZ7', pageUrl: 'https://send.now/abcdefghijkl' }]);
+      // JD handleCaptcha: the token goes as cf-turnstile-response and g-recaptcha-response,
+      // with the button the browser would send.
+      expect(posts[0].form).toMatchObject({
+        op: 'download1',
+        id: 'abcdefghijkl',
+        download_a: 'CONTINUE',
+        'cf-turnstile-response': 'TURNSTILE-TOKEN',
+        'g-recaptcha-response': 'TURNSTILE-TOKEN',
+      });
+      expect(posts[0].form).not.toHaveProperty('turnstile_callback');
+    });
+
+    it('takes the id from the URL the short link ends on', async () => {
+      const ctx = fakeCtx({ 'GET https://send.now/d/1pLfI': { url: 'https://send.now/abcdefghijkl', body: PAGE1 }, 'GET https://send.now/abcdefghijkl': { body: PAGE1 } });
+      expect(await plugin.check!('https://send.now/d/1pLfI', ctx)).toMatchObject({ online: true, name: 'Film.part1.rar' });
+    });
+  });
 });

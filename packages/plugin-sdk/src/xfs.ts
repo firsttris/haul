@@ -240,6 +240,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   const base = `https://${host}`;
   const domainRe = cfg.domains.map(escapeRe).join('|');
   const linkRe = new RegExp(`https?:\\/\\/(?:www\\.)?(?:${domainRe})\\/(?:d\\/)?([a-z0-9]{${idLen}})`, 'i');
+  /** JD getDefaultAnnotationPatternPart "d/[A-Za-z0-9]+": short links like `send.now/d/1pLfI`. */
+  const shortRe = new RegExp(`https?:\\/\\/(?:www\\.)?(?:${domainRe})\\/d\\/([A-Za-z0-9]+)`);
   const offline = cfg.offlinePatterns ?? DEFAULT_OFFLINE;
   const names = cfg.namePatterns ?? DEFAULT_NAMES;
   const sizes = cfg.sizePatterns ?? DEFAULT_SIZES;
@@ -270,6 +272,24 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     return m[1].toLowerCase();
   };
   const fileUrl = (link: string) => `${base}/${fileId(link)}`;
+
+  /**
+   * JD resolveShortURL: a short link is loaded; the long file id comes from the URL it ends on,
+   * else from the `id` field of the form F1. Other links stay as they are.
+   */
+  async function longLink(ctx: Ctx, link: string): Promise<string> {
+    if (linkRe.test(link) || !shortRe.test(link)) return link;
+    const res = await ctx.http.get(link, { headers: cfg.headers });
+    if (res.file) return link;
+    const byUrl = linkRe.exec(res.url)?.[1];
+    if (byUrl) return `${base}/${byUrl.toLowerCase()}`;
+    const form = parseForms(res.body).find((f) => /name=["']F1["']/i.test(f.html)) ?? parseForms(res.body).find((f) => /^download/.test(f.fields.op ?? ''));
+    const id = form?.fields.id;
+    if (id && new RegExp(`^[A-Za-z0-9]{${idLen}}$`).test(id)) return `${base}/${id.toLowerCase()}`;
+    assertOnline(res);
+    freeErrors(res);
+    throw new OfflineError({ de: `${cfg.name}: Kurzlink führt zu keiner Datei`, en: `${cfg.name}: short link leads to no file` });
+  }
 
   function mode(user: string, secret: string): Mode {
     const s = secret.trim();
@@ -673,7 +693,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const token = await ctx.captcha.solve({ kind: found.kind, siteKey: found.siteKey, pageUrl: page.url });
     fields[CAPTCHA_FIELD[found.kind]] = token;
     // hCaptcha fills both fields in the browser; XFS sites often read g-recaptcha-response.
-    if (found.kind === 'hcaptcha') fields['g-recaptcha-response'] = token;
+    // JD handleCloudflareTurnstileCaptcha puts a Turnstile token into both as well.
+    if (found.kind === 'hcaptcha' || found.kind === 'turnstile') fields['g-recaptcha-response'] = token;
     return true;
   }
 
@@ -728,6 +749,16 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       if (!fields.method_free) {
         fields.method_free = /["']method_free["'][^>]*value=["']([^<>"']+)["']/i.exec(download1.html)?.[1] ?? 'Free Download';
       }
+      // Any other button, e.g. send.now's "CONTINUE" (download_a): a browser sends the one clicked.
+      for (const tag of download1.html.match(/<input\b[^>]*type=["']?submit["']?[^>]*>/gi) ?? []) {
+        const name = /\bname=["']([^"']+)["']/i.exec(tag)?.[1];
+        if (!name || /^method_/.test(name) || name in fields) continue;
+        fields[name] = /\bvalue=["']([^"']*)["']/i.exec(tag)?.[1] ?? '';
+        break;
+      }
+      // A token captcha in this form (send.now 2026-09: Turnstile "Security verification"; JD
+      // solves such forms in handleCaptcha). The user solves it in the browser.
+      if (findCaptcha(download1.html)) await tokenCaptcha(ctx, download1.html, fields, res);
       const wait = countdownOf(res.body);
       if (wait) await ctx.wait(wait);
       steps.push('download1');
@@ -774,7 +805,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     id: cfg.id,
     name: cfg.name,
     version: cfg.version,
-    matches: [linkRe],
+    matches: [linkRe, shortRe],
     accountRequired: cfg.accountRequired ?? true,
     account: {
       userLabel: { de: 'Benutzer', en: 'User' },
@@ -794,6 +825,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     },
 
     async check(link, ctx): Promise<CheckResult> {
+      link = await longLink(ctx, link);
       const acc = ctx.account.get();
       const m = acc ? mode(acc.user, acc.secret) : null;
       if (m?.kind === 'api') {
@@ -816,6 +848,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     },
 
     async resolve(link, ctx): Promise<Resolved> {
+      link = await longLink(ctx, link);
       if (cfg.free && !ctx.account.get()) return resolveFree(link, ctx);
       const m = currentMode(ctx);
       const id = fileId(link);
