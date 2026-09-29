@@ -32,6 +32,8 @@ struct Meta {
     has_check_account: bool,
     #[serde(default)]
     has_crawl: bool,
+    #[serde(default)]
+    serial: bool,
 }
 
 /// Labels and hint for the account form, provided by the plugin.
@@ -61,6 +63,8 @@ pub struct Plugin {
     pub has_check: bool,
     pub has_check_account: bool,
     pub has_crawl: bool,
+    /// Calls without an account run one at a time as well.
+    pub serial: bool,
     pub builtin: bool,
     pub file: PathBuf,
     #[serde(skip)]
@@ -391,9 +395,10 @@ impl PluginManager {
     ) -> std::result::Result<T, PluginError> {
         let env = serde_json::json!({ "pluginId": plugin.id, "account": account });
         let (clients, busy) = self.session_parts(&plugin.id, account.map(|a| a.id));
-        let _serial = match account {
-            Some(_) => Some(busy.lock_owned().await),
-            None => None,
+        let _serial = if account.is_some() || plugin.serial {
+            Some(busy.lock_owned().await)
+        } else {
+            None
         };
         let value = host::invoke(&plugin.id, &plugin.code, method, args, env, clients).await?;
         serde_json::from_value(value).map_err(|e| {
@@ -473,6 +478,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
         has_check: meta.has_check,
         has_check_account: meta.has_check_account,
         has_crawl: meta.has_crawl,
+        serial: meta.serial,
         builtin,
         file: file.to_path_buf(),
         regexes,

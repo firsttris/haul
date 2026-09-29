@@ -132,6 +132,11 @@ export interface PluginDefinition {
   matches: RegExp[];
   /** Without an account the link is not even tried. */
   accountRequired?: boolean;
+  /**
+   * Run calls without an account one at a time too (with an account they always are), e.g.
+   * for a hoster whose API rate-limits guests (JD: getMaxConcurrentProcessingInstances = 1).
+   */
+  serial?: boolean;
   /** Labels and hint for the account form in the UI. */
   account?: { userLabel?: string; secretLabel?: string; help?: string };
   check?(link: string, ctx: Ctx): Promise<CheckResult>;

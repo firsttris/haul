@@ -470,6 +470,7 @@ mod bundled {
                 serde_json::from_str(&read_meta(&code).await.unwrap()).unwrap();
             assert_eq!(meta["id"], "gofile");
             assert_eq!(meta["hasCrawl"], true);
+            assert_eq!(meta["serial"], true);
             assert_eq!(meta["accountRequired"], false);
         }
         let code = r#"

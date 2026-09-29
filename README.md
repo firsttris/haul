@@ -8,7 +8,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - direkte HTTP-Links
 - ddownload mit Premium-Account (Web-Login oder API-Key)
 - Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
-  Unterordnern, Paketname = Ordnername), Download mit Gast-Token wie bei JDownloader
+  Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
+  wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
 - Linksammler mit Online-Check, Paketname, Zielordner und Archiv-Passwörtern
