@@ -34,6 +34,7 @@ import {
   CAPTCHA_FIELD,
   decodeHtml,
   findCaptcha,
+  HosterLimitError,
   PluginError,
 } from './index';
 
@@ -532,15 +533,16 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       match(html, /((?:You have reached the download[- ]limit|You have to wait)[^<>]+)/i) ??
       match(html, /Download limit reached.\s*Please wait\s*(.*?)\s*before your next download/i);
     if (wait) {
-      throw new TemporaryError(
+      // JD: ERROR_IP_BLOCKED, for every download from the site.
+      throw new HosterLimitError(
         { de: `${n}: Download-Limit, Wartezeit bis zum nächsten Download („${wait}“)`, en: `${n}: download limit, waiting for the next download (“${wait}”)` },
         parseWait(wait),
       );
     }
     const perHours = match(html, />\s*(You have reached the maximum limit \d+ files in \d+ hours)/i);
-    if (perHours) throw new TemporaryError(`${n}: ${perHours}`, 15 * 60);
+    if (perHours) throw new HosterLimitError(`${n}: ${perHours}`, 15 * 60);
     if (/You're using all download slots for IP/i.test(html)) {
-      throw new TemporaryError({ de: `${n}: alle Download-Slots dieser IP belegt`, en: `${n}: all download slots of this IP in use` }, 5 * 60);
+      throw new HosterLimitError({ de: `${n}: alle Download-Slots dieser IP belegt`, en: `${n}: all download slots of this IP in use` }, 5 * 60);
     }
     if (/Error happened when generating Download Link/i.test(html)) {
       throw new TemporaryError({ de: `${n}: Fehler beim Erzeugen des Download-Links`, en: `${n}: error generating the download link` }, 10 * 60);

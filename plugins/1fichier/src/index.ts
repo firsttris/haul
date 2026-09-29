@@ -16,7 +16,17 @@
  *   ("The free offer is intended to …", 1 h). pyLoad also waits out "Free download in ⏳ N".
  * - Requests at least 2.5 s apart (JD default, "1 request per second is also fine" says the admin).
  */
-import { decodeHtml, definePlugin, OfflineError, parseForms, PluginError, resolveUrl, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
+import {
+  decodeHtml,
+  definePlugin,
+  HosterLimitError,
+  OfflineError,
+  parseForms,
+  PluginError,
+  resolveUrl,
+  spaceRequests,
+  TemporaryError,
+} from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpOptions, HttpResponse } from '@haul/plugin-sdk';
 
 /** JD: getPluginDomains. */
@@ -115,7 +125,7 @@ export function checkErrors(res: HttpResponse): void {
     throw new PluginError('fatal', { de: '1fichier: nur mit Account ladbar', en: '1fichier: downloadable with an account only' });
   }
   if (/Your account will be unlock/i.test(html)) {
-    throw new TemporaryError({ de: '1fichier: IP aus Sicherheitsgründen gesperrt', en: '1fichier: IP blocked for security reasons' }, 60 * 60);
+    throw new HosterLimitError({ de: '1fichier: IP aus Sicherheitsgründen gesperrt', en: '1fichier: IP blocked for security reasons' }, 60 * 60);
   }
   if (/>\s*(?:Access to this file is protected|This file is protected)/i.test(html)) {
     throw new PluginError('fatal', {
@@ -124,11 +134,11 @@ export function checkErrors(res: HttpResponse): void {
     });
   }
   if (/>\s*Your requests are too fast/i.test(html)) {
-    throw new TemporaryError({ de: '1fichier: zu viele Anfragen', en: '1fichier: requests too fast' }, 30);
+    throw new HosterLimitError({ de: '1fichier: zu viele Anfragen', en: '1fichier: requests too fast' }, 30);
   }
   if (res.status === 403) throw new TemporaryError({ de: '1fichier: Serverfehler 403', en: '1fichier: server error 403' }, 15 * 60);
   if (res.status === 503 && />\s*Our services are in maintenance/i.test(html)) {
-    throw new TemporaryError({ de: '1fichier: Wartung', en: '1fichier: maintenance' }, 20 * 60);
+    throw new HosterLimitError({ de: '1fichier: Wartung', en: '1fichier: maintenance' }, 20 * 60);
   }
   if (
     /professional infrastructure detected|identified as belonging to a server, proxy, VPN|Usage of professional services is restricted/i.test(html)
@@ -139,14 +149,14 @@ export function checkErrors(res: HttpResponse): void {
     });
   }
   if (/The free offer is intended to/i.test(html) && /You already downloaded for free more than|It is not designed for intensive|These limitations are necessary to/i.test(html)) {
-    throw new TemporaryError({ de: '1fichier: tägliches Free-Limit erreicht', en: '1fichier: daily free limit reached' }, 60 * 60);
+    throw new HosterLimitError({ de: '1fichier: tägliches Free-Limit erreicht', en: '1fichier: daily free limit reached' }, 60 * 60);
   }
   if (/>\s*Free download is temporarily limited due to high demand|>\s*all free guest slots are currently in use/i.test(html)) {
     // JD: getNoFreeSlotsWaitMinutes() default 15.
-    throw new TemporaryError({ de: '1fichier: keine freien Slots, später erneut', en: '1fichier: no free slots, trying later' }, 15 * 60);
+    throw new HosterLimitError({ de: '1fichier: keine freien Slots, später erneut', en: '1fichier: no free slots, trying later' }, 15 * 60);
   }
   const internal = />\s*Internal error\s*(.*?)\s*<br\/>\s*Please try again later/i.exec(html)?.[1];
-  if (internal !== undefined) throw new TemporaryError(`1fichier: Internal error ${internal}`, 5 * 60);
+  if (internal !== undefined) throw new HosterLimitError(`1fichier: Internal error ${internal}`, 5 * 60);
   let minutes =
     /you must wait (?:at least|up to)\s*(\d+)\s*minutes between each downloads/i.exec(html)?.[1] ??
     />\s*You must wait\s*(\d+)\s*minutes/i.exec(html)?.[1] ??
@@ -169,7 +179,7 @@ export function checkErrors(res: HttpResponse): void {
   if (minutes !== undefined || between) {
     // JD: 5 minutes when the page names no time.
     const wait = minutes !== undefined ? Number(minutes) * 60 : 5 * 60;
-    throw new TemporaryError(
+    throw new HosterLimitError(
       { de: `1fichier: Wartezeit zwischen Downloads (${Math.round(wait / 60)} min)`, en: `1fichier: wait between downloads (${Math.round(wait / 60)} min)` },
       wait,
     );
@@ -246,7 +256,7 @@ export default definePlugin({
       if (!wait || round >= 2) break;
       // pyLoad: wait out the countdown, then load the page again; long waits go back to the queue.
       if (wait > 180) {
-        throw new TemporaryError({ de: `1fichier: Free-Download in ${wait} s`, en: `1fichier: free download in ${wait} s` }, wait);
+        throw new HosterLimitError({ de: `1fichier: Free-Download in ${wait} s`, en: `1fichier: free download in ${wait} s` }, wait);
       }
       await ctx.wait(wait + 1);
       res = await request(ctx, 'GET', page);

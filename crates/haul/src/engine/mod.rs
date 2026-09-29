@@ -55,6 +55,9 @@ pub struct Engine {
     extracting: Mutex<HashMap<String, (Option<i64>, u8)>>,
     /// Last extraction error of folders without a package (Fertig view).
     pub(crate) folder_errors: Mutex<HashMap<String, String>>,
+    /// Hosters whose limit holds for all their downloads (`HosterLimitError`, JD:
+    /// ERROR_IP_BLOCKED): until when, and the hoster's message.
+    hoster_waits: Mutex<HashMap<String, (i64, String)>>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -103,6 +106,7 @@ impl Engine {
             shutdown: CancellationToken::new(),
             extracting: Mutex::new(HashMap::new()),
             folder_errors: Mutex::new(HashMap::new()),
+            hoster_waits: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -199,10 +203,55 @@ impl Engine {
         }
     }
 
+    /// Every download from `plugin` waits until `until` (ms), with the hoster's message.
+    pub(crate) fn set_hoster_wait(&self, plugin: &str, until: i64, message: &str) {
+        tracing::info!(
+            plugin,
+            wait_s = (until - now_ms()) / 1000,
+            "hoster limit: all its downloads wait"
+        );
+        self.hoster_waits
+            .lock()
+            .unwrap()
+            .insert(plugin.to_string(), (until, message.to_string()));
+    }
+
+    /// Puts queued downloads of limited hosters on hold (retry_at and the message), so the
+    /// scheduler skips them and the UI shows why; also those queued after the limit came.
+    async fn apply_hoster_waits(&self) -> Result<()> {
+        let now = now_ms();
+        let waits: Vec<(String, i64, String)> = {
+            let mut map = self.hoster_waits.lock().unwrap();
+            map.retain(|_, (until, _)| *until > now);
+            map.iter()
+                .map(|(p, (u, m))| (p.clone(), *u, m.clone()))
+                .collect()
+        };
+        for (plugin, until, message) in waits {
+            let changed = sqlx::query(
+                "UPDATE downloads SET retry_at = ?, error = ?
+                 WHERE plugin_id = ? AND status = ? AND (retry_at IS NULL OR retry_at < ?)",
+            )
+            .bind(until)
+            .bind(&message)
+            .bind(&plugin)
+            .bind(status::QUEUED)
+            .bind(until)
+            .execute(&self.db)
+            .await?
+            .rows_affected();
+            if changed > 0 {
+                self.events.changed(Topic::Downloads);
+            }
+        }
+        Ok(())
+    }
+
     async fn fill_slots(self: &Arc<Self>) -> Result<()> {
         if self.shutdown.is_cancelled() {
             return Ok(());
         }
+        self.apply_hoster_waits().await?;
         let max = self.settings().max_parallel as usize;
         let running = self.active_count();
         if running >= max {
@@ -1482,5 +1531,76 @@ mod engine_tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("the wait was not recorded");
+    }
+
+    /// A hoster-wide limit (HosterLimitError) holds every queued download of that hoster
+    /// without trying each one, like JD's ERROR_IP_BLOCKED; other hosters go on.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hoster_limit_holds_all_its_downloads() {
+        // Counts how often the "hoster" is asked.
+        let hits = Arc::new(AtomicU64::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/page",
+            get(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { "limited" }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let hoster = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = format!(
+            r#"var __plugin = {{ default: {{ id: "limit", version: 1, matches: [/https?:\/\/limit\.test\//],
+                async resolve(link, ctx) {{
+                    await ctx.http.get("{hoster}/page");
+                    const e = new Error("one download at a time"); e.haulKind = "temporary"; e.haulWait = 600; e.haulScope = "hoster";
+                    throw e;
+                }},
+            }}}};"#
+        );
+        std::fs::write(plugin_dir.join("limit.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        assert!(plugins.errors().is_empty(), "{:?}", plugins.errors());
+        let e = engine_with(dir.path(), plugins).await;
+        let mut s = e.settings();
+        s.max_parallel = 1;
+        e.update_settings(s).await.unwrap();
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://limit.test/f/1 https://limit.test/f/2 https://limit.test/f/3"
+                    .into(),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids = e.package_ids(pkg).await.unwrap();
+        for _ in 0..100 {
+            let all = db::package_downloads(&e.db, pkg).await.unwrap();
+            if all.iter().all(|d| d.retry_at.is_some()) {
+                for d in &all {
+                    let left = d.retry_at.unwrap() - now_ms();
+                    assert!((500_000..=600_000).contains(&left), "{left}");
+                    assert_eq!((d.status.as_str(), d.attempts), (status::QUEUED, 0));
+                    assert_eq!(d.error.as_deref(), Some("one download at a time"));
+                }
+                // Only one download asked the hoster; the others were held back.
+                assert_eq!(hits.load(Ordering::SeqCst), 1);
+                assert_eq!(all.len(), ids.len());
+                e.shutdown().await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!(
+            "not all downloads of the hoster wait: {:?}",
+            db::package_downloads(&e.db, pkg).await.unwrap()
+        );
     }
 }

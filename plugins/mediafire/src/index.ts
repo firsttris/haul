@@ -18,6 +18,7 @@ import {
   base64Decode,
   CAPTCHA_FIELD,
   findCaptcha,
+  HosterLimitError,
   decodeHtml,
   definePlugin,
   OfflineError,
@@ -228,10 +229,14 @@ function pageErrors(res: HttpResponse) {
   }
   const ttl = limitTtl(html);
   if (ttl) {
-    throw new TemporaryError({
-      de: `Mediafire: Download-Limit dieser IP erreicht (${ttl} s)`,
-      en: `Mediafire: download limit of this IP reached (${ttl} s)`,
-    });
+    // JD: ERROR_IP_BLOCKED with limitReachedTTL seconds.
+    throw new HosterLimitError(
+      {
+        de: `Mediafire: Download-Limit dieser IP erreicht (${ttl} s)`,
+        en: `Mediafire: download limit of this IP reached (${ttl} s)`,
+      },
+      Number(ttl) || 60 * 60,
+    );
   }
 }
 

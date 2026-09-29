@@ -14,7 +14,7 @@
  *   files, private files (403, accounts.google.com).
  * - Not yet: folders, Google Docs exports, video streams, Google accounts.
  */
-import { decodeHtml, definePlugin, OfflineError, parseForms, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
+import { decodeHtml, definePlugin, HosterLimitError, OfflineError, parseForms, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
 import type { Ctx, HttpResponse } from '@haul/plugin-sdk';
 
 const HOSTS = '(?:drive|docs|drive\\.usercontent)\\.google\\.com';
@@ -61,7 +61,8 @@ export function pageErrors(res: HttpResponse): void {
     throw new TemporaryError({ de: 'Google Drive: Rate-Limit', en: 'Google Drive: rate limited' }, RATE_WAIT);
   }
   if (res.status === 403 && /but your computer or network may be sending automated queries/i.test(html)) {
-    throw new TemporaryError({ de: 'Google Drive: von Google blockiert (automatische Anfragen)', en: 'Google Drive: blocked by Google (automated queries)' }, RATE_WAIT);
+    // JD checkErrorBlockedByGoogle: ERROR_IP_BLOCKED.
+    throw new HosterLimitError({ de: 'Google Drive: von Google blockiert (automatische Anfragen)', en: 'Google Drive: blocked by Google (automated queries)' }, RATE_WAIT);
   }
   if (/>\s*Sorry, this file is infected with a virus/i.test(html)) {
     throw new PluginError('fatal', {

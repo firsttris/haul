@@ -73,7 +73,7 @@ describe('send', () => {
     const ctx = fakeCtx({
       'GET https://send.now/abcdefghijkl': { body: '<div class="err">You have to wait 1 hour 5 minutes till next download</div>' },
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 3901 });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 3901, haulScope: 'hoster' });
   });
 
   it('reports the free size limit with a wait (JD: IP blocked)', async () => {
@@ -84,7 +84,7 @@ describe('send', () => {
       },
     });
     const e = await plugin.resolve(LINK, ctx).catch((x) => x);
-    expect(e).toMatchObject({ haulKind: 'temporary', haulWait: 3600 });
+    expect(e).toMatchObject({ haulKind: 'temporary', haulWait: 3600, haulScope: 'hoster' });
     expect(e.message).toContain('1 GB');
   });
 

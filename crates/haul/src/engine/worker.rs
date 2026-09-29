@@ -38,6 +38,8 @@ pub enum Failure {
     /// The hoster said when to try again (e.g. a free download limit): queued until then,
     /// without using up an attempt.
     Wait(String, u64),
+    /// Like `Wait`, for every download from this hoster (JD: ERROR_IP_BLOCKED).
+    HosterWait(String, u64),
     /// Permanent; needs the user.
     Fail(String),
     Offline(String),
@@ -65,6 +67,9 @@ impl From<PluginError> for Failure {
     fn from(e: PluginError) -> Self {
         match e.kind {
             ErrorKind::Offline => Failure::Offline(e.message),
+            ErrorKind::Temporary if e.wait_secs.is_some() && e.hoster_wide => {
+                Failure::HosterWait(e.message, e.wait_secs.unwrap_or_default())
+            }
             ErrorKind::Temporary if e.wait_secs.is_some() => {
                 Failure::Wait(e.message, e.wait_secs.unwrap_or_default())
             }
@@ -227,6 +232,19 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
             d.attempts,
             m,
         ),
+        Failure::HosterWait(m, secs) => {
+            let until = now_ms() + secs as i64 * 1000;
+            if let Some(plugin) = &d.plugin_id {
+                engine.set_hoster_wait(plugin, until, &m);
+            }
+            (
+                status::QUEUED,
+                d.online.as_str(),
+                Some(until),
+                d.attempts,
+                m,
+            )
+        }
         Failure::Cancelled => return Ok(()),
     };
     tracing::warn!(

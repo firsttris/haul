@@ -262,6 +262,19 @@ export class TemporaryError extends PluginError {
   }
 }
 
+/**
+ * A limit of the hoster for this connection, not for one file: waits between free downloads,
+ * "one download at a time", IP locks, no free slots (JD: ERROR_IP_BLOCKED and
+ * ERROR_HOSTER_TEMPORARILY_UNAVAILABLE). Every download from this hoster waits `waitSeconds`,
+ * without using up attempts.
+ */
+export class HosterLimitError extends PluginError {
+  readonly haulScope = 'hoster';
+  constructor(message: Message, waitSeconds: number) {
+    super('temporary', message, waitSeconds);
+  }
+}
+
 /** Login failed or the account cannot be used right now. */
 export class AccountError extends PluginError {
   constructor(message: Message) {

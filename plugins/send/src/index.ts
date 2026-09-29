@@ -6,7 +6,7 @@
  * domains, name/size patterns (scanInfo), its checkErrors and isOffline additions, and the
  * connection limits (free: 1 chunk, premium: 10). JD's captcha info for the site: none.
  */
-import { definePlugin, PluginError, TemporaryError } from '@haul/plugin-sdk';
+import { definePlugin, HosterLimitError, PluginError } from '@haul/plugin-sdk';
 import { createXfsPlugin } from '@haul/plugin-sdk/xfs';
 
 export default definePlugin(
@@ -45,7 +45,8 @@ export default definePlugin(
       const limit = /(You can download up to[^<]*(?:<[^>]+>[^<]*){0,4}?without an account)/i.exec(html)?.[1];
       if (limit || />\s*You can download up to/i.test(html)) {
         const text = (limit ?? 'You can download up to …').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
-        throw new TemporaryError(
+        // JD: ERROR_IP_BLOCKED.
+        throw new HosterLimitError(
           {
             de: `Send: Free-Limit erreicht („${text}“); später erneut oder mit Account`,
             en: `Send: free limit reached (“${text}”); later again or with an account`,

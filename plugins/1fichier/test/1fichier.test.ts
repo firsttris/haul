@@ -113,7 +113,11 @@ describe('1fichier download', () => {
     expect(wait('<p>You must wait 13 minutes between each downloads</p>')).toMatchObject({ haulWait: 780 });
     expect(wait('<p>all good</p>')).toBeNull();
     expect(wait('you must wait at least 13 minutes between each downloads')).toMatchObject({ haulWait: 780 });
-    expect(wait('<div> You must wait 7 minutes</div>')).toMatchObject({ haulWait: 420 });
+    expect(wait('<div> You must wait 7 minutes</div>')).toMatchObject({ haulWait: 420, haulScope: 'hoster' });
+    // A server error is about this file only (JD: ERROR_TEMPORARILY_UNAVAILABLE).
+    const software = wait('<p> Software error:</p>');
+    expect(software).toMatchObject({ haulKind: 'temporary', haulWait: 600 });
+    expect(software).not.toHaveProperty('haulScope');
     expect(wait('Warning ! Without subscription, you can only download one file at a time...')).toMatchObject({ haulWait: 300 });
     expect(wait('<b> IP Locked</b>')).toMatchObject({ haulWait: 3600 });
     expect(wait('<p> Free download is temporarily limited due to high demand</p>')).toMatchObject({ haulWait: 900 });

@@ -140,6 +140,7 @@
         kind: (e && e.haulKind) || 'fatal',
         message: String((e && e.message) || e),
         wait: (e && typeof e.haulWait === 'number' && e.haulWait > 0) ? e.haulWait : undefined,
+        scope: (e && e.haulScope === 'hoster') ? 'hoster' : undefined,
       });
     }
   };

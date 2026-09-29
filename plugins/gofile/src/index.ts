@@ -16,7 +16,7 @@
  *   only an expired link lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
  */
-import { definePlugin, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
+import { definePlugin, HosterLimitError, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://gofile.io';
@@ -123,10 +123,14 @@ async function api(ctx: Ctx, send: () => Promise<HttpResponse>): Promise<ApiResp
     }
     return r;
   }
-  throw new TemporaryError({
-    de: 'Gofile: Rate-Limit für Gäste erreicht, später erneut',
-    en: 'Gofile: guest rate limit reached, trying later',
-  });
+  // JD: HOST_RATE_LIMIT; the guest limit is per IP, so all gofile downloads wait.
+  throw new HosterLimitError(
+    {
+      de: 'Gofile: Rate-Limit für Gäste erreicht, später erneut',
+      en: 'Gofile: guest rate limit reached, trying later',
+    },
+    5 * 60,
+  );
 }
 
 function headers(token: string, lang = ''): Record<string, string> {

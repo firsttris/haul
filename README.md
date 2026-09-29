@@ -209,7 +209,9 @@ fünf Zeilen Konfiguration. Mit `free: true` lädt die Basis ohne Account wie JD
 `freeHooks` (Formulare, Countdown, Direktlink) und `headers` sie an (siehe `plugins/datanodes`).
 Verlangt ein Hoster eine Wartezeit (Free-Limit), meldet das Plugin sie mit
 `new TemporaryError(meldung, sekunden)`; der Core versucht es genau dann erneut, ohne dass es als
-Fehlversuch zählt.
+Fehlversuch zählt. Gilt die Sperre für den ganzen Hoster (IP-Limit, Free-Slots belegt; JD
+`ERROR_IP_BLOCKED`), wirft das Plugin `new HosterLimitError(meldung, sekunden)`: dann warten alle
+Downloads dieses Hosters, statt dass jeder einzeln gegen das Limit läuft.
 
 Plugins werden mit `pnpm build:plugins` nach `plugins/dist/<name>.js` gebaut. Eigene oder
 aktualisierte Plugins nach `/config/plugins/` legen und unter *Accounts & Plugins* auf

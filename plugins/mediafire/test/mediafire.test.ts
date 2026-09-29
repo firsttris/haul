@@ -168,6 +168,7 @@ describe('mediafire resolve', () => {
   it('reports the IP limit when every User-Agent is blocked', async () => {
     const ctx = fakeCtx({ ...info, 'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: 'var limitReachedTTL = 600;' } });
     await expect(plugin.resolve(LINK, ctx)).rejects.toThrow(/Limit dieser IP/);
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulWait: 600, haulScope: 'hoster' });
   });
 
   it('maps errno pages and temporary pages', async () => {

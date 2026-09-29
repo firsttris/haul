@@ -166,6 +166,8 @@ pub struct PluginError {
     pub message: String,
     /// Seconds until the next try, when the hoster said (`TemporaryError(msg, seconds)`).
     pub wait_secs: Option<u64>,
+    /// The wait holds for every download from this hoster (`HosterLimitError`).
+    pub hoster_wide: bool,
 }
 
 impl PluginError {
@@ -174,6 +176,7 @@ impl PluginError {
             kind: ErrorKind::Fatal,
             message: message.into(),
             wait_secs: None,
+            hoster_wide: false,
         }
     }
 }
@@ -185,6 +188,7 @@ struct InvokeResult {
     kind: Option<ErrorKind>,
     message: Option<String>,
     wait: Option<f64>,
+    scope: Option<String>,
 }
 
 async fn new_context() -> Result<(AsyncRuntime, AsyncContext)> {
@@ -266,6 +270,7 @@ pub async fn invoke_with(
                         kind: ErrorKind::Temporary,
                         message: crate::tr!("Plugin-Zeitlimit überschritten", "plugin timed out"),
                         wait_secs: None,
+                        hoster_wide: false,
                     });
                 }
             }
@@ -288,6 +293,7 @@ pub async fn invoke_with(
                 .wait
                 .filter(|w| *w > 0.0)
                 .map(|w| (w.ceil() as u64).min(86_400)),
+            hoster_wide: res.scope.as_deref() == Some("hoster"),
         })
     }
 }
