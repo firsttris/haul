@@ -7,6 +7,18 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 
 - direkte HTTP-Links
 - ddownload mit Premium-Account (Web-Login oder API-Key)
+- Accounts wie bei JDownloader (unter *Accounts & Plugins*):
+
+  | Hoster | Anmeldung | Premium |
+  |---|---|---|
+  | ddownload, Datanodes | Benutzer/Passwort oder xfss-Cookie | Premium-Weg der Seite |
+  | Send | Benutzer/Passwort, xfss-Cookie oder API-Key (Benutzer leer) | API nur mit Direktlink-Traffic |
+  | 1fichier | API-Key aus den 1fichier-Einstellungen | API, ohne Wartezeiten |
+  | Gofile | API-Token aus dem Profil | Links mit dem Account-Token |
+  | Mediafire | E-Mail und Passwort | Direktlink über die API |
+  | MEGA | E-Mail und Passwort (ohne Zwei-Faktor) | Transfer-Kontingent des Pro-Accounts |
+
+  Google Drive kennt kein Premium; ein Google-Login (nur per Browser-Cookies) fehlt noch.
 - Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
   Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
