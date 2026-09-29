@@ -641,4 +641,28 @@ mod replace_tests {
         assert_eq!((r.version.as_str(), r.newer), ("8", true));
         assert_eq!(r.file, builtin.join("x.js"));
     }
+
+    /// Every built plugin loads in the real host: valid meta, and link patterns the Rust regex
+    /// engine accepts (no lookarounds or back references). Skipped if the plugins are not built.
+    #[tokio::test]
+    async fn all_built_plugins_load() {
+        let dist = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/dist"));
+        if !dist.exists() {
+            eprintln!("plugins/dist not built, skipping");
+            return;
+        }
+        let pm = PluginManager::new(vec![(dist, true)], None);
+        pm.reload().await;
+        assert!(pm.errors().is_empty(), "{:?}", pm.errors());
+        let ids: Vec<String> = pm.list().iter().map(|p| p.id.clone()).collect();
+        for id in ["1fichier", "ddownload", "gofile", "mediafire", "send"] {
+            assert!(ids.iter().any(|i| i == id), "{id} missing in {ids:?}");
+        }
+        let one = pm.find_for("https://1fichier.com/?abc123def456").unwrap();
+        assert!(one.serial && one.has_crawl && !one.account_required);
+        assert_eq!(
+            pm.find_for("https://send.cm/d/abcdefghijkl").unwrap().id,
+            "send"
+        );
+    }
 }

@@ -23,6 +23,12 @@ importers:
 
   packages/plugin-sdk: {}
 
+  plugins/1fichier:
+    dependencies:
+      '@haul/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/ddownload:
     dependencies:
       '@haul/plugin-sdk':

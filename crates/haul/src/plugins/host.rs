@@ -478,6 +478,63 @@ mod bundled {
         assert_eq!(err.kind, ErrorKind::Account, "{}", err.message);
     }
 
+    /// The 1fichier bundle's error handling in QuickJS: waits with their seconds, the link.
+    #[tokio::test]
+    async fn onefichier_bundle_in_quickjs() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugins/dist/1fichier.js"
+        );
+        let Ok(code) = std::fs::read_to_string(path) else {
+            eprintln!("plugins/dist/1fichier.js not built, skipping");
+            return;
+        };
+        let code = format!(
+            r#"{code}
+            __plugin.default.resolve = async (html) => {{
+                const res = {{ status: 200, url: "https://1fichier.com/?x", body: html, file: false, headers: {{}} }};
+                try {{ __plugin.checkErrors(res); }} catch (e) {{ return {{ url: e.haulKind + ":" + (e.haulWait || 0) }}; }}
+                return {{ url: "link:" + __plugin.downloadLink(html) }};
+            }};"#
+        );
+        let run = |html: &str| {
+            let clients = HttpClients {
+                follow: Client::new(),
+                no_follow: Client::new(),
+                jar: None,
+            };
+            invoke(
+                "1fichier",
+                &code,
+                "resolve",
+                serde_json::json!([html]),
+                serde_json::json!({}),
+                clients,
+            )
+        };
+        let url = |v: serde_json::Value| v["url"].as_str().unwrap().to_string();
+        assert_eq!(
+            url(run("<p> You must wait 7 minutes</p>").await.unwrap()),
+            "temporary:420"
+        );
+        assert_eq!(
+            url(run("<b> IP Locked</b>").await.unwrap()),
+            "temporary:3600"
+        );
+        assert_eq!(
+            url(run("<p> File not found !</p>").await.unwrap()),
+            "offline:0"
+        );
+        assert_eq!(
+            url(
+                run(r#"<a href="https://a-1.1fichier.com/c1">Click here to download</a>"#)
+                    .await
+                    .unwrap()
+            ),
+            "link:https://a-1.1fichier.com/c1"
+        );
+    }
+
     /// The gofile bundle declares `crawl`; `ctx.hash.sha256` works in QuickJS.
     #[tokio::test]
     async fn gofile_bundle_crawls_and_hashes() {

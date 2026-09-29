@@ -383,3 +383,29 @@ export function base64Decode(input: string): string {
   }
   return out;
 }
+
+/**
+ * Small values a plugin keeps between calls (each call starts with a fresh JS context). They
+ * live in the cookie jar under a path no real request uses, so they never go to the site.
+ */
+export const memo = {
+  get(ctx: Ctx, site: string, key: string): string | undefined {
+    const origin = /^https?:\/\/[^/]+/i.exec(site)?.[0] ?? site;
+    return new RegExp(`(?:^|;\\s*)haul_${key}=([^;]*)`).exec(ctx.cookies.get(`${origin}/__haul`))?.[1];
+  },
+  set(ctx: Ctx, site: string, key: string, value: string, maxAgeSeconds = 86400): void {
+    const origin = /^https?:\/\/[^/]+/i.exec(site)?.[0] ?? site;
+    ctx.cookies.set(`${origin}/__haul`, `haul_${key}=${value}; Path=/__haul; Max-Age=${maxAgeSeconds}`);
+  },
+};
+
+/**
+ * Keeps at least `ms` between requests to a site, also across calls (JD's
+ * setRequestIntervalLimitGlobal). Call it before each request.
+ */
+export async function spaceRequests(ctx: Ctx, site: string, ms: number): Promise<void> {
+  const last = Number(memo.get(ctx, site, 'last') ?? 0);
+  const wait = last + ms - Date.now();
+  if (wait > 0) await ctx.wait(Math.min(wait, ms) / 1000);
+  memo.set(ctx, site, 'last', String(Date.now()), Math.ceil(ms / 1000) + 60);
+}

@@ -12,6 +12,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
 - Send (send.now, früher send.cm, tusfiles, userscloud) ohne Account über den XFS-Free-Weg wie bei
   JDownloader (Countdown, Text-Captcha), mit Account über den Premium-Weg
+- 1fichier (und Alias-Domains) ohne Account wie bei JDownloader: Name/Größe über `check_links.pl`,
+  Ordner über `?json=1`, Wartezeiten zwischen Downloads und bei fehlenden freien Slots werden
+  abgewartet, ohne als Fehlversuch zu zählen
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
@@ -133,6 +136,7 @@ plugins/ddownload   ddownload-Plugin
 plugins/gofile      Gofile-Plugin (mit Ordner-Crawler)
 plugins/mediafire   Mediafire-Plugin (mit Ordner-Crawler)
 plugins/send        Send-Plugin (XFS, free und premium)
+plugins/1fichier    1fichier-Plugin (mit Ordner-Crawler)
 ui                  Web-UI
 ```
 

@@ -16,7 +16,7 @@
  *   only an expired link lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
  */
-import { definePlugin, OfflineError, PluginError, TemporaryError } from '@haul/plugin-sdk';
+import { definePlugin, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://gofile.io';
@@ -98,17 +98,8 @@ function fileLink(code: string, item: Item, token: string): string {
   return link;
 }
 
-/**
- * JD's 500 ms request interval for gofile, across calls: the time of the last request is kept
- * in the jar under a path no real request uses, so it never goes to gofile.
- */
-const PACE_URL = `${SITE}/__haul_pace`;
-async function pace(ctx: Ctx) {
-  const last = Number(/haul_last=(\d+)/.exec(ctx.cookies.get(PACE_URL))?.[1] ?? 0);
-  const wait = last + 500 - Date.now();
-  if (wait > 0) await ctx.wait(Math.min(wait, 500) / 1000);
-  ctx.cookies.set(PACE_URL, `haul_last=${Date.now()}; Path=/__haul_pace; Max-Age=60`);
-}
+/** JD's 500 ms request interval for gofile (setRequestIntervalLimitGlobal). */
+const pace = (ctx: Ctx) => spaceRequests(ctx, API, 500);
 
 /**
  * One API request with gofile's two ways of saying "too fast": HTTP 429 (JD: wait 5 s, up to
@@ -156,9 +147,9 @@ function websiteToken(ctx: Ctx, token: string, v: WtVariant): string {
   return ctx.hash.sha256(`${UA}::${v.lang}::${token}::${block}::${v.salt}`);
 }
 
-/** The variant that worked last, kept in the jar like the pace (not sent to gofile). */
+/** The variant that worked last (kept with `memo`, never sent to gofile). */
 function variantOrder(ctx: Ctx): WtVariant[] {
-  const last = Number(/haul_wt=(\d+)/.exec(ctx.cookies.get(PACE_URL))?.[1] ?? 0);
+  const last = Number(memo.get(ctx, SITE, 'wt') ?? 0);
   const first = WT_VARIANTS[last] ?? WT_VARIANTS[0];
   return [first, ...WT_VARIANTS.filter((v) => v !== first)];
 }
@@ -192,7 +183,7 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
     );
     // A wrong token is answered with error-notPremium (gofile-dl); try the other variant.
     if (r.status !== 'error-notPremium') {
-      ctx.cookies.set(PACE_URL, `haul_wt=${WT_VARIANTS.indexOf(v)}; Path=/__haul_pace; Max-Age=86400`);
+      memo.set(ctx, SITE, 'wt', String(WT_VARIANTS.indexOf(v)));
       break;
     }
   }
