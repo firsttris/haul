@@ -19,8 +19,15 @@
  *   no free slots ("temporarily limited due to high demand", JD waits 15 min), daily limit
  *   ("The free offer is intended to …", 1 h). pyLoad also waits out "Free download in ⏳ N".
  * - Requests at least 2.5 s apart (JD default, "1 request per second is also fine" says the admin).
+ * - Premium (JD fetchAccountInfoAPI / getDllinkPremiumAPI): the API key from the 1fichier
+ *   settings as Bearer token. `POST api.1fichier.com/v1/user/info.cgi` gives the offer (0 free,
+ *   1 premium, 2 access, 3 gold) and `subscription_end`; it may only be called every ~5 minutes
+ *   ("Flood detected", downloads still work). `download/get_token.cgi` with `{url, pass, no_ssl}`
+ *   gives the download link. JD's default: 3 connections per file (MaxPremiumChunks).
  */
 import {
+  AccountError,
+  bilingual,
   decodeHtml,
   definePlugin,
   HosterLimitError,
@@ -34,7 +41,7 @@ import {
   withPassword,
   WRONG_PASSWORD,
 } from '@haul/plugin-sdk';
-import type { Ctx, CrawledFile, HttpOptions, HttpResponse } from '@haul/plugin-sdk';
+import type { AccountInfo, Ctx, CrawledFile, HttpOptions, HttpResponse, Resolved } from '@haul/plugin-sdk';
 
 /** JD: getPluginDomains. */
 const DOMAINS = [
@@ -219,6 +226,112 @@ export function folderRows(html: string): CrawledFile[] {
   return out;
 }
 
+// ---- premium API (JD OneFichierCom) -----------------------------------------------------
+
+const API = 'https://api.1fichier.com/v1';
+
+/** JD looksLikeValidAPIKeySTATIC. */
+export const looksLikeApiKey = (s: string) => /^(?:[A-Za-z0-9\-_=]{32}|[A-Za-z0-9\-_=]{40})$/.test(s.trim());
+
+/** JD isAPIErrorFloodDetected: account info only every ~5 minutes, downloads are not affected. */
+const isFlood = (msg: string) => /Flood detected: (?:User|User APK|IP) Locked/i.test(msg);
+/** JD isAPIErrorPassword. */
+const isPasswordError = (msg: string) => /(?:Invalid password\.|Password not provided\.).*Resource not allowed/i.test(msg);
+
+async function apiCall(ctx: Ctx, path: string, body: Record<string, unknown> | ''): Promise<Record<string, unknown>> {
+  const key = ctx.account.get()!.secret.trim();
+  const res = await ctx.http.post(`${API}${path}`, body === '' ? '' : JSON.stringify(body), {
+    // JD prepareBrowserAPI: its own User-Agent, JSON and the key as Bearer token.
+    headers: { 'User-Agent': 'JDownloader', 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    timeoutMs: 180_000,
+  });
+  if (res.status === 503) throw new TemporaryError({ de: '1fichier-API: Wartung (503)', en: '1fichier API: maintenance (503)' }, 5 * 60);
+  try {
+    return res.json();
+  } catch {
+    throw new TemporaryError({ de: `1fichier-API: unerwartete Antwort (HTTP ${res.status})`, en: `1fichier API: unexpected answer (HTTP ${res.status})` });
+  }
+}
+
+/** JD handleErrorsAPI, for downloads; `null` = password needed or wrong. */
+function apiErrors(r: Record<string, unknown>, during: 'account' | 'download'): 'password' | null {
+  if (String(r.status ?? '').toUpperCase() !== 'KO') return null;
+  const msg = String(r.message ?? '');
+  const n = '1fichier';
+  if (!msg) throw new TemporaryError({ de: `${n}-API: unbekannter Fehler`, en: `${n} API: unknown error` }, 5 * 60);
+  if (isFlood(msg)) {
+    throw new AccountError({ de: `${n}: API-Sperre wegen zu vieler Anfragen, in 5 min erneut`, en: `${n}: API flood protection, again in 5 min` });
+  }
+  if (/Not authenticated #\d+|No such user\s*#\d+/i.test(msg)) {
+    throw new AccountError({ de: `${n}: API-Key ungültig`, en: `${n}: invalid API key` });
+  }
+  if (/Owner locked\s*#\d+/i.test(msg)) throw new AccountError({ de: `${n}: Account gesperrt (${msg})`, en: `${n}: account banned (${msg})` });
+  if (/IP Locked\s*#\d+/i.test(msg)) throw new HosterLimitError(`${n}: ${msg}`, 60 * 60);
+  if (/Must be a customer/i.test(msg)) {
+    throw new AccountError({ de: `${n}: die API gibt es nur für Premium-Kunden`, en: `${n}: the API is for premium customers only` });
+  }
+  if (isPasswordError(msg)) return 'password';
+  if (/Resource not allowed #\d+/i.test(msg)) {
+    throw new PluginError('fatal', { de: `${n}: Zugriff vom Besitzer beschränkt`, en: `${n}: access restricted by the owner` });
+  }
+  if (/Resource not found #\d+/i.test(msg)) throw new OfflineError();
+  if (/Only \d+ locations? allowed at a time\s*#\d+/i.test(msg)) throw new TemporaryError(`${n}: ${msg}`, 5 * 60);
+  if (/professional equipment, must have CDN/i.test(msg)) {
+    throw new PluginError('fatal', {
+      de: `${n}: Server-, VPN- oder Proxy-IP erkannt; dafür braucht der Account CDN-Guthaben`,
+      en: `${n}: server, VPN or proxy IP detected; the account needs CDN credits for that`,
+    });
+  }
+  if (during === 'account') throw new AccountError(`${n}: ${msg}`);
+  throw new TemporaryError(`${n}: ${msg}`, 5 * 60);
+}
+
+/** JD fetchAccountInfoAPI. */
+async function accountInfo(ctx: Ctx): Promise<AccountInfo> {
+  const key = ctx.account.get()?.secret ?? '';
+  if (!looksLikeApiKey(key)) {
+    throw new AccountError({
+      de: '1fichier: bitte den API-Key eintragen (1fichier.com → Einstellungen → API-Key), nicht das Passwort',
+      en: '1fichier: please enter the API key (1fichier.com → settings → API key), not the password',
+    });
+  }
+  const r = await apiCall(ctx, '/user/info.cgi', '');
+  if (isFlood(String(r.message ?? ''))) {
+    // JD: the account is fine, the details just cannot be read right now.
+    return {
+      valid: true,
+      message: bilingual('Account-Infos gerade gesperrt (Flood-Schutz), Downloads gehen trotzdem', 'Account info locked right now (flood protection), downloads still work'),
+    };
+  }
+  apiErrors(r, 'account');
+  const offer = Number(r.offer ?? 0);
+  if (offer === 0) return { valid: true, premium: false, message: 'Free' };
+  // JD: "yyyy-MM-dd HH:mm:ss" without a time zone (an hour does not matter here).
+  const end = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(String(r.subscription_end ?? ''));
+  const validUntil = end ? Date.UTC(+end[1], +end[2] - 1, +end[3], +end[4], +end[5], +end[6]) : undefined;
+  const kind = ({ 1: 'Premium', 2: 'Access', 3: 'Gold' } as Record<number, string>)[offer] ?? 'Premium';
+  return { valid: true, premium: validUntil === undefined || validUntil > Date.now(), validUntil, message: kind };
+}
+
+/** JD getDllinkPremiumAPI; the password only when the file asks for it. */
+async function resolvePremium(ctx: Ctx, url: string): Promise<Resolved> {
+  const token = async (pass?: string) => {
+    const r = await apiCall(ctx, '/download/get_token.cgi', { url, pass: pass ?? null, no_ssl: 0 });
+    return { r, problem: apiErrors(r, 'download') };
+  };
+  let { r, problem } = await token();
+  if (problem === 'password') {
+    r = await withPassword(ctx, '1fichier', async (password) => {
+      const t = await token(password);
+      return t.problem === 'password' ? WRONG_PASSWORD : t.r;
+    });
+  }
+  const dl = typeof r.url === 'string' ? r.url : '';
+  if (!dl) throw new TemporaryError({ de: '1fichier-API: kein Download-Link', en: '1fichier API: no download link' }, 5 * 60);
+  // JD getMaxChunks: MaxPremiumChunks, default 3.
+  return { url: dl, maxConnections: 3 };
+}
+
 /** JD: the link on the page after the form. */
 export function downloadLink(html: string): string | undefined {
   const a = /<a href="([^"]+)"[^>]*>\s*(?:Click here to|Start your) download/i.exec(html)?.[1];
@@ -230,11 +343,23 @@ export function downloadLink(html: string): string | undefined {
 export default definePlugin({
   id: '1fichier',
   name: '1fichier',
-  version: 2,
+  version: 3,
   matches: [FILE, OLD_FILE, FOLDER],
   accountRequired: false,
   // Free: one download at a time and requests spaced (JD); calls run one after another.
   serial: true,
+  account: {
+    userLabel: { de: 'E-Mail (optional)', en: 'E-mail (optional)' },
+    secretLabel: 'API-Key',
+    help: {
+      de: 'Premium über die offizielle API wie bei JDownloader: den API-Key unter 1fichier.com → Einstellungen („Parameters“) → API-Key erzeugen und hier eintragen.',
+      en: 'Premium through the official API like JDownloader: create the API key at 1fichier.com → settings ("Parameters") → API key and enter it here.',
+    },
+  },
+
+  async checkAccount(ctx) {
+    return accountInfo(ctx);
+  },
 
   async crawl(link, ctx) {
     const folder = FOLDER.exec(link);
@@ -284,6 +409,7 @@ export default definePlugin({
 
   async resolve(link, ctx) {
     const url = mustFileUrl(link);
+    if (ctx.account.get()) return resolvePremium(ctx, url);
     const page = `${url}&lg=en`;
     let res = await request(ctx, 'GET', page);
     for (let round = 0; ; round++) {

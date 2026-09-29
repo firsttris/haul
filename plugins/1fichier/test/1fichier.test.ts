@@ -204,3 +204,62 @@ describe('1fichier download', () => {
     expect(ctx.savedPassword).toBe('pw');
   });
 });
+
+describe('1fichier premium (JD API mode)', () => {
+  const KEY = 'AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+  const acc = { id: 1, user: '', secret: KEY };
+  const json = (body: object) => ({ body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
+
+  it('reads offer and subscription end with the key as Bearer token', async () => {
+    const ctx = fakeCtx(
+      {
+        'POST https://api.1fichier.com/v1/user/info.cgi': (req) => {
+          expect(req.headers).toMatchObject({ Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' });
+          return json({ email: 'a@b.c', offer: 1, subscription_end: '2099-01-31 12:00:00' });
+        },
+      },
+      acc,
+    );
+    expect(await plugin.checkAccount!(ctx)).toEqual({ valid: true, premium: true, validUntil: Date.UTC(2099, 0, 31, 12, 0, 0), message: 'Premium' });
+  });
+
+  it('refuses a password instead of an API key, and free accounts', async () => {
+    await expect(plugin.checkAccount!(fakeCtx({}, { id: 1, user: 'a@b.c', secret: 'geheim' }))).rejects.toMatchObject({ haulKind: 'account' });
+    const free = fakeCtx({ 'POST https://api.1fichier.com/v1/user/info.cgi': json({ offer: 0 }) }, acc);
+    expect(await plugin.checkAccount!(free)).toMatchObject({ valid: true, premium: false });
+    const bad = fakeCtx({ 'POST https://api.1fichier.com/v1/user/info.cgi': json({ status: 'KO', message: 'No such user #401' }) }, acc);
+    await expect(plugin.checkAccount!(bad)).rejects.toMatchObject({ haulKind: 'account' });
+  });
+
+  it('keeps the account when the info call is flood-protected (JD)', async () => {
+    const ctx = fakeCtx({ 'POST https://api.1fichier.com/v1/user/info.cgi': json({ status: 'KO', message: 'Flood detected: IP Locked #38' }) }, acc);
+    expect(await plugin.checkAccount!(ctx)).toMatchObject({ valid: true });
+  });
+
+  it('gets the download link from get_token.cgi, asking for a password when needed', async () => {
+    const sent: unknown[] = [];
+    const ctx = fakeCtx(
+      {
+        'POST https://api.1fichier.com/v1/download/get_token.cgi': (req) => {
+          const body = JSON.parse(req.body!);
+          sent.push(body.pass);
+          expect(body).toMatchObject({ url: LINK, no_ssl: 0 });
+          if (body.pass !== 'pw') return json({ status: 'KO', message: 'Invalid password. Resource not allowed #403' });
+          return json({ url: 'https://a-7.1fichier.com/p123' });
+        },
+      },
+      acc,
+    );
+    ctx.passwordAnswers = ['pw'];
+    expect(await plugin.resolve(LINK, ctx)).toEqual({ url: 'https://a-7.1fichier.com/p123', maxConnections: 3 });
+    expect(sent).toEqual([null, 'pw']);
+  });
+
+  it('maps JD’s API errors', async () => {
+    const at = (message: string) => fakeCtx({ 'POST https://api.1fichier.com/v1/download/get_token.cgi': json({ status: 'KO', message }) }, acc);
+    await expect(plugin.resolve(LINK, at('Resource not found #469'))).rejects.toMatchObject({ haulKind: 'offline' });
+    await expect(plugin.resolve(LINK, at('Must be a customer (Premium, Access) #200'))).rejects.toMatchObject({ haulKind: 'account' });
+    await expect(plugin.resolve(LINK, at('IP Locked #12'))).rejects.toMatchObject({ haulWait: 3600, haulScope: 'hoster' });
+    await expect(plugin.resolve(LINK, at('Only 3 locations allowed at a time #37'))).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 300 });
+  });
+});
