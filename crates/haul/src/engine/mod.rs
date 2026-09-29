@@ -873,6 +873,53 @@ impl Engine {
         Ok(())
     }
 
+    /// Starts only the checked downloads of a Linksammler package. They move into a new package
+    /// with the same name, folder and archive passwords; the unchecked ones stay behind in the
+    /// Linksammler. All of them checked (or a package already started): the whole package.
+    /// Returns the package that was started.
+    pub async fn start_selected(&self, id: i64, only: &[i64]) -> Result<i64> {
+        let pkg = db::get_package(&self.db, id).await?.ok_or_else(|| {
+            anyhow::anyhow!(crate::tr!("Paket nicht gefunden", "Package not found"))
+        })?;
+        let all = self.package_ids(id).await?;
+        let chosen: Vec<i64> = all.iter().copied().filter(|d| only.contains(d)).collect();
+        if chosen.is_empty() {
+            anyhow::bail!(crate::tr!("keine Datei ausgewählt", "no file selected"));
+        }
+        if chosen.len() == all.len() || !pkg.collector {
+            self.start_package(id).await?;
+            return Ok(id);
+        }
+        let mut tx = self.db.begin().await?;
+        let new_id = sqlx::query(
+            "INSERT INTO packages(name, target_dir, source, source_page, passwords, collector, created_at)
+             SELECT name, target_dir, source, source_page, passwords, 0, ? FROM packages WHERE id = ?",
+        )
+        .bind(now_ms())
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .last_insert_rowid();
+        for d in &chosen {
+            sqlx::query("UPDATE downloads SET package_id = ? WHERE id = ? AND package_id = ?")
+                .bind(new_id)
+                .bind(d)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query("UPDATE downloads SET status = ? WHERE package_id = ? AND status = ? AND online != 'offline'")
+            .bind(status::QUEUED)
+            .bind(new_id)
+            .bind(status::COLLECTED)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        self.events.changed(Topic::Downloads);
+        self.wake();
+        Ok(new_id)
+    }
+
     pub async fn pause(&self, ids: &[i64]) -> Result<()> {
         for &id in ids {
             let res =
@@ -1294,6 +1341,57 @@ mod engine_tests {
         let d = wait_for(&e, id, status::FINISHED).await;
         assert_eq!(d.name, "Movie.2026.part1.rar");
         assert!(dir.path().join("done/Crypt/Movie.2026.part1.rar").exists());
+        e.shutdown().await;
+    }
+
+    /// Only the checked files of a Linksammler package start: they move into a new package
+    /// with the same name, folder and archive passwords; the others stay in the Linksammler.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn checked_files_start_the_rest_stays_collected() {
+        let base = range_server(Arc::new(b"DATA".to_vec()), Arc::default()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin?a {base}/file.bin?b {base}/file.bin?c"),
+                package_name: Some("CNL".into()),
+                passwords: Some("pw".into()),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids = e.package_ids(pkg).await.unwrap();
+        assert!(e.start_selected(pkg, &[]).await.is_err());
+        let started = e.start_selected(pkg, &[ids[1], 999_999]).await.unwrap();
+        assert_ne!(started, pkg);
+        wait_for(&e, ids[1], status::FINISHED).await;
+        let new = db::get_package(&e.db, started).await.unwrap().unwrap();
+        let old = db::get_package(&e.db, pkg).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                new.name.as_str(),
+                new.target_dir.as_str(),
+                new.passwords.as_deref(),
+                new.collector
+            ),
+            ("CNL", old.target_dir.as_str(), Some("pw"), false)
+        );
+        assert!(old.collector);
+        assert_eq!(e.package_ids(pkg).await.unwrap(), [ids[0], ids[2]]);
+        for id in [ids[0], ids[2]] {
+            let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+            assert_eq!(d.status, status::COLLECTED);
+        }
+        // All checked: the package itself starts.
+        assert_eq!(e.start_selected(pkg, &[ids[0], ids[2]]).await.unwrap(), pkg);
+        assert!(
+            !db::get_package(&e.db, pkg)
+                .await
+                .unwrap()
+                .unwrap()
+                .collector
+        );
         e.shutdown().await;
     }
 

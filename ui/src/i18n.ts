@@ -195,6 +195,14 @@ const de = {
     discard: 'Verwerfen',
     start: 'Starten',
     startN: (n: number) => `${n} starten`,
+    startSome: (n: number, total: number) => `${n} von ${total} starten`,
+    startChecked: 'Angehakte starten',
+    checkAll: 'Alle Dateien',
+    checkedOf: (n: number, total: number) => `${n} von ${total} angehakt`,
+    include: (name: string) => `${name} herunterladen`,
+    partialArchive: (name: string, n: number, total: number) =>
+      `${name}: nur ${n} von ${total} Teilen angehakt. So lässt sich das Archiv nicht entpacken.`,
+    checkAllParts: 'Alle Teile anhaken',
   },
   accounts: {
     title: 'Accounts & Plugins',
@@ -515,6 +523,13 @@ const en: Messages = {
     discard: 'Discard',
     start: 'Start',
     startN: (n) => `Start ${n}`,
+    startSome: (n, total) => `Start ${n} of ${total}`,
+    startChecked: 'Start checked',
+    checkAll: 'All files',
+    checkedOf: (n, total) => `${n} of ${total} checked`,
+    include: (name) => `Download ${name}`,
+    partialArchive: (name, n, total) => `${name}: only ${n} of ${total} parts checked. The archive cannot be extracted like this.`,
+    checkAllParts: 'Check all parts',
   },
   accounts: {
     title: 'Accounts & plugins',

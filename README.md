@@ -43,7 +43,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
-- Linksammler mit Online-Check, Paketname, Zielordner, Download-Passwort und Archiv-Passwörtern
+- Linksammler mit Online-Check, Paketname, Zielordner, Download-Passwort und Archiv-Passwörtern;
+  jede Datei hat ein Häkchen (anfangs alle an, Shift-Klick für Bereiche), gestartet werden nur die
+  angehakten, der Rest bleibt im Linksammler. Teilweise angehakte mehrteilige Archive meldet Haul
 - passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
   ddownload, Datanodes): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
@@ -326,7 +328,7 @@ Alle Endpunkte unter `/api`, JSON. Authentifizierung per Session-Cookie (Web-UI)
 | `POST` | `/links` | `{ links, packageName?, targetDir?, passwords?, start }` |
 | `GET` | `/packages?view=queue\|collector` | Pakete mit Downloads |
 | `PATCH`/`DELETE` | `/packages/{id}` | umbenennen, Zielordner, Passwörter / löschen |
-| `POST` | `/packages/{id}/start\|pause\|resume\|check\|extract` | |
+| `POST` | `/packages/{id}/start\|pause\|resume\|check\|extract` | `start` optional mit `{ downloadIds }`: nur diese Dateien, der Rest bleibt im Linksammler |
 | `POST`/`DELETE` | `/downloads/{id}/pause\|resume`, `/downloads/{id}` | |
 | `POST` | `/downloads/pause-all\|resume-all\|clear-finished` | |
 | `GET` | `/events` | SSE: `changed` und `progress` |

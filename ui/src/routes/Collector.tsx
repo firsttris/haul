@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { api, post, type Package } from '../api';
 import { PageHeader, usePackages } from '../components/Layout';
 import { IconPlay, IconRefresh, IconTrash } from '../components/icons';
+import { partialArchives } from '../components/archive';
 import { describe, toneColor } from '../components/status';
 import { bytes } from '../format';
 import { localize, useT } from '../i18n';
@@ -96,10 +97,22 @@ function AddLinksForm() {
   );
 }
 
-function CollectedPackage({ pkg }: { pkg: Package }) {
+/** Unchecked files per package: everything starts checked (like JD's Linkgrabber), so
+ *  "start" without touching a checkbox loads the whole package. */
+type Unchecked = Map<number, Set<number>>;
+
+/** Starts the checked files of a package; all checked: the whole package. */
+function startPackage(pkg: Package, unchecked: Set<number>) {
+  const checked = pkg.downloads.filter((d) => !unchecked.has(d.id));
+  if (checked.length === pkg.downloads.length) return post(`/packages/${pkg.id}/start`);
+  return post(`/packages/${pkg.id}/start`, { downloadIds: checked.map((d) => d.id) });
+}
+
+function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unchecked: Set<number>; setUnchecked: (s: Set<number>) => void }) {
   const t = useT();
   const [name, setName] = useState(pkg.name);
   const [targetDir, setTargetDir] = useState(pkg.targetDir);
+  const last = useRef<number | null>(null);
   useEffect(() => {
     setName(pkg.name);
     setTargetDir(pkg.targetDir);
@@ -107,11 +120,32 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
 
   const save = useMutation({ mutationFn: (body: object) => api(`/packages/${pkg.id}`, { method: 'PATCH', body }) });
   const act = useMutation({ mutationFn: (path: string) => post(path) });
+  const start = useMutation({ mutationFn: () => startPackage(pkg, unchecked), onSuccess: () => setUnchecked(new Set()) });
   const remove = useMutation({ mutationFn: () => api(`/packages/${pkg.id}`, { method: 'DELETE' }) });
 
   const total = pkg.downloads.reduce((n, d) => n + (d.size ?? 0), 0);
   const offline = pkg.downloads.filter((d) => d.online === 'offline').length;
-  const startable = pkg.downloads.length - offline;
+  const checked = pkg.downloads.filter((d) => !unchecked.has(d.id));
+  const allChecked = checked.length === pkg.downloads.length;
+  const startable = checked.filter((d) => d.online !== 'offline').length;
+  const online = pkg.downloads.length - offline;
+  const partial = partialArchives(pkg.downloads, unchecked);
+
+  /** Click (or shift-click for the range since the last click) flips the files' checkboxes. */
+  function toggle(i: number, range: boolean) {
+    const on = unchecked.has(pkg.downloads[i].id);
+    const from = range && last.current !== null ? Math.min(last.current, i) : i;
+    const to = range && last.current !== null ? Math.max(last.current, i) : i;
+    const next = new Set(unchecked);
+    for (let k = from; k <= to; k++) {
+      const id = pkg.downloads[k]?.id;
+      if (id === undefined) continue;
+      if (on) next.delete(id);
+      else next.add(id);
+    }
+    last.current = i;
+    setUnchecked(next);
+  }
 
   return (
     <section className="card" aria-label={t.collector.packageAria(pkg.name)}>
@@ -151,10 +185,44 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
         {offline > 0 && <span style={{ color: 'var(--err)' }}> · {t.collector.offline(offline)}</span>}
       </div>
       <div className="list">
-        {pkg.downloads.map((d) => {
+        {pkg.downloads.length > 1 && (
+          <label className="list-row pick-all">
+            <input
+              type="checkbox"
+              className="row-check"
+              checked={allChecked}
+              ref={(el) => {
+                if (el) el.indeterminate = checked.length > 0 && !allChecked;
+              }}
+              onChange={() => {
+                last.current = null;
+                setUnchecked(allChecked ? new Set(pkg.downloads.map((d) => d.id)) : new Set());
+              }}
+            />
+            <span className="grow">
+              <span className="title">{t.collector.checkAll}</span>
+            </span>
+            <span className="subtitle" style={{ fontSize: 13 }}>
+              {t.collector.checkedOf(checked.length, pkg.downloads.length)}
+            </span>
+          </label>
+        )}
+        {pkg.downloads.map((d, i) => {
           const s = describe(d, t);
+          const on = !unchecked.has(d.id);
           return (
-            <div className="list-row" key={d.id}>
+            <div className={`list-row pick${on ? '' : ' unchecked'}`} key={d.id} onClick={(e) => toggle(i, e.shiftKey)}>
+              <input
+                type="checkbox"
+                className="row-check"
+                aria-label={t.collector.include(d.name)}
+                checked={on}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(i, e.shiftKey);
+                }}
+                onChange={() => {}}
+              />
               <div className="grow">
                 <span className="cell-name">{d.name}</span>
                 <span className="sub mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -167,13 +235,38 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
                 <span className="dot" style={{ background: toneColor[s.tone].color }} />
                 <span>{s.label}</span>
               </div>
-              <button type="button" className="icon-btn" aria-label={t.common.remove(d.name)} onClick={() => api(`/downloads/${d.id}`, { method: 'DELETE' })}>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={t.common.remove(d.name)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  api(`/downloads/${d.id}`, { method: 'DELETE' });
+                }}
+              >
                 <IconTrash size={16} />
               </button>
             </div>
           );
         })}
       </div>
+      {partial.map((a) => (
+        <div className="notice" role="status" key={a.label}>
+          {t.collector.partialArchive(a.label, a.checked, a.total)}{' '}
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => {
+              const next = new Set(unchecked);
+              a.ids.forEach((id) => next.delete(id));
+              setUnchecked(next);
+            }}
+          >
+            {t.collector.checkAllParts}
+          </button>
+        </div>
+      ))}
+      {start.error && <div className="notice" role="alert">{localize(start.error.message)}</div>}
       <div className="toolbar">
         <button type="button" className="btn small" onClick={() => act.mutate(`/packages/${pkg.id}/check`)}>
           <IconRefresh size={16} />
@@ -184,9 +277,9 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
           {t.collector.discard}
         </button>
         <div className="spacer" />
-        <button type="button" className="btn primary small" disabled={startable === 0} onClick={() => act.mutate(`/packages/${pkg.id}/start`)}>
+        <button type="button" className="btn primary small" disabled={startable === 0 || start.isPending} onClick={() => start.mutate()}>
           <IconPlay size={16} />
-          {offline > 0 ? t.collector.startN(startable) : t.collector.start}
+          {!allChecked ? t.collector.startSome(startable, online) : offline > 0 ? t.collector.startN(startable) : t.collector.start}
         </button>
       </div>
     </section>
@@ -196,10 +289,17 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
 export function CollectorPage() {
   const t = useT();
   const { data: packages = [] } = usePackages('collector');
+  const [unchecked, setUnchecked] = useState<Unchecked>(new Map());
+  const uncheckedOf = (p: Package) => unchecked.get(p.id) ?? new Set<number>();
+  const someUnchecked = packages.some((p) => p.downloads.some((d) => uncheckedOf(p).has(d.id)));
   const startAll = useMutation({
     mutationFn: async () => {
-      for (const p of packages) await post(`/packages/${p.id}/start`);
+      for (const p of packages) {
+        if (p.downloads.every((d) => uncheckedOf(p).has(d.id))) continue;
+        await startPackage(p, uncheckedOf(p));
+      }
     },
+    onSuccess: () => setUnchecked(new Map()),
   });
   const links = packages.reduce((n, p) => n + p.downloads.length, 0);
   return (
@@ -209,16 +309,21 @@ export function CollectorPage() {
         subtitle={t.collector.subtitle(packages.length, links)}
       >
         {packages.length > 0 && (
-          <button type="button" className="btn primary" onClick={() => startAll.mutate()}>
+          <button type="button" className="btn primary" onClick={() => startAll.mutate()} disabled={startAll.isPending}>
             <IconPlay size={16} />
-            {t.collector.startAll}
+            {someUnchecked ? t.collector.startChecked : t.collector.startAll}
           </button>
         )}
       </PageHeader>
       <div className="content">
         <AddLinksForm />
         {packages.map((p) => (
-          <CollectedPackage key={p.id} pkg={p} />
+          <CollectedPackage
+            key={p.id}
+            pkg={p}
+            unchecked={uncheckedOf(p)}
+            setUnchecked={(s) => setUnchecked((m) => new Map(m).set(p.id, s))}
+          />
         ))}
       </div>
     </>

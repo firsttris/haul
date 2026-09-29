@@ -256,8 +256,27 @@ async fn delete_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn start_package(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    app.engine.start_package(id).await?;
+/// `downloadIds`: only these (the checked files in the Linksammler); without a body: all.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartBody {
+    download_ids: Vec<i64>,
+}
+
+async fn start_package(
+    State(app): State<Arc<App>>,
+    Path(id): Path<i64>,
+    body: Option<Json<StartBody>>,
+) -> ApiResult<StatusCode> {
+    match body {
+        Some(Json(b)) => {
+            app.engine
+                .start_selected(id, &b.download_ids)
+                .await
+                .map_err(bad)?;
+        }
+        None => app.engine.start_package(id).await?,
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

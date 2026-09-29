@@ -976,6 +976,17 @@ pre.code {
 .frow.selected {
   background: #1a1d21;
 }
+.list-row.pick {
+  cursor: pointer;
+  user-select: none;
+}
+.list-row.pick-all {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.list-row.unchecked > :not(.row-check) {
+  opacity: 0.45;
+}
 .row-check {
   width: 18px;
   height: 18px;
