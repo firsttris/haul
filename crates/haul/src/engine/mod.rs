@@ -1442,4 +1442,45 @@ mod engine_tests {
         assert!(written == data, "file content differs");
         e.shutdown().await;
     }
+
+    /// A wait the hoster demands (free download limit) schedules the next try exactly then and
+    /// does not use up an attempt, like JD's ERROR_IP_BLOCKED.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hoster_wait_schedules_the_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("limit.js"),
+            r#"var __plugin = { default: { id: "limit", version: 1, matches: [/https?:\/\/limit\.test\//],
+                async resolve() { const e = new Error("wait please"); e.haulKind = "temporary"; e.haulWait = 900; throw e; },
+            }};"#,
+        )
+        .unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://limit.test/f/1".into(),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        for _ in 0..100 {
+            let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+            if d.retry_at.is_some() {
+                let left = d.retry_at.unwrap() - now_ms();
+                assert!((890_000..=900_000).contains(&left), "{left}");
+                assert_eq!((d.status.as_str(), d.attempts), (status::QUEUED, 0));
+                assert_eq!(d.error.as_deref(), Some("wait please"));
+                e.shutdown().await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the wait was not recorded");
+    }
 }

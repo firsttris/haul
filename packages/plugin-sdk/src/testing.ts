@@ -21,6 +21,8 @@ export interface FakeCtx extends Ctx {
   requests: HttpRequest[];
   /** The fake cookie jar: one jar for all hosts, name → value, in insertion order. */
   jar: Map<string, string>;
+  /** Seconds of every `ctx.wait` (which returns at once). */
+  waits: number[];
 }
 
 function response(req: HttpRequest, r: FakeRoute): HttpResponse {
@@ -68,6 +70,7 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
     return res;
   };
   const log = Object.assign(() => {}, { info() {}, warn() {}, error() {}, debug() {} });
+  const waits: number[] = [];
   return {
     pluginId: 'test',
     requests,
@@ -82,7 +85,10 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
           ...(typeof body === 'string' ? { body } : body ? { form: body } : {}),
         }),
     },
-    wait: async () => {},
+    wait: async (seconds: number) => {
+      waits.push(seconds);
+    },
+    waits,
     log,
     account: { get: () => account },
     hash: { sha256: (text: string) => createHash('sha256').update(text, 'utf8').digest('hex') },

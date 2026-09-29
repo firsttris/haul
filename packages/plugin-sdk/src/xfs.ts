@@ -10,6 +10,9 @@
  *  - Web login: user + password → cookie session.
  *  - API key: user left empty (or "apikey"), secret = API key → XFS JSON API
  *    (only when the site hands out user API keys, see `userApiKeys`).
+ *
+ * Without an account, sites with `free: true` go JD's free way (`doFree`): the download1 form
+ * with `method_free`, the countdown, the plain-text captcha if any, then download2.
  */
 import {
   AccountError,
@@ -17,6 +20,7 @@ import {
   Bilingual,
   CheckResult,
   Ctx,
+  HtmlForm,
   HttpOptions,
   HttpResponse,
   OfflineError,
@@ -28,6 +32,8 @@ import {
   parseSize,
   resolveUrl,
   bilingual,
+  decodeHtml,
+  PluginError,
 } from './index';
 
 export interface XfsConfig {
@@ -57,17 +63,71 @@ export interface XfsConfig {
   validUntilPatterns?: RegExp[];
   /** Traffic left in bytes from the `?op=my_account` HTML. */
   trafficLeft?: (html: string) => number | undefined;
+  /** Free downloads without an account (JD's doFree). */
+  free?: boolean;
+  /** Connections per file for free downloads (JD: getMaxChunks without account; default 1). */
+  freeMaxConnections?: number;
+  /** Site-specific errors on the way (JD: a plugin's own checkErrors); throw to stop. */
+  checkErrors?: (html: string, res: HttpResponse) => void;
 }
 
+/** JD's isOffline (XFileSharingProBasic, mirror 2026-09-28) plus a few older variants. */
 const DEFAULT_OFFLINE = [
-  />\s*File Not Found\s*</i,
+  />\s*(?:[*-]\s*)?File Not Found\s*</i,
   />\s*This file was banned by copyright/i,
-  />\s*File Deleted\s*</i,
+  />\s*(?:[*-]\s*)?File Deleted\s*</i,
   /No such file/i,
   /The file (?:was|has been) (?:removed|deleted)/i,
   /file was deleted by/i,
   /Reason for deletion/i,
+  />\s*(?:[*-]\s*)?File has been removed due to copyright issues\s*</i,
+  />\s*(?:[*-]\s*)?The file expired/i,
+  />\s*(?:[*-]\s*)?Sorry, we can't find the page you're looking for/i,
+  />\s*(?:[*-]\s*)?File could not be found due to expiration or removal by the file owner/i,
+  />\s*(?:[*-]\s*)?The file of the above link no longer exists/i,
+  />\s*(?:[*-]\s*)?The file you were looking for doesn/i,
+  />\s*(?:[*-]\s*)?File is not? longer available as it/i,
 ];
+
+/** JD's getPremiumOnlyErrorMessage texts. */
+const PREMIUM_ONLY = [
+  /\s*(?:The file you requested reached max downloads|This file reached max downloads)[^<]*/i,
+  /\s*(?:Available Only for Premium Members|File is available only for Premium users|Please Buy Premium To download)[^<]*/i,
+  /\s*(?:This file is not available for free download|Only Premium user can download this file)[^<]*/i,
+  /\s*This (?:video|file) is available for Premium Users only[^<]*/i,
+  /(?:\s*Sorry\s*,)?\s*This file (?:can|only can|can only) be downloaded by[^<]+/i,
+  /\s*You can download files up to \d+ [^<]*/i,
+];
+
+/** Seconds from "1 hour 5 minutes 3 seconds" (JD: preciseWaittime); default one hour. */
+export function parseWait(text: string): number {
+  const n = (unit: string) => Number(new RegExp(`(\\d+)\\s*${unit}`, 'i').exec(text)?.[1] ?? 0);
+  const total = n('days?') * 86400 + n('hours?') * 3600 + n('minutes?') * 60 + n('seconds?');
+  return total > 0 ? total + 1 : 3600;
+}
+
+/** Countdown seconds on a free download page (JD: regexWaittime). */
+export function countdown(html: string): number | undefined {
+  const m =
+    /id=["']countdown_str["'][^>]*>[^<>]*<span id=[^>]*>\s*(\d+)\s*<\/span>/i.exec(html) ??
+    /class="seconds"[^>]*>\s*(\d+)\s*</i.exec(html) ??
+    /id="seconds"[^>]*>\s*(\d+)\s*</i.exec(html);
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * JD's "plaintext captcha" (ManiacMansion): digits as HTML entities in absolutely positioned
+ * spans; ordered by `padding-left` they are the code.
+ */
+export function plainTextCaptcha(html: string): string | undefined {
+  const re = /<span style=.position:absolute;padding-left:(\d+)px;padding-top:\d+px;.>(&#\d+;)<\/span>/gi;
+  const digits = [...html.matchAll(re)].map((m) => [Number(m[1]), decodeHtml(m[2])] as const);
+  if (!digits.length) return undefined;
+  return digits
+    .sort((a, b) => a[0] - b[0])
+    .map((d) => d[1])
+    .join('');
+}
 
 const DEFAULT_NAMES = [
   /class=["']file-info-name["'][^>]*>([^<]+)</i,
@@ -421,6 +481,179 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     return mode(acc.user, acc.secret);
   }
 
+  // ---- free mode (JD: doFree) --------------------------------------------------------
+
+  /** JD's checkErrors for free downloads: limits with their wait, premium-only, site states. */
+  function freeErrors(res: HttpResponse) {
+    const html = visible(res.body);
+    cfg.checkErrors?.(html, res);
+    const n = cfg.name;
+    if (/>\s*Wrong password/i.test(html)) {
+      throw new PluginError('fatal', { de: `${n}: falsches Datei-Passwort`, en: `${n}: wrong file password` });
+    }
+    if (/>\s*Wrong captcha/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Captcha falsch`, en: `${n}: wrong captcha` });
+    }
+    if (/>\s*Skipped countdown\s*</i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Countdown übersprungen`, en: `${n}: countdown skipped` });
+    }
+    const wait =
+      match(html, /((?:You have reached the download[- ]limit|You have to wait)[^<>]+)/i) ??
+      match(html, /Download limit reached.\s*Please wait\s*(.*?)\s*before your next download/i);
+    if (wait) {
+      throw new TemporaryError(
+        { de: `${n}: Download-Limit, Wartezeit bis zum nächsten Download („${wait}“)`, en: `${n}: download limit, waiting for the next download (“${wait}”)` },
+        parseWait(wait),
+      );
+    }
+    const perHours = match(html, />\s*(You have reached the maximum limit \d+ files in \d+ hours)/i);
+    if (perHours) throw new TemporaryError(`${n}: ${perHours}`, 15 * 60);
+    if (/You're using all download slots for IP/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: alle Download-Slots dieser IP belegt`, en: `${n}: all download slots of this IP in use` }, 5 * 60);
+    }
+    if (/Error happened when generating Download Link/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Fehler beim Erzeugen des Download-Links`, en: `${n}: error generating the download link` }, 10 * 60);
+    }
+    for (const p of PREMIUM_ONLY) {
+      const m = new RegExp(`>(${p.source})`, 'i').exec(res.body);
+      if (m) {
+        throw new PluginError('fatal', {
+          de: `${n}: nur mit Premium („${decodeHtml(m[1]).trim()}“)`,
+          en: `${n}: premium only (“${decodeHtml(m[1]).trim()}”)`,
+        });
+      }
+    }
+    if (/>\s*Expired download session/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Download-Sitzung abgelaufen`, en: `${n}: download session expired` }, 10 * 60);
+    }
+    if (res.status === 500 || />\s*(?:This server is in maintenance mode|Technical Maintenance\s*<)/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Server in Wartung`, en: `${n}: server under maintenance` }, 30 * 60);
+    }
+    if (/>\s*Downloads disabled for this file/i.test(html)) {
+      throw new PluginError('fatal', { de: `${n}: Download vom Uploader deaktiviert`, en: `${n}: the uploader disabled downloads` });
+    }
+    if (/>\s*Downloads are disabled for your country/i.test(html)) {
+      throw new PluginError('fatal', { de: `${n}: Downloads für dein Land gesperrt`, en: `${n}: downloads are disabled for your country` });
+    }
+    if (/>\s*File was locked by administrator/i.test(html)) {
+      throw new PluginError('fatal', { de: `${n}: Datei vom Admin gesperrt`, en: `${n}: file locked by the administrator` });
+    }
+    if (/>\s*Couldn't generate direct link/i.test(html)) {
+      throw new TemporaryError({ de: `${n}: Direktlink konnte nicht erzeugt werden`, en: `${n}: could not generate the direct link` });
+    }
+  }
+
+  /** JD's handleCaptcha: the plain-text captcha is solved; anything else needs a human. */
+  function solveCaptcha(form: HtmlForm, fields: Record<string, string>, page: string) {
+    if (form.html.includes(';background:#ccc;text-align')) {
+      // JD looks in the whole page too: the digits may sit outside the form.
+      const code = plainTextCaptcha(form.html) ?? plainTextCaptcha(page);
+      if (!code) throw new TemporaryError({ de: `${cfg.name}: Text-Captcha nicht lesbar`, en: `${cfg.name}: plain-text captcha unreadable` });
+      fields.code = code;
+      return;
+    }
+    const kind = /cf-turnstile/i.test(form.html)
+      ? 'Cloudflare Turnstile'
+      : /h-captcha|hcaptcha/i.test(form.html)
+        ? 'hCaptcha'
+        : /g-recaptcha|data-sitekey/i.test(form.html)
+          ? 'reCaptcha'
+          : /\/captchas\//i.test(form.html)
+            ? 'Bild-Captcha'
+            : null;
+    if (kind) {
+      throw new PluginError('fatal', {
+        de: `${cfg.name}: Download ohne Account verlangt ein Captcha (${kind}), das Haul nicht lösen kann`,
+        en: `${cfg.name}: downloading without an account needs a captcha (${kind}) that Haul cannot solve`,
+      });
+    }
+  }
+
+  async function resolveFree(link: string, ctx: Ctx): Promise<Resolved> {
+    const url = fileUrl(link);
+    let fileName: string | undefined;
+    let fileSize: number | undefined;
+    const scan = (page: HttpResponse) => {
+      const html = visible(page.body);
+      fileName ??= match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((x) => !!x && x.trim().length > 0);
+      fileSize ??= parseSize(match(html, ...sizes));
+    };
+    const direct = (target: string): Resolved => {
+      ctx.log.info(`Direktlink (free): ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/… (${fileName ?? 'Name unbekannt'})`);
+      return { url: target, name: fileName, size: fileSize, headers: { Referer: url }, maxConnections: cfg.freeMaxConnections ?? 1 };
+    };
+    /** A file, a redirect to it or a link to it on the page; follows redirects within the site. */
+    const found = async (res: HttpResponse): Promise<{ link?: string; page: HttpResponse }> => {
+      for (let hop = 0; hop < 5; hop++) {
+        if (res.file) return { link: res.url, page: res };
+        const target = redirectOf(res);
+        if (!target) break;
+        if (!isSitePage(target) || directs.some((p) => p.test(`"${target}"`))) return { link: target, page: res };
+        res = await ctx.http.get(target, { followRedirects: false });
+      }
+      scan(res);
+      return { link: match(res.body, ...directs), page: res };
+    };
+
+    let { link: dl, page: res } = await found(await ctx.http.get(url, { followRedirects: false }));
+    if (dl) return direct(dl);
+    assertOnline(res);
+    freeErrors(res);
+    const steps: string[] = [];
+
+    // download1: the "Free Download" button (JD: findFormDownload1Free).
+    const forms1 = parseForms(visible(res.body));
+    const download1 = forms1.find((f) => f.fields.op === 'download1');
+    if (download1) {
+      const fields = { ...download1.fields };
+      delete fields.method_premium;
+      // Usually a submit button, so not among the fields; JD takes its value from the page.
+      if (!fields.method_free) {
+        fields.method_free = /["']method_free["'][^>]*value=["']([^<>"']+)["']/i.exec(download1.html)?.[1] ?? 'Free Download';
+      }
+      const wait = countdown(res.body);
+      if (wait) await ctx.wait(wait);
+      steps.push('download1');
+      ({ link: dl, page: res } = await found(
+        await ctx.http.post(download1.action ? resolveUrl(url, download1.action) : url, fields, { followRedirects: false }),
+      ));
+      if (dl) return direct(dl);
+      assertOnline(res);
+      freeErrors(res);
+    }
+
+    // download2: countdown, captcha, then the form; some sites need more than one round.
+    for (let round = 0; round < 3; round++) {
+      const forms = parseForms(visible(res.body));
+      const download2 =
+        forms.find((f) => /method_/.test(f.html) && (f.fields.op ?? '').includes('download')) ??
+        forms.find((f) => /name=["']F1["']/i.test(f.html)) ??
+        forms.find((f) => f.fields.op === 'download2');
+      if (!download2) break;
+      const started = Date.now();
+      const fields: Record<string, string> = { ...download2.fields };
+      if ('adblock_detected' in fields && !fields.adblock_detected) fields.adblock_detected = '0';
+      if (/<input[^>]+type=["']password["'][^>]+name=["']password["']/i.test(download2.html)) {
+        throw new PluginError('fatal', {
+          de: `${cfg.name}: passwortgeschützte Datei (noch nicht unterstützt)`,
+          en: `${cfg.name}: password-protected file (not supported yet)`,
+        });
+      }
+      solveCaptcha(download2, fields, res.body);
+      const wait = countdown(res.body);
+      const left = wait ? wait - (Date.now() - started) / 1000 : 0;
+      if (left > 0) await ctx.wait(left);
+      steps.push(fields.op ?? 'download2');
+      ({ link: dl, page: res } = await found(
+        await ctx.http.post(download2.action ? resolveUrl(url, download2.action) : url, fields, { followRedirects: false }),
+      ));
+      if (dl) return direct(dl);
+      assertOnline(res);
+      freeErrors(res);
+    }
+    lastResort(res, steps, []);
+  }
+
   return {
     id: cfg.id,
     name: cfg.name,
@@ -467,6 +700,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     },
 
     async resolve(link, ctx): Promise<Resolved> {
+      if (cfg.free && !ctx.account.get()) return resolveFree(link, ctx);
       const m = currentMode(ctx);
       const id = fileId(link);
 

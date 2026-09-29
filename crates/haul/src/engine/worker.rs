@@ -35,6 +35,9 @@ pub enum Failure {
     Cancelled,
     /// Transient; the download goes back to the queue with backoff.
     Retry(String),
+    /// The hoster said when to try again (e.g. a free download limit): queued until then,
+    /// without using up an attempt.
+    Wait(String, u64),
     /// Permanent; needs the user.
     Fail(String),
     Offline(String),
@@ -62,6 +65,9 @@ impl From<PluginError> for Failure {
     fn from(e: PluginError) -> Self {
         match e.kind {
             ErrorKind::Offline => Failure::Offline(e.message),
+            ErrorKind::Temporary if e.wait_secs.is_some() => {
+                Failure::Wait(e.message, e.wait_secs.unwrap_or_default())
+            }
             ErrorKind::Temporary | ErrorKind::Account => Failure::Retry(e.message),
             ErrorKind::Fatal => Failure::Fail(e.message),
         }
@@ -214,6 +220,13 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
                 m,
             )
         }
+        Failure::Wait(m, secs) => (
+            status::QUEUED,
+            d.online.as_str(),
+            Some(now_ms() + secs as i64 * 1000),
+            d.attempts,
+            m,
+        ),
         Failure::Cancelled => return Ok(()),
     };
     tracing::warn!(

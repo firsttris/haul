@@ -164,6 +164,8 @@ pub enum ErrorKind {
 pub struct PluginError {
     pub kind: ErrorKind,
     pub message: String,
+    /// Seconds until the next try, when the hoster said (`TemporaryError(msg, seconds)`).
+    pub wait_secs: Option<u64>,
 }
 
 impl PluginError {
@@ -171,6 +173,7 @@ impl PluginError {
         Self {
             kind: ErrorKind::Fatal,
             message: message.into(),
+            wait_secs: None,
         }
     }
 }
@@ -181,6 +184,7 @@ struct InvokeResult {
     value: Option<serde_json::Value>,
     kind: Option<ErrorKind>,
     message: Option<String>,
+    wait: Option<f64>,
 }
 
 async fn new_context() -> Result<(AsyncRuntime, AsyncContext)> {
@@ -229,7 +233,8 @@ pub async fn invoke(
         Err(_) => {
             return Err(PluginError {
                 kind: ErrorKind::Temporary,
-                message: "plugin timed out".into(),
+                message: crate::tr!("Plugin-Zeitlimit überschritten", "plugin timed out"),
+                wait_secs: None,
             })
         }
     };
@@ -241,6 +246,11 @@ pub async fn invoke(
         Err(PluginError {
             kind: res.kind.unwrap_or(ErrorKind::Fatal),
             message: res.message.unwrap_or_else(|| "unknown plugin error".into()),
+            // At most a day: a hoster's number is not trusted blindly.
+            wait_secs: res
+                .wait
+                .filter(|w| *w > 0.0)
+                .map(|w| (w.ceil() as u64).min(86_400)),
         })
     }
 }

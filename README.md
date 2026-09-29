@@ -10,6 +10,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
   Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
+- Send (send.now, früher send.cm, tusfiles, userscloud) ohne Account über den XFS-Free-Weg wie bei
+  JDownloader (Countdown, Text-Captcha), mit Account über den Premium-Weg
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
@@ -130,6 +132,7 @@ packages/plugin-sdk Typen, Helfer, XFileSharing-Basis, Test-ctx für Plugins
 plugins/ddownload   ddownload-Plugin
 plugins/gofile      Gofile-Plugin (mit Ordner-Crawler)
 plugins/mediafire   Mediafire-Plugin (mit Ordner-Crawler)
+plugins/send        Send-Plugin (XFS, free und premium)
 ui                  Web-UI
 ```
 
@@ -173,7 +176,10 @@ erhalten), `cookies.get/set`, `hash.sha256`, `wait(sec)`, `log` und `account.get
 und Größe (siehe `plugins/gofile`). Fehler signalisiert ein Plugin mit
 `OfflineError` (kein Retry), `TemporaryError` (später erneut) oder `AccountError`.
 Für XFileSharing-Hoster gibt es `createXfsPlugin` in `@haul/plugin-sdk/xfs`; ddownload ist damit
-fünf Zeilen Konfiguration.
+fünf Zeilen Konfiguration. Mit `free: true` lädt die Basis ohne Account wie JDs `doFree`.
+Verlangt ein Hoster eine Wartezeit (Free-Limit), meldet das Plugin sie mit
+`new TemporaryError(meldung, sekunden)`; der Core versucht es genau dann erneut, ohne dass es als
+Fehlversuch zählt.
 
 Plugins werden mit `pnpm build:plugins` nach `plugins/dist/<name>.js` gebaut. Eigene oder
 aktualisierte Plugins nach `/config/plugins/` legen und unter *Accounts & Plugins* auf

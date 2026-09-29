@@ -46,3 +46,19 @@ describe('XFS API-key accounts', () => {
     expect((plugin.account?.help as { de: string }).de).toContain('API-Key');
   });
 });
+
+describe('free mode helpers (JD)', () => {
+  it('parses waits, countdowns and plain-text captchas', async () => {
+    const { parseWait, countdown, plainTextCaptcha } = await import('./xfs');
+    expect(parseWait('You have to wait 2 minutes, 10 seconds till next download')).toBe(131);
+    expect(parseWait('You have reached the download limit')).toBe(3600);
+    expect(countdown('<span id="countdown_str">Wait <span id="x">60</span> seconds</span>')).toBe(60);
+    expect(countdown('<span class="seconds">30</span>')).toBe(30);
+    expect(countdown('nothing')).toBeUndefined();
+    const spans = [
+      [20, 50],
+      [0, 52],
+    ].map(([p, d]) => `<span style='position:absolute;padding-left:${p}px;padding-top:2px;'>&#${d};</span>`);
+    expect(plainTextCaptcha(spans.join(''))).toBe('42');
+  });
+});

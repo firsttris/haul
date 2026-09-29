@@ -195,9 +195,12 @@ type Kind = 'offline' | 'temporary' | 'account' | 'fatal';
  */
 export class PluginError extends Error {
   readonly haulKind: Kind;
-  constructor(kind: Kind, message: Message) {
+  /** Seconds until the next try, if the hoster said (see `TemporaryError`). */
+  readonly haulWait?: number;
+  constructor(kind: Kind, message: Message, waitSeconds?: number) {
     super(toText(message));
     this.haulKind = kind;
+    if (waitSeconds !== undefined && waitSeconds > 0) this.haulWait = Math.ceil(waitSeconds);
   }
 }
 
@@ -208,10 +211,14 @@ export class OfflineError extends PluginError {
   }
 }
 
-/** Try again later: server busy, limit reached, maintenance. */
+/**
+ * Try again later: server busy, limit reached, maintenance. With `waitSeconds` (e.g. the wait
+ * a free hoster demands until the next download, JD's ERROR_IP_BLOCKED) the core tries again
+ * exactly then, and the wait does not count as a failed attempt.
+ */
 export class TemporaryError extends PluginError {
-  constructor(message: Message) {
-    super('temporary', message);
+  constructor(message: Message, waitSeconds?: number) {
+    super('temporary', message, waitSeconds);
   }
 }
 
