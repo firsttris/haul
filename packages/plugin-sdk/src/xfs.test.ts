@@ -4,7 +4,9 @@ import { createXfsPlugin, parseDate } from './xfs';
 
 describe('parseDate', () => {
   it('reads common formats', () => {
-    expect(parseDate('2026-10-12 23:59:59')).toBe(Date.UTC(2026, 9, 12));
+    // With a time (XFS API, JD compares to the second) and without.
+    expect(parseDate('2026-10-12 23:59:59')).toBe(Date.UTC(2026, 9, 12, 23, 59, 59));
+    expect(parseDate('2026-10-12')).toBe(Date.UTC(2026, 9, 12));
     expect(parseDate('12 October 2026')).toBe(Date.UTC(2026, 9, 12));
     expect(parseDate('October 12, 2026')).toBe(Date.UTC(2026, 9, 12));
     expect(parseDate('bald')).toBeUndefined();
@@ -40,6 +42,17 @@ describe('XFS API-key accounts', () => {
     expect(await plugin.resolve(LINK, ctx)).toMatchObject({ url: 'https://s1.x.example/d/API/f.rar', size: 42 });
     expect(await plugin.checkAccount!(ctx)).toMatchObject({ valid: true, premium: true, trafficLeft: 1024 ** 3 });
     expect((await plugin.check!(LINK, ctx)).online).toBe(false);
+  });
+
+  it('reads the account like JD: premim_expire typo, server time, premium_bandwidth first', async () => {
+    const info = (result: object, server_time?: string) =>
+      plugin.checkAccount!(
+        fakeCtx({ 'GET https://x.example/api/account/info?key=K': { body: JSON.stringify({ status: 200, server_time, result }) } }, { id: 2, user: '', secret: 'K' }),
+      );
+    expect(await info({ premim_expire: '2099-05-01 00:00:00' })).toMatchObject({ premium: true, validUntil: Date.UTC(2099, 4, 1) });
+    // Expired by the server's clock, even though ours might say otherwise.
+    expect(await info({ premium_expire: '2030-01-01 10:00:00' }, '2030-01-01 10:00:01')).toMatchObject({ premium: false });
+    expect(await info({ premium_expire: '2099-01-01 00:00:00', premium_bandwidth: '5 GB', traffic_left: '1 GB' })).toMatchObject({ trafficLeft: 5 * 1024 ** 3 });
   });
 
   it('mentions the API key in its form hint', () => {

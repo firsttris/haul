@@ -11,9 +11,9 @@
  * when there is one per link; further pages via the `page-link` to `?op=user_public…&page=N`.
  * The package is named after the rest of the folder URL, like JD.
  */
-import { decodeHtml, definePlugin, HosterLimitError, OfflineError, parseSize, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
+import { AccountError, decodeHtml, definePlugin, HosterLimitError, OfflineError, parseSize, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
 import type { CrawledFile, Ctx } from '@haul/plugin-sdk';
-import { createXfsPlugin } from '@haul/plugin-sdk/xfs';
+import { createXfsPlugin, isApiAccount } from '@haul/plugin-sdk/xfs';
 
 /** JD SendNow.getPluginDomains. */
 const DOMAINS = ['send.now', 'send.cm', 'sendit.cloud', 'usersfiles.com', 'tusfiles.com', 'tusfiles.net', 'userscloud.com', 'usercdn.com'];
@@ -69,10 +69,13 @@ const xfs = definePlugin(
   createXfsPlugin({
     id: 'send',
     name: 'Send',
-    version: 5,
+    version: 6,
     // JD: getPluginDomains; usersfiles.com is dead (getDeadDomains), kept for old links.
     domains: DOMAINS,
     fileIdLength: 12,
+    // JD SendNow: the XFS API (getAPIBase = main page + /api) with the user's API key.
+    apiBase: 'https://send.now/api',
+    userApiKeys: true,
     accountRequired: false,
     free: true,
     // JD: getMaxChunks() = 1 without account, -10 with premium.
@@ -125,6 +128,18 @@ const notAFile = () =>
 
 export default definePlugin({
   ...xfs,
+  // JD SendNow.fetchAccountInfoAPI: the API only downloads with premium traffic.
+  async checkAccount(ctx) {
+    const info = await xfs.checkAccount!(ctx);
+    const acc = ctx.account.get();
+    if (acc && isApiAccount(acc.user) && !(info.trafficLeft && info.trafficLeft > 0)) {
+      throw new AccountError({
+        de: 'Send: über den API-Key lädt nur ein Premium-Account mit Direktlink-Traffic; sonst Benutzer und Passwort verwenden',
+        en: 'Send: the API key only downloads with a premium account with direct link traffic; otherwise use user and password',
+      });
+    }
+    return info;
+  },
   matches: [...xfs.matches, FOLDER],
   // Folder links become their files; a file link stays as it is (checked later like before).
   async crawl(link, ctx) {

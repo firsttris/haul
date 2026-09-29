@@ -208,8 +208,9 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 /** `2026-10-12`, `12 October 2026`, `October 12, 2026` → Unix ms (UTC midnight). */
 export function parseDate(text: string | undefined): number | undefined {
   if (!text) return undefined;
-  const iso = /(\d{4})-(\d{2})-(\d{2})/.exec(text);
-  if (iso) return Date.UTC(+iso[1], +iso[2] - 1, +iso[3]);
+  // "2026-09-29" or, from the API, "2026-09-29 13:45:00" (JD compares to the second).
+  const iso = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(text);
+  if (iso) return Date.UTC(+iso[1], +iso[2] - 1, +iso[3], +(iso[4] ?? 0), +(iso[5] ?? 0), +(iso[6] ?? 0));
   const month = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase());
   const dmy = /(\d{1,2})\.?\s+([A-Za-z]+)\.?,?\s+(\d{4})/.exec(text);
   if (dmy && month(dmy[2]) >= 0) return Date.UTC(+dmy[3], month(dmy[2]), +dmy[1]);
@@ -385,11 +386,16 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   // ---- API mode --------------------------------------------------------------------
 
   async function api<T>(ctx: Ctx, path: string, params: Record<string, string>): Promise<T> {
+    return (await apiFull<T>(ctx, path, params)).result;
+  }
+
+  /** The API's whole answer (`server_time` sits next to `result`). */
+  async function apiFull<T>(ctx: Ctx, path: string, params: Record<string, string>): Promise<{ result: T; server_time?: string }> {
     const qs = Object.keys(params)
       .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
       .join('&');
     const res = await ctx.http.get(`${cfg.apiBase}${path}?${qs}`);
-    let data: { status?: number; msg?: string; result?: unknown };
+    let data: { status?: number; msg?: string; result?: unknown; server_time?: string };
     try {
       data = res.json();
     } catch {
@@ -403,7 +409,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     }
     if (data.status === 404) throw new OfflineError();
     if (data.status !== 200) throw new TemporaryError(`${cfg.name}-API: ${data.msg || data.status}`);
-    return data.result as T;
+    return data as { result: T; server_time?: string };
   }
 
   // ---- web session -----------------------------------------------------------------
@@ -918,16 +924,22 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     async checkAccount(ctx): Promise<AccountInfo> {
       const m = currentMode(ctx);
       if (m.kind === 'api') {
-        const info = await api<{ premium_expire?: string; traffic_left?: number | string; premium?: number | boolean }>(
-          ctx,
-          '/account/info',
-          { key: m.key },
-        );
-        const validUntil = parseDate(info?.premium_expire);
-        const traffic = info?.traffic_left;
+        const { result: info, server_time } = await apiFull<{
+          premium_expire?: string;
+          premim_expire?: string;
+          premium_bandwidth?: number | string;
+          traffic_left?: number | string;
+          premium?: number | boolean;
+        }>(ctx, '/account/info', { key: m.key });
+        // JD fetchAccountInfoAPI: "premim_expire" is a typo of early XFS API versions; the
+        // expiry is compared with the server's time where given.
+        const validUntil = parseDate(info?.premium_expire || info?.premim_expire);
+        const now = parseDate(server_time) ?? Date.now();
+        // JD: premium_bandwidth before traffic_left.
+        const traffic = info?.premium_bandwidth ?? info?.traffic_left;
         return {
           valid: true,
-          premium: validUntil ? validUntil > Date.now() : !!info?.premium,
+          premium: validUntil ? validUntil > now : !!info?.premium,
           trafficLeft: traffic === undefined ? undefined : typeof traffic === 'number' ? traffic * 1024 * 1024 : parseSize(String(traffic)),
           validUntil,
         };

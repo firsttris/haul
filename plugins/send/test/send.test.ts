@@ -238,4 +238,29 @@ describe('send', () => {
       await expect(plugin.resolve('https://send.now/s/bob', ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
     });
   });
+
+  describe('API-key account (JD SendNow)', () => {
+    const info = (result: object) => ({
+      'GET https://send.now/api/account/info?key=abcdefghij0123456789': { body: JSON.stringify({ status: 200, result }) },
+    });
+    const acc = { id: 3, user: '', secret: 'abcdefghij0123456789' };
+
+    it('accepts premium with direct link traffic', async () => {
+      const ctx = fakeCtx(info({ premium_expire: '2099-01-01 00:00:00', premium_bandwidth: '100 GB' }), acc);
+      expect(await plugin.checkAccount!(ctx)).toMatchObject({ valid: true, premium: true, trafficLeft: 100 * 1024 ** 3 });
+    });
+
+    it('refuses the API without premium traffic, like JD', async () => {
+      const ctx = fakeCtx(info({ premium_expire: '2020-01-01 00:00:00' }), acc);
+      await expect(plugin.checkAccount!(ctx)).rejects.toMatchObject({ haulKind: 'account' });
+    });
+
+    it('downloads premium through file/direct_link', async () => {
+      const ctx = fakeCtx(
+        { 'GET https://send.now/api/file/direct_link?key=abcdefghij0123456789&file_code=abcdefghijkl': { body: JSON.stringify({ status: 200, result: { url: CDN } }) } },
+        acc,
+      );
+      expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    });
+  });
 });
