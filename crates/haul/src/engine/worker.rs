@@ -399,6 +399,7 @@ async fn execute(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("text/html"));
     if html && resp.headers().get(CONTENT_DISPOSITION).is_none() {
+        let resp_url = resp.url().to_string();
         let body = resp.text().await.unwrap_or_default();
         let text: String = body
             .split('<')
@@ -407,7 +408,17 @@ async fn execute(
             .take(6)
             .collect::<Vec<_>>()
             .join(" ");
-        tracing::debug!(id, "direct link returned HTML: {body:.2000}");
+        tracing::debug!(id, url = %resp_url, "direct link returned HTML: {body:.2000}");
+        // With debug logging the whole page goes to a file, to see what the hoster wants.
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            let file = engine.cfg.tmp_dir.join(format!("{id}.page.html"));
+            if tokio::fs::write(&file, format!("<!-- {resp_url} -->\n{body}"))
+                .await
+                .is_ok()
+            {
+                tracing::debug!(id, file = %file.display(), "page saved");
+            }
+        }
         let text = text.chars().take(160).collect::<String>();
         return Err(Failure::Retry(crate::tr!(
             "Server lieferte eine Webseite statt der Datei: {}",
