@@ -176,6 +176,50 @@ describe('ddownload', () => {
     expect(await plugin.checkAccount!(acc)).toMatchObject({ valid: true, premium: true, trafficLeft: 78_700_000_000 });
   });
 
+  it('follows a redirect to an intermediate page after the form (HTTP 302)', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/account/">Konto</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/?op=download_link&id=abcdefghijkl' } },
+        'GET https://ddownload.com/?op=download_link&id=abcdefghijkl': {
+          body: '<a class="dk-btn" href="https://srv7.ddownload.com/d/TOKEN/Some.File.part1.rar">Download</a>',
+        },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    expect((await plugin.resolve(LINK, ctx)).url).toBe('https://srv7.ddownload.com/d/TOKEN/Some.File.part1.rar');
+    // The account link counts as logged in (JD's isLoggedin), so no extra account check.
+    expect(ctx.requests.some((r) => r.url.includes('op=my_account'))).toBe(false);
+  });
+
+  it('treats a redirect to the login page as an expired session', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/login.html' } },
+        'GET https://ddownload.com/?op=my_account': { status: 302, headers: { location: '/login.html' } },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=OLD' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      haulKind: 'account',
+      message: expect.stringContaining('Kontoseite: HTTP 302'),
+    });
+  });
+
+  it('names the redirects when nothing is found', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/?op=dl_wait' } },
+        'GET https://ddownload.com/?op=dl_wait': { body: '<a href="/?op=logout">x</a><p>Bitte warten</p>' },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      message: expect.stringContaining('weitergeleitet: /?op=dl_wait'),
+    });
+  });
+
   it('flags a free account', async () => {
     const ctx = fakeCtx(
       { 'GET https://ddownload.com/?op=my_account': { body: '<a href="/?op=logout">Logout</a> Free account' } },

@@ -166,6 +166,9 @@ pub struct PluginManager {
 struct Session {
     clients: HttpClients,
     cookies: Arc<CookieStoreMutex>,
+    /// Plugin calls of one account run one after another, like JD's `synchronized (account)`:
+    /// parallel logins or page loads of the same session confuse some hosters.
+    busy: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn session_key(plugin: &str, account: Option<i64>) -> String {
@@ -293,13 +296,19 @@ impl PluginManager {
 
     /// Clients with the cookie jar of `plugin` + `account`.
     pub fn clients_for(&self, plugin: &str, account: Option<i64>) -> HttpClients {
-        self.clients
-            .lock()
-            .unwrap()
+        self.session_parts(plugin, account).0
+    }
+
+    fn session_parts(
+        &self,
+        plugin: &str,
+        account: Option<i64>,
+    ) -> (HttpClients, Arc<tokio::sync::Mutex<()>>) {
+        let mut sessions = self.clients.lock().unwrap();
+        let s = sessions
             .entry(session_key(plugin, account))
-            .or_insert_with(|| self.new_session(cookie_store::CookieStore::default()))
-            .clients
-            .clone()
+            .or_insert_with(|| self.new_session(cookie_store::CookieStore::default()));
+        (s.clients.clone(), s.busy.clone())
     }
 
     fn new_session(&self, store: cookie_store::CookieStore) -> Session {
@@ -307,6 +316,7 @@ impl PluginManager {
         Session {
             clients: build_clients(&self.user_agent, Some(cookies.clone())),
             cookies,
+            busy: Arc::default(),
         }
     }
 
@@ -361,7 +371,11 @@ impl PluginManager {
         account: Option<&AccountCreds>,
     ) -> std::result::Result<T, PluginError> {
         let env = serde_json::json!({ "pluginId": plugin.id, "account": account });
-        let clients = self.clients_for(&plugin.id, account.map(|a| a.id));
+        let (clients, busy) = self.session_parts(&plugin.id, account.map(|a| a.id));
+        let _serial = match account {
+            Some(_) => Some(busy.lock_owned().await),
+            None => None,
+        };
         let value = host::invoke(&plugin.id, &plugin.code, method, args, env, clients).await?;
         serde_json::from_value(value).map_err(|e| {
             PluginError::fatal(format!(

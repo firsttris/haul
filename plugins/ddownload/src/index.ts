@@ -16,7 +16,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'ddownload',
     name: 'ddownload',
-    version: 5,
+    version: 6,
     domains: ['ddownload.com', 'ddl.to'],
     fileIdLength: 12,
     apiBase: 'https://api-v2.ddownload.com/api',

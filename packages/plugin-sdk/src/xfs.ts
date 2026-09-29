@@ -190,8 +190,25 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       .replace(/<!--[\s\S]*?-->/g, '');
   }
 
+  /** JD's `isLoggedin`: a visible logout link or a link to the own account page. */
   function loggedIn(res: HttpResponse): boolean {
-    return /<a[^<]*href\s*=\s*["'][^"']*(?:[?&]op=logout|\/(?:user_)?logout["'])/i.test(visible(res.body));
+    const html = visible(res.body);
+    const a = `<a[^<]*href\\s*=\\s*["'][^"']*`;
+    const logout = new RegExp(`${a}(?:[?&]op=logout|/(?:user_)?logout/?["']|/logout\\.html["'])`, 'i');
+    const myAccount = new RegExp(`${a}(?:[?&]op=my_account|/my[-_]account["']|/account/?["'])`, 'i');
+    return logout.test(html) || myAccount.test(html);
+  }
+
+  /** Absolute target of a redirect response, or null. */
+  function redirectOf(res: HttpResponse): string | null {
+    const loc = res.header('location');
+    return res.status >= 300 && res.status < 400 && loc ? resolveUrl(res.url, loc) : null;
+  }
+
+  /** A page of the site itself (not a download server like srv12.ddownload.com or a CDN). */
+  function isSitePage(url: string): boolean {
+    const hostOf = /^https?:\/\/([^/:?#]+)/i.exec(url)?.[1]?.toLowerCase().replace(/^www\./, '');
+    return !!hostOf && cfg.domains.includes(hostOf);
   }
 
   function isCloudflare(res: HttpResponse): boolean {
@@ -212,7 +229,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
   /** Last resort when no link was found, like JD's `checkErrorsLastResort`: limits and the
    * site's own error box, quoted so the user sees what the hoster said. */
-  function lastResort(res: HttpResponse, steps: string[]): never {
+  function lastResort(res: HttpResponse, steps: string[], redirects: string[]): never {
     const html = visible(res.body);
     const limit =
       match(html, />\s*(You have reached the maximum limit \d+ files in \d+ hours)/i) ??
@@ -223,19 +240,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     }
     const siteError = match(html, /class=["'][^"']*(?:\berr\b|alert-danger)[^"']*["'][^>]*>\s*([^<]{3,})</i);
     const where = steps.length ? `nach ${steps.join(' → ')}` : 'kein Download-Formular';
+    const via = redirects.length ? `, weitergeleitet: ${redirects.map((r) => r.replace(/^https?:\/\/[^/]+/, '')).join(' → ')}` : '';
     throw new TemporaryError(
-      `${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status}${siteError ? `, Seite: „${siteError}“` : ''})`,
+      `${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status}${via}${siteError ? `, Seite: „${siteError}“` : ''})`,
     );
-  }
-
-  function isDirect(res: HttpResponse): string | null {
-    const loc = res.header('location');
-    if (res.status >= 300 && res.status < 400 && loc) {
-      const abs = resolveUrl(res.url, loc);
-      // A redirect back to the file page or login is not a download.
-      if (!linkRe.test(abs) && !/login|op=/.test(abs)) return abs;
-    }
-    return null;
   }
 
   // ---- API mode --------------------------------------------------------------------
@@ -261,14 +269,18 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
   // ---- web session -----------------------------------------------------------------
 
+  /** Last account-page answer that did not look logged in, for the error message. */
+  let lastAccountDetail = '';
+
   async function accountPage(ctx: Ctx, m: Mode): Promise<HttpResponse | null> {
     // Follow redirects: some sites move the account page; logged out ends on the login form.
     const res = await web(ctx, m).get(`${base}/?op=my_account`);
     if (isCloudflare(res)) throw new TemporaryError(`${cfg.name}: Cloudflare-Prüfung, später erneut`);
     if (res.status === 429 || res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status} beim Prüfen der Anmeldung`);
-    if (res.status !== 200 || /op=login/.test(res.url)) return null;
     // Like JD: sites comment out the logout button for expired sessions, so ignore comments and scripts.
-    return loggedIn(res) ? res : null;
+    if (res.status === 200 && !/op=login|\/login/i.test(res.url) && loggedIn(res)) return res;
+    lastAccountDetail = `Kontoseite: HTTP ${res.status}, ${res.url.replace(/^https?:\/\/[^/]+/, '')}`;
+    return null;
   }
 
   /** Makes sure the session is logged in and returns the account page. */
@@ -276,7 +288,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const existing = await accountPage(ctx, m);
     if (existing) return existing;
     if (m.kind === 'cookie') {
-      throw new AccountError(`${cfg.name}: Sitzungs-Cookie ungültig oder abgelaufen. ${cookieHelp}`);
+      throw new AccountError(`${cfg.name}: Sitzungs-Cookie ungültig oder abgelaufen (${lastAccountDetail}). ${cookieHelp}`);
     }
     if (m.kind !== 'password') throw new AccountError(`${cfg.name}: keine Web-Anmeldung möglich`);
 
@@ -376,46 +388,55 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
       const http = web(ctx, m);
       const url = fileUrl(link);
-      const found = (res: HttpResponse): Resolved | null => {
-        const target = isDirect(res) ?? match(res.body, ...directs);
-        if (!target) return null;
+      const direct = (target: string): Resolved => {
         ctx.log.info(`Direktlink: ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/…`);
         return { url: target, headers: { Referer: url }, maxConnections: cfg.maxConnections };
       };
 
-      // Like JD (validateCookies=false): trust the session and open the file right away. With
-      // "direct downloads" enabled in the account, the file page redirects to the file.
+      // Like JD (validateCookies=false): trust the session and open the file right away.
       let res = await http.get(url, { followRedirects: false });
-      let hit = found(res);
-      if (hit) return hit;
-      assertOnline(res);
-      if (!loggedIn(res)) {
-        // Logged out (first use, or the session expired): log in / verify the cookie, retry once.
-        await session(ctx, m);
-        res = await http.get(url, { followRedirects: false });
-        hit = found(res);
-        if (hit) return hit;
-        assertOnline(res);
-      }
-
-      // Otherwise submit the download form (JD: form F1, pyLoad: op=download*) until a link
-      // shows up; some sites need several steps.
+      let sessionChecked = false;
       const steps: string[] = [];
-      for (let step = 0; step < 5; step++) {
+      const redirects: string[] = [];
+      for (let round = 0; round < 10; round++) {
+        const target = redirectOf(res);
+        if (target) {
+          // A redirect to a download server or CDN is the file ("direct downloads" enabled or
+          // after the form). A redirect within the site is an intermediate page: follow it.
+          if (!isSitePage(target)) return direct(target);
+          if (/op=login|\/login/i.test(target)) {
+            if (sessionChecked) throw new AccountError(`${cfg.name}: nach der Anmeldung wieder zur Login-Seite umgeleitet`);
+            await session(ctx, m);
+            sessionChecked = true;
+            res = await http.get(url, { followRedirects: false });
+            continue;
+          }
+          redirects.push(target);
+          res = await http.get(target, { followRedirects: false });
+          continue;
+        }
+        const inline = match(res.body, ...directs);
+        if (inline) return direct(inline);
+        assertOnline(res);
+        if (!sessionChecked && steps.length === 0 && !loggedIn(res)) {
+          // Logged out (first use or expired session): log in / verify the cookie once.
+          await session(ctx, m);
+          sessionChecked = true;
+          res = await http.get(url, { followRedirects: false });
+          continue;
+        }
+        // Submit the download form (JD: form F1, pyLoad: op=download*); some sites need several steps.
         const forms = parseForms(visible(res.body));
         const form =
           forms.find((f) => /name=["']F1["']/i.test(f.html)) ?? forms.find((f) => /^download/.test(f.fields.op ?? ''));
-        if (!form) break;
+        if (!form || steps.length >= 5) break;
         const fields: Record<string, string> = { ...form.fields, referer: form.fields.referer || url };
         delete fields.method_free;
         fields.method_premium = 'Premium Download';
         steps.push(fields.op ?? '?');
         res = await http.post(form.action ? resolveUrl(url, form.action) : url, fields, { followRedirects: false });
-        hit = found(res);
-        if (hit) return hit;
-        assertOnline(res);
       }
-      lastResort(res, steps);
+      lastResort(res, steps, redirects);
     },
 
     async checkAccount(ctx): Promise<AccountInfo> {
