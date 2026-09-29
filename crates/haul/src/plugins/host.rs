@@ -80,6 +80,52 @@ fn looks_like_file(headers: &reqwest::header::HeaderMap) -> bool {
             .any(|t| ct.contains(t))
 }
 
+/// `ctx.crypto.aesDecrypt`: AES-128 ECB or CBC without padding, hex in and out (mega.nz keys
+/// and attributes; QuickJS has no crypto).
+fn aes_decrypt(raw: &str) -> Result<String> {
+    use aes::cipher::{
+        generic_array::GenericArray, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit,
+    };
+    #[derive(Deserialize)]
+    struct Req {
+        mode: String,
+        key: String,
+        #[serde(default)]
+        iv: Option<String>,
+        data: String,
+    }
+    let req: Req = serde_json::from_str(raw)?;
+    let key: [u8; 16] = hex::decode(&req.key)?
+        .try_into()
+        .map_err(|_| anyhow!("key must be 16 bytes"))?;
+    let mut data = hex::decode(&req.data)?;
+    if data.len() % 16 != 0 {
+        return Err(anyhow!("data must be a multiple of 16 bytes"));
+    }
+    match req.mode.as_str() {
+        "ecb" => {
+            let cipher = aes::Aes128::new(&key.into());
+            for block in data.chunks_mut(16) {
+                cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        "cbc" => {
+            let iv: [u8; 16] = match &req.iv {
+                Some(iv) => hex::decode(iv)?
+                    .try_into()
+                    .map_err(|_| anyhow!("iv must be 16 bytes"))?,
+                None => [0; 16],
+            };
+            let mut dec = cbc::Decryptor::<aes::Aes128>::new(&key.into(), &iv.into());
+            for block in data.chunks_mut(16) {
+                dec.decrypt_block_mut(GenericArray::from_mut_slice(block));
+            }
+        }
+        other => return Err(anyhow!("unknown mode {other}")),
+    }
+    Ok(hex::encode(data))
+}
+
 /// Largest captcha picture taken; real ones are a few KB.
 const MAX_CAPTCHA_IMAGE: usize = 1024 * 1024;
 
@@ -264,6 +310,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_cookies", Func::from(|| ()))?;
             ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
             ctx.globals().set("__host_sha256", Func::from(|| ()))?;
+            ctx.globals().set("__host_aes", Func::from(|| ()))?;
             ctx.globals().set("__host_captcha", Func::from(|| ()))?;
             ctx.globals().set("__host_password", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
@@ -481,6 +528,15 @@ async fn invoke_inner(
                 Func::from(|text: String| -> String {
                     use sha2::Digest;
                     hex::encode(sha2::Sha256::digest(text.as_bytes()))
+                }),
+            )?;
+            g.set(
+                "__host_aes",
+                Func::from(|req: String| -> String {
+                    match aes_decrypt(&req) {
+                        Ok(out) => serde_json::json!({ "data": out }).to_string(),
+                        Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
+                    }
                 }),
             )?;
             let jar = clients.jar.clone();
@@ -718,6 +774,36 @@ mod bundled {
             rows,
             r#"[{"url":"https://1fichier.com/?abcde12345","name":"a & b.rar","size":1610612736}]"#
         );
+    }
+
+    /// mega.nz in QuickJS: base64url, AES-CBC through the host, UTF-8 names.
+    #[tokio::test]
+    async fn mega_bundle_in_quickjs() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/dist/mega.js");
+        let Ok(code) = std::fs::read_to_string(path) else {
+            eprintln!("plugins/dist/mega.js not built, skipping");
+            return;
+        };
+        let code = format!(
+            r#"{code}
+            __plugin.default.resolve = async (at, ctx) => ({{ url: __plugin.decryptAttr(ctx, at, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]).n }});"#
+        );
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let v = invoke(
+            "mega",
+            &code,
+            "resolve",
+            serde_json::json!(["89W6_aLFeM6oXJnwA_xV97Rn5EDQ_Q2J-C0AFelRAPQ"]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        assert_eq!(v["url"], "Film ä.rar");
     }
 
     /// Google Drive's confirm-link parsing in QuickJS (no URL class there).

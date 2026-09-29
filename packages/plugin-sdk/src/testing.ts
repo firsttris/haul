@@ -2,7 +2,7 @@
  * A fake `ctx` for unit-testing plugins in Node without the Rust core.
  * Routes are matched by `METHOD url` prefix; unmatched requests fail the test.
  */
-import { createHash } from 'node:crypto';
+import { createDecipheriv, createHash } from 'node:crypto';
 import type { Account, CaptchaRequest, Ctx, HttpRequest, HttpResponse } from './index';
 
 export interface FakeRoute {
@@ -139,6 +139,13 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
     log,
     account: { get: () => account },
     hash: { sha256: (text: string) => createHash('sha256').update(text, 'utf8').digest('hex') },
+    crypto: {
+      aesDecrypt({ mode, key, iv, data }) {
+        const d = createDecipheriv(`aes-128-${mode}`, Buffer.from(key, 'hex'), mode === 'cbc' ? Buffer.from(iv ?? '0'.repeat(32), 'hex') : null);
+        d.setAutoPadding(false);
+        return Buffer.concat([d.update(Buffer.from(data, 'hex')), d.final()]).toString('hex');
+      },
+    },
     cookies: {
       get: () => [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
       set: (_url, cookie) => setCookie(cookie),

@@ -59,6 +59,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/mega:
+    dependencies:
+      '@haul/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/send:
     dependencies:
       '@haul/plugin-sdk':

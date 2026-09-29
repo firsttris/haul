@@ -350,6 +350,7 @@ async fn execute(
                 name: None,
                 size: None,
                 max_connections: None,
+                decrypt: None,
             },
             engine.plugins.direct_clients().follow,
             None,
@@ -375,6 +376,12 @@ async fn execute(
         url: resolved.url.clone(),
         headers,
     });
+    let decrypt = match &resolved.decrypt {
+        Some(spec) => Some(Arc::new(
+            super::crypt::Decrypt::from_spec(spec).map_err(Failure::Fail)?,
+        )),
+        None => None,
+    };
 
     // 2. Probe: size, range support, file name.
     let resp = cancellable(cancel, source.get(0, None).send())
@@ -414,10 +421,11 @@ async fn execute(
     let known_name = (placeholder.as_deref() != Some(d.name.as_str()) || has_extension(&d.name))
         .then(|| d.name.clone());
     let url_name = util::filename_from_url(resp.url().as_str()).filter(|n| has_extension(n));
-    let name = probe
-        .name
-        .clone()
-        .or_else(|| resolved.name.as_deref().map(util::sanitize_filename))
+    let plugin_name = resolved.name.as_deref().map(util::sanitize_filename);
+    // An encrypted file's real name is known to the plugin only (mega.nz: in the attributes).
+    let server_name = probe.name.clone().filter(|_| decrypt.is_none());
+    let name = server_name
+        .or(plugin_name)
         .or(url_name)
         .or(known_name)
         .or_else(|| util::filename_from_url(resp.url().as_str()))
@@ -547,6 +555,7 @@ async fn execute(
             progress: progress.clone(),
             cancel: seg_cancel.clone(),
             ranges,
+            decrypt: decrypt.clone(),
         };
         let first = first.take();
         set.spawn(async move { run_segment(ctx, first).await });
@@ -678,6 +687,8 @@ struct SegCtx {
     progress: Arc<Progress>,
     cancel: CancellationToken,
     ranges: bool,
+    /// Encrypted by the hoster (mega.nz): decrypted at each byte's position in the file.
+    decrypt: Option<Arc<super::crypt::Decrypt>>,
 }
 
 async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Failure> {
@@ -771,7 +782,13 @@ async fn pump(ctx: &SegCtx, resp: Response, file: &mut tokio::fs::File) -> Resul
             data = &data[..data.len().min(remaining as usize)];
         }
         cancellable(&ctx.cancel, ctx.engine.limiter.consume(data.len())).await?;
-        file.write_all(data).await?;
+        if let Some(d) = &ctx.decrypt {
+            let mut plain = data.to_vec();
+            d.apply(seg.start + seg.done.load(Ordering::Relaxed), &mut plain);
+            file.write_all(&plain).await?;
+        } else {
+            file.write_all(data).await?;
+        }
         let n = data.len() as u64;
         seg.done.fetch_add(n, Ordering::Relaxed);
         ctx.progress.done.fetch_add(n, Ordering::Relaxed);

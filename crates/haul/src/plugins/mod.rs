@@ -126,6 +126,9 @@ pub struct Resolved {
     pub name: Option<String>,
     pub size: Option<i64>,
     pub max_connections: Option<u32>,
+    /// The hoster sends the file encrypted (mega.nz): decrypted while writing.
+    #[serde(default)]
+    pub decrypt: Option<crate::engine::crypt::DecryptSpec>,
 }
 
 impl Resolved {
@@ -700,6 +703,7 @@ mod replace_tests {
             "gdrive",
             "gofile",
             "mediafire",
+            "mega",
             "send",
         ] {
             assert!(ids.iter().any(|i| i == id), "{id} missing in {ids:?}");
@@ -710,5 +714,15 @@ mod replace_tests {
             pm.find_for("https://send.cm/d/abcdefghijkl").unwrap().id,
             "send"
         );
+        // Folder links of both forms reach the MEGA plugin (Rust regex, not JS).
+        for link in [
+            "https://mega.nz/folder/F0lder12#a2V5a2V5a2V5a2V5a2V5aw",
+            "https://mega.nz/file/AbCdEfGh#key",
+            "https://mega.co.nz/#!AbCdEfGh!key",
+            "https://drive.google.com/drive/folders/1xyz",
+            "https://send.now/s/bob",
+        ] {
+            assert!(pm.find_for(link).is_some(), "{link}");
+        }
     }
 }

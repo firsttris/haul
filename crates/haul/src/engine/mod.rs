@@ -1,6 +1,7 @@
 //! Queue manager: decides which downloads run, keeps live progress and exposes the
 //! operations the API needs (add, pause, resume, delete, online check).
 
+pub mod crypt;
 pub mod extract;
 mod limiter;
 mod worker;
@@ -1710,5 +1711,85 @@ mod engine_tests {
         wait_for(&e, id, status::FINISHED).await;
         assert!(captchas.list().is_empty());
         e.shutdown().await;
+    }
+
+    /// An encrypted file (mega.nz): 4 segments, paused and resumed, decrypted on disk.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn encrypted_download_is_decrypted_per_segment() {
+        let plain: Vec<u8> = (0..24 * 1024 * 1024u32 + 5)
+            .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+            .collect();
+        let spec = crypt::DecryptSpec {
+            cipher: "aes-128-ctr".into(),
+            key: "000102030405060708090a0b0c0d0e0f".into(),
+            iv: "a0a1a2a3a4a5a6a70000000000000000".into(),
+        };
+        let mut encrypted = plain.clone();
+        crypt::Decrypt::from_spec(&spec)
+            .unwrap()
+            .apply(0, &mut encrypted);
+        let base = range_server(Arc::new(encrypted), Arc::default()).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = format!(
+            r#"var __plugin = {{ default: {{ id: "enc", version: 1, matches: [/https?:\/\/enc\.test\//],
+                async resolve(link, ctx) {{
+                    return {{ url: "{base}/file.bin", name: "plain.bin", size: {len},
+                        decrypt: {{ cipher: "aes-128-ctr", key: "{key}", iv: "{iv}" }} }};
+                }},
+            }}}};"#,
+            len = plain.len(),
+            key = spec.key,
+            iv = spec.iv
+        );
+        std::fs::write(plugin_dir.join("enc.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://enc.test/f/1".into(),
+                package_name: Some("Enc".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        wait_for(&e, id, status::DOWNLOADING).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        e.pause(&[id]).await.unwrap();
+        let paused = db::get_download(&e.db, id).await.unwrap().unwrap();
+        assert!(paused.bytes_done > 0 && paused.bytes_done < plain.len() as i64);
+        e.resume(&[id]).await.unwrap();
+        let done = wait_for(&e, id, status::FINISHED).await;
+        let listing: Vec<_> = walk(&dir.path().join("done"));
+        assert_eq!(
+            done.name, "plain.bin",
+            "the plugin's name, not the server's"
+        );
+        let written = std::fs::read(dir.path().join("done/Enc").join(&done.name))
+            .unwrap_or_else(|e| panic!("{e}: {} in {listing:?}", done.name));
+        assert!(written == plain, "decrypted content differs");
+        e.shutdown().await;
+    }
+
+    fn walk(p: &std::path::Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(p)
+            .map(|r| {
+                r.flatten()
+                    .flat_map(|e| {
+                        let path = e.path();
+                        if path.is_dir() {
+                            walk(&path)
+                        } else {
+                            vec![path]
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }

@@ -74,6 +74,14 @@ export interface Ctx {
     /** Lower-case hex SHA-256 of the UTF-8 text. */
     sha256(text: string): string;
   };
+  /** Ciphers computed by the core. */
+  crypto: {
+    /**
+     * AES-128 decryption without padding (mega.nz keys and attributes). Key, iv (CBC, default
+     * zeros) and data as hex; data a multiple of 16 bytes. Returns hex.
+     */
+    aesDecrypt(opts: { mode: 'ecb' | 'cbc'; key: string; iv?: string; data: string }): string;
+  };
   /**
    * Captchas the user solves in the browser, on the hoster's page (like JD's browser solver).
    * Waits until solved (up to 10 minutes) and returns the token for the form field
@@ -195,6 +203,11 @@ export interface Resolved {
   size?: number;
   /** Upper bound for parallel connections to this file. */
   maxConnections?: number;
+  /**
+   * The hoster sends the file encrypted (mega.nz); the core decrypts it while writing.
+   * Key and initial counter block as hex (16 bytes each).
+   */
+  decrypt?: { cipher: 'aes-128-ctr'; key: string; iv: string };
 }
 
 /** One file found by `crawl`. `url` is what `check`/`resolve` get later. */

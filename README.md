@@ -21,6 +21,11 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Rate-Limit mit Wartezeit); Google-Dokumente noch nicht
 - Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); ein reCaptcha löst du im Browser
   (siehe [Captchas](#captchas))
+- MEGA (mega.nz) ohne Account wie bei JDownloader und pyLoad: Datei- und Ordner-Links (auch
+  Unterordner), Name über die MEGA-API; die Datei kommt verschlüsselt und wird beim Laden
+  entschlüsselt (AES-CTR, pro Segment, auch beim Fortsetzen). Fehlt der Schlüssel im Link, fragt
+  Haul danach wie nach einem Download-Passwort. Ist das freie Transfer-Kontingent erschöpft,
+  warten alle MEGA-Downloads die von MEGA genannte Zeit ab
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert

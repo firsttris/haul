@@ -1,0 +1,13 @@
+{
+  "name": "@haul/plugin-mega",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@haul/plugin-sdk": "workspace:*"
+  }
+}

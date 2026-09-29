@@ -79,6 +79,19 @@
       hash: {
         sha256: function (text) { return __host_sha256(String(text)); },
       },
+      crypto: {
+        // AES-128 ECB/CBC decryption without padding; key, iv and data as hex.
+        aesDecrypt: function (opts) {
+          var r = JSON.parse(__host_aes(JSON.stringify({
+            mode: String(opts.mode),
+            key: String(opts.key),
+            iv: opts.iv ? String(opts.iv) : undefined,
+            data: String(opts.data),
+          })));
+          if (r.error) throw new Error('aesDecrypt: ' + r.error);
+          return r.data;
+        },
+      },
       captcha: {
         // Waits until the user solved it in the browser (see captcha.rs); returns the token.
         solve: async function (req) {
