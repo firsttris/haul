@@ -1,7 +1,7 @@
 //! Queue manager: decides which downloads run, keeps live progress and exposes the
 //! operations the API needs (add, pause, resume, delete, online check).
 
-mod extract;
+pub mod extract;
 mod limiter;
 mod worker;
 

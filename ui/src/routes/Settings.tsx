@@ -210,6 +210,7 @@ export function SettingsPage() {
               ['Laufende Downloads', data.tmpDir],
               ['Fertige Dateien', data.doneDir],
               ['Eigene Plugins', data.pluginDir],
+              ['Entpacker', data.extractors.length ? data.extractors.join(', ') : 'keiner gefunden: sudo apt install 7zip 7zip-rar'],
             ].map(([k, v]) => (
               <div className="list-row" key={k}>
                 <div className="grow">

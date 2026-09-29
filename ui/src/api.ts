@@ -91,6 +91,7 @@ export interface SettingsView extends Settings {
   pluginDir: string;
   apiTokenSet: boolean;
   version: string;
+  extractors: string[];
 }
 
 export interface AuthState {

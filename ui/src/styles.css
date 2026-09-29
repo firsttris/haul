@@ -824,3 +824,23 @@ pre.code {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+.pkg-error {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px 10px 58px;
+  border-top: 1px solid var(--line-soft);
+  background: #1c1414;
+  color: #f5b3a8;
+  font-size: 13px;
+  min-width: 1100px;
+}
+.pkg-error span {
+  flex: 1;
+}
+.notice code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+}

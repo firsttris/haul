@@ -212,6 +212,13 @@ export function DownloadsPage() {
       </PageHeader>
 
       <div className="content">
+        {settings && settings.autoExtract && settings.extractors.length === 0 && (
+          <div className="notice" role="alert">
+            <strong>Kein Entpacker installiert.</strong> Fertige Archive werden nicht entpackt. Empfohlen ist 7-Zip mit
+            RAR-Modul, unter Ubuntu/Debian: <code className="mono">sudo apt install 7zip 7zip-rar</code> (alternativ{' '}
+            <code className="mono">7zip unrar</code>). Danach an betroffenen Paketen auf „Erneut entpacken“ klicken.
+          </div>
+        )}
         <div className="grid-4">
           <div className="stat">
             <div className="k">Aktiv</div>
@@ -363,6 +370,7 @@ function PackageRow({
           : null;
   const n = pkg.downloads.length;
   return (
+    <>
     <div className="pkg-row" role="row">
       <button type="button" className="icon-btn toggle" aria-expanded={open} aria-label={`${pkg.name} auf- oder zuklappen`} onClick={onToggle}>
         <IconChevron size={14} strokeWidth={2.5} open={open} />
@@ -402,5 +410,15 @@ function PackageRow({
         <IconTrash size={16} />
       </button>
     </div>
+    {pkg.extract === 'failed' && (
+      <div className="pkg-error" role="row">
+        <span role="alert">{pkg.extractError ?? 'Entpacken fehlgeschlagen'}</span>
+        <button type="button" className="btn small" onClick={() => onAction(`/packages/${pkg.id}/extract`)}>
+          <IconArchive size={16} />
+          Erneut entpacken
+        </button>
+      </div>
+    )}
+    </>
   );
 }

@@ -648,6 +648,8 @@ struct SettingsView {
     plugin_dir: String,
     api_token_set: bool,
     version: &'static str,
+    /// Installed extractors (7-Zip, unrar, unar), best first.
+    extractors: Vec<String>,
 }
 
 async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsView>> {
@@ -661,6 +663,10 @@ async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsVie
             .await?
             .is_some(),
         version: env!("CARGO_PKG_VERSION"),
+        extractors: crate::engine::extract::available_tools()
+            .iter()
+            .map(|t| t.describe())
+            .collect(),
     }))
 }
 

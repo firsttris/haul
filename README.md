@@ -168,7 +168,9 @@ Plugin in `/config/plugins`, ohne neues Image.
 
 ## Entwicklung
 
-Voraussetzungen: Rust (stable), Node 22, pnpm.
+Voraussetzungen: Rust (stable), Node 22, pnpm. Zum Entpacken 7-Zip mit RAR-Modul, unter
+Ubuntu/Debian `sudo apt install 7zip 7zip-rar` (alternativ `7zip unrar`). Haul findet `7zz`, `7z`,
+`7za`, `unrar` und `unar` selbst; welche gefunden wurden, steht unter *Einstellungen → Ordner*.
 
 ```sh
 pnpm install
