@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { base64Decode, cookiesFrom, pickLang, t, decodeHtml, match, parseForms, parseSize, resolveUrl } from './index';
+import { base64Decode, bilingual, cookiesFrom, OfflineError, pickLang, decodeHtml, match, parseForms, parseSize, resolveUrl } from './index';
 import { fakeCtx } from './testing';
 
 describe('parseSize', () => {
@@ -55,13 +55,21 @@ describe('base64Decode', () => {
   });
 });
 
-describe('t / pickLang', () => {
-  it('frames both languages and picks one', () => {
-    const msg = `x: ${t('Datei offline', 'File offline')}`;
+describe('bilingual messages', () => {
+  it('packs both languages into one string', () => {
+    const msg = `x: ${bilingual('Datei offline', 'File offline')}`;
     expect(msg).toBe('x: \u0002Datei offline\u001fFile offline\u0003');
     expect(pickLang(msg, 'de')).toBe('x: Datei offline');
     expect(pickLang(msg, 'en')).toBe('x: File offline');
     // Markers inside the texts cannot break the frame.
-    expect(pickLang(t('a\u0003b', 'c'), 'de')).toBe('ab');
+    expect(pickLang(bilingual('a\u0003b', 'c'), 'de')).toBe('ab');
+  });
+
+  it('errors take { de, en } or a plain string', () => {
+    const e = new OfflineError({ de: 'Ordner gelöscht', en: 'Folder deleted' });
+    expect(e.haulKind).toBe('offline');
+    expect(pickLang(e.message, 'en')).toBe('Folder deleted');
+    expect(pickLang(new OfflineError().message, 'de')).toBe('Datei offline');
+    expect(new OfflineError('HTTP 410').message).toBe('HTTP 410');
   });
 });

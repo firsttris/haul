@@ -156,14 +156,29 @@ export function definePlugin<T extends PluginDefinition>(plugin: T): T {
   return plugin;
 }
 
+/** Both languages of a message; the UI shows the viewer's. */
+export interface Bilingual {
+  de: string;
+  en: string;
+}
+
 /**
- * A message in German and English for errors: the UI shows the viewer's language. Framed with
- * control characters (`\u0002` de `\u001f` en `\u0003`), so it can sit inside other text.
+ * Packs a German and an English text into one string; it does not translate anything. The UI
+ * shows the viewer's language. Needed where a message must be a plain string, e.g. to join it
+ * with other text or for `AccountInfo.message`; errors take `{ de, en }` directly.
+ *
+ * The texts are framed with control characters (`\u0002` de `\u001f` en `\u0003`), so the
+ * message survives the way through the core and the database and can sit inside other text.
  */
-export function t(de: string, en: string): string {
+export function bilingual(de: string, en: string): string {
   const clean = (s: string) => s.replace(/[\u0002\u0003\u001f]/g, '');
   return `\u0002${clean(de)}\u001f${clean(en)}\u0003`;
 }
+
+/** A message given as plain string (same in both languages) or as `{ de, en }`. */
+export type Message = string | Bilingual;
+
+const toText = (m: Message) => (typeof m === 'string' ? m : bilingual(m.de, m.en));
 
 /** The text of `message` in one language, e.g. for tests and logs. */
 export function pickLang(message: string, lang: 'de' | 'en'): string {
@@ -174,31 +189,35 @@ export function pickLang(message: string, lang: 'de' | 'en'): string {
 
 type Kind = 'offline' | 'temporary' | 'account' | 'fatal';
 
+/**
+ * Base of the errors a plugin throws. `message` is a plain string or `{ de, en }`:
+ * `throw new OfflineError({ de: 'Datei gelöscht', en: 'File deleted' })`.
+ */
 export class PluginError extends Error {
   readonly haulKind: Kind;
-  constructor(kind: Kind, message: string) {
-    super(message);
+  constructor(kind: Kind, message: Message) {
+    super(toText(message));
     this.haulKind = kind;
   }
 }
 
 /** The file is gone. The download fails without retry. */
 export class OfflineError extends PluginError {
-  constructor(message = t('Datei offline', 'File offline')) {
+  constructor(message: Message = { de: 'Datei offline', en: 'File offline' }) {
     super('offline', message);
   }
 }
 
 /** Try again later: server busy, limit reached, maintenance. */
 export class TemporaryError extends PluginError {
-  constructor(message: string) {
+  constructor(message: Message) {
     super('temporary', message);
   }
 }
 
 /** Login failed or the account cannot be used right now. */
 export class AccountError extends PluginError {
-  constructor(message: string) {
+  constructor(message: Message) {
     super('account', message);
   }
 }

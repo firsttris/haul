@@ -160,8 +160,10 @@ export default definePlugin({
 });
 ```
 
-Meldungen schreibt ein Plugin zweisprachig mit `t('Datei offline', 'File offline')` aus
-`@haul/plugin-sdk`; die UI zeigt die gewählte Sprache (im Rust-Core entsprechend `tr!`).
+Fehler nehmen beide Sprachen direkt: `throw new OfflineError({ de: 'Datei gelöscht', en: 'File deleted' })`
+(ein einfacher String gilt für beide). Wo eine Meldung ein String sein muss, etwa zum Zusammensetzen
+oder für `AccountInfo.message`, packt `bilingual(de, en)` beide Texte in einen String; übersetzt wird
+dabei nichts, die UI zeigt die gewählte Sprache (im Rust-Core entsprechend `tr!`).
 Texte für das Account-Formular (`account.userLabel`, `secretLabel`, `help`) sind ein String oder
 `{ de, en }`; die UI zeigt die gewählte Sprache.
 
