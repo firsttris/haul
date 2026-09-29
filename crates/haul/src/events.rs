@@ -27,6 +27,8 @@ pub enum Topic {
     Settings,
     /// Contents of the done folder.
     Files,
+    /// Captchas waiting for the user.
+    Captchas,
 }
 
 #[derive(Debug, Clone, Serialize)]

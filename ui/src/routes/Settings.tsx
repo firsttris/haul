@@ -144,6 +144,38 @@ function Password() {
   );
 }
 
+function Captchas() {
+  const t = useT();
+  const [permission, setPermission] = useState(() => ('Notification' in window ? Notification.permission : 'denied'));
+  return (
+    <section className="card" id="captchas" aria-labelledby="captcha-title">
+      <h2 id="captcha-title">{t.captcha.title}</h2>
+      <div className="card-sub">{t.captcha.intro}</div>
+      <ol className="steps">
+        <li>{t.captcha.step1}</li>
+        <li>
+          {t.captcha.step2}{' '}
+          <a href="/api/captcha/haul-captcha.user.js" target="_blank" rel="noreferrer">
+            {t.captcha.install}
+          </a>
+        </li>
+        <li>{t.captcha.step3}</li>
+      </ol>
+      <div className="toolbar">
+        <span className="subtitle" style={{ fontSize: 13 }}>
+          {t.captcha.notifications}:{' '}
+          {permission === 'granted' ? t.captcha.notificationsOn : permission === 'denied' ? t.captcha.notificationsBlocked : ''}
+        </span>
+        {permission === 'default' && (
+          <button type="button" className="btn small" onClick={async () => setPermission(await Notification.requestPermission())}>
+            {t.captcha.notificationsEnable}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Language() {
   const t = useT();
   const lang = useLang();
@@ -239,6 +271,7 @@ export function SettingsPage() {
         </section>
 
         <Language />
+        <Captchas />
         <ApiToken isSet={data.apiTokenSet} />
         <Password />
       </div>

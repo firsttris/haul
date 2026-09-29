@@ -88,12 +88,24 @@ describe('send', () => {
     expect(e.message).toContain('1 GB');
   });
 
-  it('refuses captchas it cannot solve', async () => {
+  it('has the user solve a reCaptcha and posts the token', async () => {
     const ctx = fakeCtx({
       'GET https://send.now/abcdefghijkl': { body: PAGE1 },
-      'POST https://send.now/abcdefghijkl': { body: PAGE2('<div class="g-recaptcha" data-sitekey="6Lx"></div>') },
+      'POST https://send.now/abcdefghijkl': (req) =>
+        req.form?.op === 'download1'
+          ? { body: PAGE2('<div class="g-recaptcha" data-sitekey="6Lx"></div>') }
+          : (expect(req.form?.['g-recaptcha-response']).toBe('CAPTCHA-TOKEN'), { status: 302, headers: { location: CDN } }),
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal', message: expect.stringContaining('reCaptcha') });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas).toEqual([{ kind: 'recaptcha', siteKey: '6Lx', pageUrl: LINK }]);
+  });
+
+  it('stops on image captchas', async () => {
+    const ctx = fakeCtx({
+      'GET https://send.now/abcdefghijkl': { body: PAGE1 },
+      'POST https://send.now/abcdefghijkl': { body: PAGE2('<img src="/captchas/abc.jpg">') },
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal', message: expect.stringContaining('Bild-Captcha') });
   });
 
   it('knows its offline and premium-only pages', async () => {

@@ -120,6 +120,22 @@ export interface SettingsView extends Settings {
   extractors: string[];
 }
 
+/** A captcha waiting for the user (see captcha.rs). */
+export interface Captcha {
+  id: string;
+  secret: string;
+  pluginId: string;
+  pluginName: string;
+  kind: 'recaptcha' | 'hcaptcha' | 'turnstile';
+  siteKey: string;
+  pageUrl: string;
+  host: string;
+  enterprise: boolean;
+  link: string | null;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export interface AuthState {
   setupRequired: boolean;
   loggedIn: boolean;

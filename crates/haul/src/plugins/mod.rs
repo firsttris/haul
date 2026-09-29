@@ -202,6 +202,8 @@ pub struct PluginManager {
     clients: Mutex<HashMap<String, Session>>,
     direct: HttpClients,
     user_agent: String,
+    /// Captchas for the user to solve; unset in tests that do not need them.
+    captchas: std::sync::OnceLock<Arc<crate::captcha::Captchas>>,
 }
 
 /// HTTP clients of one plugin + account and the cookie store they share.
@@ -269,7 +271,13 @@ impl PluginManager {
             clients: Mutex::new(HashMap::new()),
             direct: build_clients(&user_agent, Some(Arc::default())),
             user_agent,
+            captchas: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Lets plugins ask the user for captchas (`ctx.captcha.solve`).
+    pub fn set_captchas(&self, captchas: Arc<crate::captcha::Captchas>) {
+        let _ = self.captchas.set(captchas);
     }
 
     pub async fn reload(&self) {
@@ -437,7 +445,14 @@ impl PluginManager {
         } else {
             None
         };
-        let value = host::invoke(&plugin.id, &plugin.code, method, args, env, clients).await?;
+        let asker = self.captchas.get().map(|c| crate::captcha::Asker {
+            captchas: c.clone(),
+            plugin_id: plugin.id.clone(),
+            plugin_name: plugin.name.clone(),
+            link: args.get(0).and_then(|v| v.as_str()).map(str::to_string),
+        });
+        let value =
+            host::invoke_with(&plugin.id, &plugin.code, method, args, env, clients, asker).await?;
         serde_json::from_value(value).map_err(|e| {
             PluginError::fatal(format!(
                 "{} returned an unexpected value from {method}: {e}",

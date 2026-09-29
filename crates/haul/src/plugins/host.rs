@@ -207,6 +207,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_cookies", Func::from(|| ()))?;
             ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
             ctx.globals().set("__host_sha256", Func::from(|| ()))?;
+            ctx.globals().set("__host_captcha", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
             ctx.eval::<(), _>(code.as_str())?;
             let meta: Function = ctx.globals().get("__haul_meta")?;
@@ -218,6 +219,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
 }
 
 /// Calls `method(...args, ctx)` on the plugin and returns its JSON result.
+#[cfg(test)]
 pub async fn invoke(
     plugin_id: &str,
     code: &str,
@@ -226,17 +228,52 @@ pub async fn invoke(
     env: serde_json::Value,
     clients: HttpClients,
 ) -> std::result::Result<serde_json::Value, PluginError> {
-    let fut = invoke_inner(plugin_id, code, method, args, env, clients);
-    let raw = match tokio::time::timeout(CALL_TIMEOUT, fut).await {
-        Ok(Ok(raw)) => raw,
-        Ok(Err(e)) => return Err(PluginError::fatal(format!("plugin error: {e}"))),
-        Err(_) => {
-            return Err(PluginError {
-                kind: ErrorKind::Temporary,
-                message: crate::tr!("Plugin-Zeitlimit überschritten", "plugin timed out"),
-                wait_secs: None,
-            })
+    invoke_with(plugin_id, code, method, args, env, clients, None).await
+}
+
+/// Like [`invoke`], with `ctx.captcha` answered by the user through `asker`.
+pub async fn invoke_with(
+    plugin_id: &str,
+    code: &str,
+    method: &str,
+    args: serde_json::Value,
+    env: serde_json::Value,
+    clients: HttpClients,
+    asker: Option<crate::captcha::Asker>,
+) -> std::result::Result<serde_json::Value, PluginError> {
+    // The time limit does not count time spent waiting for the user to solve a captcha.
+    let deadline = Arc::new(std::sync::Mutex::new(
+        tokio::time::Instant::now() + CALL_TIMEOUT,
+    ));
+    let fut = invoke_inner(
+        plugin_id,
+        code,
+        method,
+        args,
+        env,
+        clients,
+        asker,
+        deadline.clone(),
+    );
+    tokio::pin!(fut);
+    let raw = loop {
+        let until = *deadline.lock().unwrap();
+        tokio::select! {
+            r = &mut fut => break r,
+            _ = tokio::time::sleep_until(until) => {
+                if *deadline.lock().unwrap() <= tokio::time::Instant::now() {
+                    return Err(PluginError {
+                        kind: ErrorKind::Temporary,
+                        message: crate::tr!("Plugin-Zeitlimit überschritten", "plugin timed out"),
+                        wait_secs: None,
+                    });
+                }
+            }
         }
+    };
+    let raw = match raw {
+        Ok(raw) => raw,
+        Err(e) => return Err(PluginError::fatal(format!("plugin error: {e}"))),
     };
     let res: InvokeResult = serde_json::from_str(&raw)
         .map_err(|e| PluginError::fatal(format!("bad plugin result: {e}")))?;
@@ -255,6 +292,7 @@ pub async fn invoke(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn invoke_inner(
     plugin_id: &str,
     code: &str,
@@ -262,6 +300,8 @@ async fn invoke_inner(
     args: serde_json::Value,
     env: serde_json::Value,
     clients: HttpClients,
+    asker: Option<crate::captcha::Asker>,
+    deadline: Arc<std::sync::Mutex<tokio::time::Instant>>,
 ) -> Result<String> {
     let (rt, ctx) = new_context().await?;
     let code = code.to_string();
@@ -282,6 +322,32 @@ async fn invoke_inner(
                         match do_http(&c, &req).await {
                             Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
                             Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
+                        }
+                    }
+                })),
+            )?;
+            let asker = asker.clone();
+            let deadline = deadline.clone();
+            g.set(
+                "__host_captcha",
+                Func::from(Async(move |req: String| {
+                    let asker = asker.clone();
+                    let deadline = deadline.clone();
+                    async move {
+                        let Some(asker) = asker else {
+                            return serde_json::json!({ "error": "captchas are not available here" }).to_string();
+                        };
+                        let req: crate::captcha::CaptchaRequest = match serde_json::from_str(&req) {
+                            Ok(r) => r,
+                            Err(e) => return serde_json::json!({ "error": format!("bad captcha request: {e}") }).to_string(),
+                        };
+                        {
+                            let mut d = deadline.lock().unwrap();
+                            *d += crate::captcha::TIMEOUT;
+                        }
+                        match asker.captchas.request(&asker, req).await {
+                            Ok(token) => serde_json::json!({ "token": token }).to_string(),
+                            Err(e) => serde_json::json!({ "error": e }).to_string(),
                         }
                     }
                 })),

@@ -70,7 +70,8 @@ describe('ddownload', () => {
         'GET https://ddownload.com/?op=my_account': () => (loggedIn ? { body: ACCOUNT_PAGE } : LOGGED_OUT),
         'GET https://ddownload.com/login.html': { body: LOGIN_PAGE },
         'POST https://ddownload.com/': (req) => {
-          expect(req.form).toMatchObject({ op: 'login', token: 't0k', login: 'bob', password: 'pw' });
+          // The login's Turnstile, solved by the user in the browser.
+          expect(req.form).toMatchObject({ op: 'login', token: 't0k', login: 'bob', password: 'pw', 'cf-turnstile-response': 'CAPTCHA-TOKEN' });
           loggedIn = true;
           return { status: 302, headers: { location: '/?op=my_account' } };
         },
@@ -80,6 +81,7 @@ describe('ddownload', () => {
       { id: 1, user: 'bob', secret: 'pw' },
     );
     const r = await plugin.resolve(LINK, ctx);
+    expect(ctx.captchas).toEqual([{ kind: 'turnstile', siteKey: '0x4AAA', pageUrl: 'https://ddownload.com/login.html' }]);
     expect(r.url).toBe('https://srv12.ddownload.com/d/HASH/Some.File.part1.rar');
     expect(r.maxConnections).toBe(1);
     expect(r.headers).toEqual({ Referer: 'https://ddownload.com/abcdefghijkl' });
@@ -99,6 +101,18 @@ describe('ddownload', () => {
     expect(err.message).toContain('Captcha');
     expect(err.message).toContain('xfss=');
     expect(err.message).not.toContain('API');
+  });
+
+  it('waits for the user when the login captcha is not solved', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': LOGGED_OUT,
+        'GET https://ddownload.com/login.html': { body: LOGIN_PAGE },
+      },
+      { id: 1, user: 'bob', secret: 'pw' },
+    );
+    ctx.captchaToken = null;
+    await expect(plugin.checkAccount!(ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
   });
 
   it('reports a wrong password as such', async () => {

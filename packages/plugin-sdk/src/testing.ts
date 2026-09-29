@@ -3,7 +3,7 @@
  * Routes are matched by `METHOD url` prefix; unmatched requests fail the test.
  */
 import { createHash } from 'node:crypto';
-import type { Account, Ctx, HttpRequest, HttpResponse } from './index';
+import type { Account, CaptchaRequest, Ctx, HttpRequest, HttpResponse } from './index';
 
 export interface FakeRoute {
   status?: number;
@@ -23,6 +23,9 @@ export interface FakeCtx extends Ctx {
   jar: Map<string, string>;
   /** Seconds of every `ctx.wait` (which returns at once). */
   waits: number[];
+  /** Every `ctx.captcha.solve` request; answered with `captchaToken` (default "CAPTCHA-TOKEN"). */
+  captchas: CaptchaRequest[];
+  captchaToken: string | null;
 }
 
 function response(req: HttpRequest, r: FakeRoute): HttpResponse {
@@ -71,7 +74,8 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
   };
   const log = Object.assign(() => {}, { info() {}, warn() {}, error() {}, debug() {} });
   const waits: number[] = [];
-  return {
+  const captchas: CaptchaRequest[] = [];
+  const ctx: FakeCtx = {
     pluginId: 'test',
     requests,
     http: {
@@ -89,6 +93,18 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
       waits.push(seconds);
     },
     waits,
+    captchas,
+    captchaToken: 'CAPTCHA-TOKEN',
+    captcha: {
+      async solve(req) {
+        captchas.push(req);
+        // `captchaToken = null` plays a user who does not solve it.
+        if (ctx.captchaToken === null) {
+          throw Object.assign(new Error('Captcha not solved in time'), { haulKind: 'temporary', haulWait: 1800 });
+        }
+        return ctx.captchaToken;
+      },
+    },
     log,
     account: { get: () => account },
     hash: { sha256: (text: string) => createHash('sha256').update(text, 'utf8').digest('hex') },
@@ -98,4 +114,5 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
     },
     jar,
   };
+  return ctx;
 }

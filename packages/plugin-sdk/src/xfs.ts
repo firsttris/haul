@@ -31,7 +31,9 @@ import {
   parseSize,
   resolveUrl,
   bilingual,
+  CAPTCHA_FIELD,
   decodeHtml,
+  findCaptcha,
   PluginError,
 } from './index';
 
@@ -443,8 +445,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const form =
       forms.find((f) => /name=["']FL["']/i.test(f.html)) ??
       forms.find((f) => f.fields.op === 'login' || 'password' in f.fields);
-    const fields = { ...(form?.fields ?? {}), op: 'login', redirect: base, login: m.user, password: m.password };
+    const fields: Record<string, string> = { ...(form?.fields ?? {}), op: 'login', redirect: base, login: m.user, password: m.password };
     const action = form?.action ? resolveUrl(loginUrl, form.action) : loginUrl;
+    // A captcha on the login form (ddownload: Turnstile) goes to the user.
+    const solved = await tokenCaptcha(ctx, form?.html ?? '', fields, page);
     const res = await ctx.http.post(action, fields);
 
     const after = await accountPage(ctx, m);
@@ -459,6 +463,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       throw new AccountError({
         de: `${cfg.name}: Account gesperrt`,
         en: `${cfg.name}: account banned`,
+      });
+    }
+    if (solved) {
+      throw new AccountError({
+        de: `${cfg.name}: Login trotz gelöstem Captcha fehlgeschlagen. ${cookieHelp.de}`,
+        en: `${cfg.name}: login failed although the captcha was solved. ${cookieHelp.en}`,
       });
     }
     if (CAPTCHA_WORDS.test(form?.html ?? page.body)) {
@@ -565,29 +575,37 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   }
 
   /** JD's handleCaptcha: the plain-text captcha is solved; anything else needs a human. */
-  function solveCaptcha(form: { html: string }, fields: Record<string, string>, page: string) {
+  /**
+   * JD's handleCaptcha: the plain-text captcha is read from the page; reCaptcha, hCaptcha and
+   * Turnstile go to the user, who solves them in the browser on the hoster's page.
+   */
+  async function solveCaptcha(ctx: Ctx, form: { html: string }, fields: Record<string, string>, page: HttpResponse) {
     if (form.html.includes(';background:#ccc;text-align')) {
       // JD looks in the whole page too: the digits may sit outside the form.
-      const code = plainTextCaptcha(form.html) ?? plainTextCaptcha(page);
+      const code = plainTextCaptcha(form.html) ?? plainTextCaptcha(page.body);
       if (!code) throw new TemporaryError({ de: `${cfg.name}: Text-Captcha nicht lesbar`, en: `${cfg.name}: plain-text captcha unreadable` });
       fields.code = code;
       return;
     }
-    const kind = /cf-turnstile/i.test(form.html)
-      ? 'Cloudflare Turnstile'
-      : /h-captcha|hcaptcha/i.test(form.html)
-        ? 'hCaptcha'
-        : /g-recaptcha|data-sitekey/i.test(form.html)
-          ? 'reCaptcha'
-          : /\/captchas\//i.test(form.html)
-            ? 'Bild-Captcha'
-            : null;
-    if (kind) {
+    await tokenCaptcha(ctx, form.html, fields, page);
+    if (/\/captchas\//i.test(form.html)) {
       throw new PluginError('fatal', {
-        de: `${cfg.name}: Download ohne Account verlangt ein Captcha (${kind}), das Haul nicht lösen kann`,
-        en: `${cfg.name}: downloading without an account needs a captcha (${kind}) that Haul cannot solve`,
+        de: `${cfg.name}: Bild-Captcha (noch nicht unterstützt)`,
+        en: `${cfg.name}: image captcha (not supported yet)`,
       });
     }
+  }
+
+  /** A reCaptcha, hCaptcha or Turnstile widget in `html` (or the page): solved by the user. */
+  async function tokenCaptcha(ctx: Ctx, html: string, fields: Record<string, string>, page: HttpResponse): Promise<boolean> {
+    const found = findCaptcha(html) ?? findCaptcha(visible(page.body));
+    if (!found) return false;
+    ctx.log.info(`${cfg.name}: ${found.kind} – wartet auf Lösung im Browser`);
+    const token = await ctx.captcha.solve({ kind: found.kind, siteKey: found.siteKey, pageUrl: page.url });
+    fields[CAPTCHA_FIELD[found.kind]] = token;
+    // hCaptcha fills both fields in the browser; XFS sites often read g-recaptcha-response.
+    if (found.kind === 'hcaptcha') fields['g-recaptcha-response'] = token;
+    return true;
   }
 
   async function resolveFree(link: string, ctx: Ctx): Promise<Resolved> {
@@ -667,7 +685,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
           en: `${cfg.name}: password-protected file (not supported yet)`,
         });
       }
-      solveCaptcha(download2, fields, res.body);
+      await solveCaptcha(ctx, download2, fields, res);
       const wait = countdownOf(res.body);
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
       if (left > 0) await ctx.wait(left);

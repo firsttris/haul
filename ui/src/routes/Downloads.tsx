@@ -16,6 +16,7 @@ import { describe, isActive, isWaiting, toneColor } from '../components/status';
 import { useLive, type LiveProgress } from '../live';
 import { bytes, duration, percent, speed } from '../format';
 import { localize, useT } from '../i18n';
+import { useCaptchas } from '../components/Captchas';
 
 type Filter = 'all' | 'active' | 'waiting' | 'finished' | 'failed';
 
@@ -41,6 +42,8 @@ const col = createColumnHelper<Row>();
 export function DownloadsPage() {
   const t = useT();
   const { data: packages = [], isPending } = usePackages('queue');
+  const captchas = useCaptchas().data;
+  const captchaLinks = useMemo(() => new Set((captchas ?? []).map((c) => c.link ?? '')), [captchas]);
   const stats = useStats().data;
   const settings = useSettings().data;
   const live = useLive();
@@ -133,7 +136,7 @@ export function DownloadsPage() {
         header: t.common.status,
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
-          const s = describe(row.original.d, t);
+          const s = describe(row.original.d, t, captchaLinks);
           return (
             <div className="status" style={{ color: toneColor[s.tone].color }} title={localize(row.original.d.error) ?? s.label}>
               <span className="dot" style={{ background: toneColor[s.tone].color }} />
@@ -174,7 +177,7 @@ export function DownloadsPage() {
         },
       }),
     ],
-    [live.items, action, remove, t],
+    [live.items, action, remove, t, captchaLinks],
   );
 
   const table = useReactTable({

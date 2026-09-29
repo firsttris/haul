@@ -79,6 +79,27 @@
       hash: {
         sha256: function (text) { return __host_sha256(String(text)); },
       },
+      captcha: {
+        // Waits until the user solved it in the browser (see captcha.rs); returns the token.
+        solve: async function (req) {
+          var r = JSON.parse(await __host_captcha(JSON.stringify({
+            kind: String(req.kind),
+            siteKey: String(req.siteKey),
+            pageUrl: String(req.pageUrl),
+            enterprise: !!req.enterprise,
+          })));
+          if (r.token) return r.token;
+          var e = new Error(r.error === 'cancelled'
+            ? '\u0002Captcha abgebrochen\u001fCaptcha cancelled\u0003'
+            : r.error === 'timeout'
+              ? '\u0002Captcha nicht rechtzeitig gelöst\u001fCaptcha not solved in time\u0003'
+              : 'Captcha: ' + r.error);
+          // Cancelled by the user: stop. Not solved in time: try again later, the user may be away.
+          e.haulKind = r.error === 'cancelled' ? 'fatal' : 'temporary';
+          if (r.error === 'timeout') e.haulWait = 30 * 60;
+          throw e;
+        },
+      },
       cookies: {
         get: function (url) { return __host_cookies(String(url)); },
         set: function (url, cookie) { __host_set_cookie(String(url), String(cookie)); },

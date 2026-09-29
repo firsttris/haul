@@ -11,8 +11,10 @@ export const toneColor: Record<Tone, { color: string; bar: string }> = {
   err: { color: 'var(--err)', bar: 'var(--err)' },
 };
 
-export function describe(d: Download, t: Messages, now = Date.now()): { label: string; tone: Tone } {
+/** `captchaLinks`: links whose plugin call waits for a captcha (see useCaptchas). */
+export function describe(d: Download, t: Messages, captchaLinks?: Set<string>, now = Date.now()): { label: string; tone: Tone } {
   const s = t.status;
+  if (d.status === 'resolving' && captchaLinks?.has(d.url)) return { label: s.captcha, tone: 'run' };
   const error = localize(d.error);
   switch (d.status) {
     case 'finished':

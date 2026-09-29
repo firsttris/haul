@@ -47,6 +47,7 @@ const topicKeys: Record<string, string[][]> = {
   plugins: [['plugins']],
   settings: [['settings'], ['stats']],
   files: [['files']],
+  captchas: [['captchas']],
 };
 
 /** Opens the SSE connection once and turns events into query invalidations. */

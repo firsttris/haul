@@ -35,7 +35,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Weboberfläche auf Deutsch und Englisch (Browsersprache, umschaltbar unten in der Seitenleiste
   und unter *Einstellungen*), auch die Meldungen von Server und Hoster-Plugins
 
-**Bewusst nicht in v1:** Free-Downloads mit Captcha, DLC-Container, Multi-User, passwortgeschützte
+**Bewusst nicht in v1:** DLC-Container, Multi-User, passwortgeschützte
 Gofile-Ordner.
 
 ## Schnellstart
@@ -77,6 +77,24 @@ Dann `http://server:8080` öffnen und beim ersten Aufruf den Benutzer anlegen (o
 | `HAUL_USER_AGENT` | Desktop-Browser | User-Agent gegenüber Hostern |
 | `HAUL_7Z`, `HAUL_UNRAR` | `7z`, `unrar` | Programme zum Entpacken |
 | `RUST_LOG` | `info` | Log-Level |
+
+## Captchas
+
+reCaptcha, hCaptcha und Turnstile gelten nur auf der Seite des Hosters. Haul löst sie deshalb wie
+JDownloaders Browser-Solver in deinem Browser:
+
+1. Tampermonkey oder Violentmonkey installieren, dann unter *Einstellungen → Captchas* das
+   Userscript `haul-captcha.user.js` installieren.
+2. Wartet ein Captcha, erscheint oben in Haul ein Hinweis (auch im Tab-Titel, auf Wunsch als
+   Browser-Benachrichtigung). *Lösen* öffnet die Hoster-Seite; das Userscript zeigt dort nur das
+   Captcha und schickt die Lösung an Haul. Der Download läuft danach von selbst weiter.
+3. Ein Captcha wartet 10 Minuten; danach versucht Haul es nach 30 Minuten erneut.
+
+Das Userscript wird nur aktiv, wenn Haul die Seite mit einer Aufgabe im `#…`-Teil der URL öffnet
+(der geht nie an den Hoster), und meldet sich mit einem Einmal-Geheimnis der Aufgabe. So lösen
+auch Web-Logins mit Captcha (ddownload: Turnstile) ohne den Umweg über das xfss-Cookie.
+Plugins fragen mit `await ctx.captcha.solve({ kind, siteKey, pageUrl })`; einfache Text-Captchas
+löst die XFS-Basis selbst, Bild-Captchas noch nicht.
 
 ## Click'n'Load
 

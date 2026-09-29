@@ -135,12 +135,19 @@ describe('mediafire resolve', () => {
     expect((await plugin.resolve(LINK, ctx)).url).toBe(DL);
   });
 
-  it('gives up on a reCaptcha for now', async () => {
+  it('has the user solve a reCaptcha (JD) and posts it', async () => {
     const ctx = fakeCtx({
       ...info,
-      'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: '<form name="form_captcha"><div class="g-recaptcha" data-sitekey="x"></div></form>' },
+      'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': {
+        body: '<form name="form_captcha" method="post" action="/file/q1w2e3r4t5y6u7i"><div class="g-recaptcha" data-sitekey="6Lmf"></div></form>',
+      },
+      'POST https://www.mediafire.com/file/q1w2e3r4t5y6u7i': (req) => {
+        expect(req.form?.['g-recaptcha-response']).toBe('CAPTCHA-TOKEN');
+        return { body: PAGE };
+      },
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(DL);
+    expect(ctx.captchas[0]).toEqual({ kind: 'recaptcha', siteKey: '6Lmf', pageUrl: 'https://www.mediafire.com/file/q1w2e3r4t5y6u7i' });
   });
 
   it('switches the User-Agent at the IP limit', async () => {

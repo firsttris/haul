@@ -64,13 +64,17 @@ describe('datanodes', () => {
     expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
   });
 
-  it('stops on a reCaptcha in captcha-html', async () => {
+  it('has the user solve the reCaptcha from captcha-html', async () => {
     const page2 = `<download-countdown countdown="3" rand="r" captcha-html="&lt;div class=&quot;g-recaptcha&quot; data-sitekey=&quot;k&quot;&gt;&lt;/div&gt;"></download-countdown>`;
     const ctx = fakeCtx({
       'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
-      'POST https://datanodes.to/abcdefghijkl': { body: page2 },
+      'POST https://datanodes.to/abcdefghijkl': (req) =>
+        req.form?.op === 'download1'
+          ? { body: page2 }
+          : (expect(req.form?.['g-recaptcha-response']).toBe('CAPTCHA-TOKEN'), { status: 302, headers: { location: CDN } }),
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal', message: expect.stringContaining('reCaptcha') });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas[0]).toMatchObject({ kind: 'recaptcha', siteKey: 'k' });
   });
 
   it('knows its own errors', async () => {

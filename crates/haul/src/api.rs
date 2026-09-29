@@ -23,6 +23,7 @@ use crate::util::{self, now_ms};
 
 pub struct App {
     pub engine: Arc<Engine>,
+    pub captchas: Arc<crate::captcha::Captchas>,
 }
 
 #[derive(Debug)]
@@ -108,6 +109,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/settings", get(get_settings).put(put_settings))
         .route("/settings/api-token", post(auth::rotate_token))
         .route("/auth/password", post(auth::change_password))
+        .route("/captchas", get(list_captchas))
+        .route("/captchas/{id}/cancel", post(cancel_captcha))
         .nest("/cnl", crate::cnl::router(app.engine.clone()))
         .route_layer(middleware::from_fn_with_state(
             app.clone(),
@@ -123,6 +126,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/auth/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
+        // The userscript answers from the hoster's page, without the UI's login: the
+        // challenge's one-time secret is the proof.
+        .route("/captcha/solve", post(solve_captcha))
+        .route("/captcha/haul-captcha.user.js", get(captcha_userscript))
         .merge(protected)
         .with_state(app)
 }
@@ -978,4 +985,50 @@ async fn put_settings(
     Json(s): Json<Settings>,
 ) -> ApiResult<Json<Settings>> {
     Ok(Json(app.engine.update_settings(s).await?))
+}
+
+// ---- captchas ----------------------------------------------------------------------
+
+async fn list_captchas(State(app): State<Arc<App>>) -> Json<Vec<crate::captcha::CaptchaView>> {
+    Json(app.captchas.list())
+}
+
+async fn cancel_captcha(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    if app.captchas.cancel(&id) {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found())
+    }
+}
+
+#[derive(Deserialize)]
+struct CaptchaAnswer {
+    id: String,
+    secret: String,
+    token: String,
+}
+
+async fn solve_captcha(State(app): State<Arc<App>>, Json(a): Json<CaptchaAnswer>) -> StatusCode {
+    if app.captchas.solve(&a.id, &a.secret, &a.token) {
+        tracing::info!(id = %a.id, "captcha solved in the browser");
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::FORBIDDEN
+    }
+}
+
+async fn captcha_userscript() -> impl IntoResponse {
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/javascript; charset=utf-8",
+            ),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("captcha.user.js"),
+    )
 }

@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod captcha;
 mod cnl;
 mod config;
 mod crypto;
@@ -59,10 +60,14 @@ async fn main() -> Result<()> {
     plugin_dirs.push((cfg.user_plugins(), false));
     let plugins = Arc::new(PluginManager::new(plugin_dirs, cfg.user_agent.clone()));
     plugins.reload().await;
+    let events = Events::new();
+    let captchas = Arc::new(captcha::Captchas::new(events.clone()));
+    plugins.set_captchas(captchas.clone());
 
-    let engine = Engine::new(db, cfg.clone(), plugins, Events::new()).await?;
+    let engine = Engine::new(db, cfg.clone(), plugins, events).await?;
     let app = Arc::new(App {
         engine: engine.clone(),
+        captchas,
     });
     auth::ensure_initial_user(&app).await?;
 

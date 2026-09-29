@@ -16,6 +16,8 @@
  */
 import {
   base64Decode,
+  CAPTCHA_FIELD,
+  findCaptcha,
   decodeHtml,
   definePlugin,
   OfflineError,
@@ -353,19 +355,20 @@ export default definePlugin({
     for (let i = 0; i < 3; i++) {
       const form = parseForms(res.body).find((f) => /name="form_captcha"/i.test(f.html));
       if (!form) break;
-      if (/g-recaptcha|h-captcha|cf-turnstile/i.test(form.html)) {
-        throw new TemporaryError({
-          de: 'Mediafire verlangt gerade ein Captcha, später erneut',
-          en: 'Mediafire asks for a captcha right now, trying later',
-        });
-      }
-      if (!/customCaptchaCheckbox/i.test(form.html)) {
+      const fields: Record<string, string> = { ...form.fields };
+      const widget = findCaptcha(form.html) ?? findCaptcha(res.body);
+      if (widget) {
+        // JD: reCaptchaV2 in form_captcha; the user solves it in the browser on mediafire.com.
+        fields[CAPTCHA_FIELD[widget.kind]] = await ctx.captcha.solve({ kind: widget.kind, siteKey: widget.siteKey, pageUrl: res.url });
+      } else if (/customCaptchaCheckbox/i.test(form.html)) {
+        fields.mf_captcha_response = '1';
+      } else {
         throw new PluginError('fatal', {
           de: 'Mediafire: unbekanntes Captcha',
           en: 'Mediafire: unknown captcha',
         });
       }
-      res = await ctx.http.post(resolveUrl(res.url, form.action || res.url), { ...form.fields, mf_captcha_response: '1' }, {
+      res = await ctx.http.post(resolveUrl(res.url, form.action || res.url), fields, {
         headers: { 'User-Agent': ua, Referer: res.url },
       });
       if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info) };

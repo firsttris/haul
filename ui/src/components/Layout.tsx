@@ -5,6 +5,7 @@ import { api, type Package, type SettingsView, type Stats } from '../api';
 import { useLive } from '../live';
 import { bytes } from '../format';
 import { LANGS, setLang, useLang, useT, type Lang } from '../i18n';
+import { CaptchaBanner } from './Captchas';
 import { IconDownload, IconFolder, IconKey, IconLink, IconSliders, Logo } from './icons';
 
 export function useStats() {
@@ -117,7 +118,10 @@ export function Layout({ children }: { children: ReactNode }) {
           <LanguageSwitch />
         </div>
       </aside>
-      <main className="main">{children}</main>
+      <main className="main">
+        <CaptchaBanner />
+        {children}
+      </main>
     </div>
   );
 }

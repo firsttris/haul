@@ -74,6 +74,15 @@ export interface Ctx {
     /** Lower-case hex SHA-256 of the UTF-8 text. */
     sha256(text: string): string;
   };
+  /**
+   * Captchas the user solves in the browser, on the hoster's page (like JD's browser solver).
+   * Waits until solved (up to 10 minutes) and returns the token for the form field
+   * (`g-recaptcha-response`, `h-captcha-response`, `cf-turnstile-response`). Throws when the
+   * user cancels or does not solve it in time.
+   */
+  captcha: {
+    solve(req: CaptchaRequest): Promise<string>;
+  };
   /** The account's cookie jar, shared by all requests and kept across restarts. */
   cookies: {
     /** `Cookie` header value the jar would send to `url`. */
@@ -82,6 +91,37 @@ export interface Ctx {
     set(url: string, cookie: string): void;
   };
 }
+
+export interface CaptchaRequest {
+  kind: 'recaptcha' | 'hcaptcha' | 'turnstile';
+  /** `data-sitekey` of the widget. */
+  siteKey: string;
+  /** The page that shows the captcha; the token is bound to its domain. */
+  pageUrl: string;
+  /** reCaptcha Enterprise. */
+  enterprise?: boolean;
+}
+
+/** The token-captcha widget on a page, if any: kind and site key (JD's detection order). */
+export function findCaptcha(html: string): { kind: CaptchaRequest['kind']; siteKey: string } | undefined {
+  const key = (cls: string) =>
+    new RegExp(`class=["'][^"']*\\b${cls}\\b[^"']*["'][^>]*data-sitekey=["']([^"']+)["']`, 'i').exec(html)?.[1] ??
+    new RegExp(`data-sitekey=["']([^"']+)["'][^>]*class=["'][^"']*\\b${cls}\\b`, 'i').exec(html)?.[1];
+  const turnstile = key('cf-turnstile');
+  if (turnstile) return { kind: 'turnstile', siteKey: turnstile };
+  const h = key('h-captcha');
+  if (h) return { kind: 'hcaptcha', siteKey: h };
+  const g = key('g-recaptcha') ?? (/g-recaptcha|recaptcha\/api\.js/i.test(html) ? /data-sitekey=["']([^"']+)["']/i.exec(html)?.[1] : undefined);
+  if (g) return { kind: 'recaptcha', siteKey: g };
+  return undefined;
+}
+
+/** The form field a solved token goes into. */
+export const CAPTCHA_FIELD: Record<CaptchaRequest['kind'], string> = {
+  recaptcha: 'g-recaptcha-response',
+  hcaptcha: 'h-captcha-response',
+  turnstile: 'cf-turnstile-response',
+};
 
 export interface CheckResult {
   online: boolean;
