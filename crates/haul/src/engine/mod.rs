@@ -315,11 +315,48 @@ impl Engine {
         .fetch_optional(&self.db)
         .await?;
         match acc {
-            Some(a) => {
-                let secret = self.secrets.decrypt(&a.secret)?;
-                Ok(Some(AccountCreds::from_account(&a, secret)))
-            }
+            Some(a) => Ok(Some(self.account_creds(&a)?)),
             None => Ok(None),
+        }
+    }
+
+    /// Decrypts an account for a plugin call and brings back its saved session, so a login
+    /// survives restarts (like JD's saved account cookies).
+    pub fn account_creds(&self, a: &db::Account) -> Result<AccountCreds> {
+        if !self.plugins.has_session(&a.plugin_id, a.id) {
+            if let Some(stored) = &a.session {
+                let restored = self
+                    .secrets
+                    .decrypt(stored)
+                    .and_then(|json| self.plugins.restore_session(&a.plugin_id, a.id, &json));
+                if let Err(e) = restored {
+                    tracing::warn!(account = a.id, "saved session not usable: {e:#}");
+                }
+            }
+        }
+        let secret = self.secrets.decrypt(&a.secret)?;
+        Ok(AccountCreds::from_account(a, secret))
+    }
+
+    /// Persists an account's cookies after a plugin call.
+    pub async fn save_session(&self, plugin_id: &str, account: i64) {
+        let Some(json) = self.plugins.session_json(plugin_id, account) else {
+            return;
+        };
+        let saved = match self.secrets.encrypt(&json) {
+            Ok(enc) => sqlx::query("UPDATE accounts SET session = ? WHERE id = ?")
+                .bind(enc)
+                .bind(account)
+                .execute(&self.db)
+                .await
+                .map(|_| ()),
+            Err(e) => {
+                tracing::warn!(account, "cannot encrypt session: {e:#}");
+                return;
+            }
+        };
+        if let Err(e) = saved {
+            tracing::warn!(account, "cannot save session: {e:#}");
         }
     }
 
@@ -409,7 +446,11 @@ impl Engine {
         let (online, name, size, err) = match &plugin {
             Some(p) if p.has_check => {
                 let acc = self.pick_account(&p.id).await.ok().flatten();
-                match self.plugins.check(p, &d.url, acc.as_ref()).await {
+                let result = self.plugins.check(p, &d.url, acc.as_ref()).await;
+                if let Some(a) = &acc {
+                    self.save_session(&p.id, a.id).await;
+                }
+                match result {
                     Ok(r) => (
                         if r.online.unwrap_or(true) {
                             "online"
@@ -690,10 +731,11 @@ mod engine_tests {
             builtin_plugins: None,
             app_secret: "test".into(),
             initial_user: None,
+            user_agent: None,
         };
         std::fs::create_dir_all(&cfg.config_dir).unwrap();
         let db = db::connect(&cfg.db_path()).await.unwrap();
-        let plugins = Arc::new(PluginManager::new(vec![]));
+        let plugins = Arc::new(PluginManager::new(vec![], None));
         let e = Engine::new(db, cfg, plugins, Events::new()).await.unwrap();
         tokio::spawn(e.clone().run());
         e

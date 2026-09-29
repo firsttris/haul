@@ -92,6 +92,9 @@ pub struct Account {
     pub error: Option<String>,
     pub checked_at: Option<i64>,
     pub created_at: i64,
+    /// Encrypted cookies of the hoster session.
+    #[serde(skip_serializing)]
+    pub session: Option<String>,
 }
 
 pub async fn get_download(db: &Db, id: i64) -> Result<Option<Download>> {

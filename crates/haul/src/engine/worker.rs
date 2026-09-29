@@ -274,7 +274,11 @@ async fn execute(
                 cancel,
                 engine.plugins.resolve(&plugin, &d.url, acc.as_ref()),
             )
-            .await??;
+            .await?;
+            if let Some(a) = &acc {
+                engine.save_session(&plugin.id, a.id).await;
+            }
+            let r = r?;
             let clients = engine
                 .plugins
                 .clients_for(&plugin.id, acc.as_ref().map(|a| a.id));

@@ -51,6 +51,7 @@ Dann `http://server:8080` öffnen und beim ersten Aufruf den Benutzer anlegen (o
 | `HAUL_CNL_LISTEN` | `127.0.0.1:9666` (im Image `0.0.0.0:9666`) | Click'n'Load; `off` schaltet es ab |
 | `HAUL_BUILTIN_PLUGINS` | im Image `/app/plugins` | mitgelieferte Plugins |
 | `HAUL_USER`, `HAUL_PASSWORD` | – | legt den Login beim ersten Start an |
+| `HAUL_USER_AGENT` | Desktop-Browser | User-Agent gegenüber Hostern |
 | `HAUL_7Z`, `HAUL_UNRAR` | `7z`, `unrar` | Programme zum Entpacken |
 | `RUST_LOG` | `info` | Log-Level |
 

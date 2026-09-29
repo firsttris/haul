@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         plugin_dirs.push((builtin.clone(), true));
     }
     plugin_dirs.push((cfg.user_plugins(), false));
-    let plugins = Arc::new(PluginManager::new(plugin_dirs));
+    let plugins = Arc::new(PluginManager::new(plugin_dirs, cfg.user_agent.clone()));
     plugins.reload().await;
 
     let engine = Engine::new(db, cfg.clone(), plugins, Events::new()).await?;

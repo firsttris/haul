@@ -16,6 +16,8 @@ pub struct Config {
     pub builtin_plugins: Option<PathBuf>,
     pub app_secret: String,
     pub initial_user: Option<(String, String)>,
+    /// User-Agent sent to hosters; default: a current desktop browser.
+    pub user_agent: Option<String>,
 }
 
 impl Config {
@@ -49,6 +51,7 @@ impl Config {
             config_dir,
             app_secret,
             initial_user,
+            user_agent: var("HAUL_USER_AGENT"),
         })
     }
 }

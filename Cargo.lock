@@ -957,6 +957,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "cbc",
+ "cookie_store",
  "dotenvy",
  "futures",
  "governor",
@@ -967,6 +968,7 @@ dependencies = [
  "rand 0.8.8",
  "regex",
  "reqwest",
+ "reqwest_cookie_store",
  "rquickjs",
  "rust-embed",
  "serde",
@@ -1984,6 +1986,18 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "webpki-roots",
+]
+
+[[package]]
+name = "reqwest_cookie_store"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e75bc88d954b228850d19e3685cedb38c030a17da34aa01c307f95d6e33de34"
+dependencies = [
+ "bytes",
+ "cookie_store",
+ "reqwest",
+ "url",
 ]
 
 [[package]]

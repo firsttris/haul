@@ -18,7 +18,7 @@ use crate::auth;
 use crate::db::{self, status, Account, Download, Package, Settings};
 use crate::engine::{AddLinks, Engine};
 use crate::events::Topic;
-use crate::plugins::{AccountCreds, LoadError, Plugin};
+use crate::plugins::{LoadError, Plugin};
 use crate::util::{self, now_ms};
 
 pub struct App {
@@ -530,7 +530,12 @@ async fn update_account(
         recheck = true;
     }
     if recheck {
+        // New credentials: the old session belongs to the old login.
         app.engine.plugins.forget_account(&acc.plugin_id, id);
+        sqlx::query("UPDATE accounts SET session = NULL WHERE id = ?")
+            .bind(id)
+            .execute(db)
+            .await?;
         spawn_account_check(&app, id);
     }
     app.engine.events.changed(Topic::Accounts);
@@ -579,8 +584,9 @@ pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
         .execute(db)
         .await?;
     engine.events.changed(Topic::Accounts);
-    let creds = AccountCreds::from_account(&acc, engine.secrets.decrypt(&acc.secret)?);
+    let creds = engine.account_creds(&acc)?;
     let result = engine.plugins.check_account(&plugin, &creds).await;
+    engine.save_session(&plugin.id, acc.id).await;
     let (status, premium, traffic, until, error) = match result {
         Ok(i) if i.valid => ("valid", i.premium, i.traffic_left, i.valid_until, i.message),
         Ok(i) => (

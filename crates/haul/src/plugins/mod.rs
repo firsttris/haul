@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use reqwest::cookie::Jar;
 use reqwest::Client;
+use reqwest_cookie_store::CookieStoreMutex;
 use serde::{Deserialize, Serialize};
 
 pub use host::{ErrorKind, HttpClients, PluginError};
@@ -157,14 +157,28 @@ pub struct PluginManager {
     plugins: RwLock<Vec<Arc<Plugin>>>,
     errors: RwLock<Vec<LoadError>>,
     /// Cookie jars per plugin and account, so logins survive between calls.
-    clients: Mutex<HashMap<String, HttpClients>>,
+    clients: Mutex<HashMap<String, Session>>,
     direct: HttpClients,
+    user_agent: String,
 }
 
-fn build_clients(jar: Option<Arc<Jar>>) -> HttpClients {
+/// HTTP clients of one plugin + account and the cookie store they share.
+struct Session {
+    clients: HttpClients,
+    cookies: Arc<CookieStoreMutex>,
+}
+
+fn session_key(plugin: &str, account: Option<i64>) -> String {
+    format!(
+        "{plugin}:{}",
+        account.map(|a| a.to_string()).unwrap_or_default()
+    )
+}
+
+fn build_clients(user_agent: &str, jar: Option<Arc<CookieStoreMutex>>) -> HttpClients {
     let build = |follow: bool| {
         let mut b = Client::builder()
-            .user_agent(USER_AGENT)
+            .user_agent(user_agent)
             .connect_timeout(Duration::from_secs(20))
             .redirect(if follow {
                 reqwest::redirect::Policy::limited(10)
@@ -199,13 +213,16 @@ fn to_regex(m: &MatchSpec) -> Result<Regex> {
 
 impl PluginManager {
     /// `dirs` in load order; later directories override plugins with the same id.
-    pub fn new(dirs: Vec<(PathBuf, bool)>) -> Self {
+    /// `user_agent` overrides the browser-like default sent to hosters.
+    pub fn new(dirs: Vec<(PathBuf, bool)>, user_agent: Option<String>) -> Self {
+        let user_agent = user_agent.unwrap_or_else(|| USER_AGENT.to_string());
         Self {
             dirs,
             plugins: RwLock::new(Vec::new()),
             errors: RwLock::new(Vec::new()),
             clients: Mutex::new(HashMap::new()),
-            direct: build_clients(Some(Arc::new(Jar::default()))),
+            direct: build_clients(&user_agent, Some(Arc::default())),
+            user_agent,
         }
     }
 
@@ -276,16 +293,56 @@ impl PluginManager {
 
     /// Clients with the cookie jar of `plugin` + `account`.
     pub fn clients_for(&self, plugin: &str, account: Option<i64>) -> HttpClients {
-        let key = format!(
-            "{plugin}:{}",
-            account.map(|a| a.to_string()).unwrap_or_default()
-        );
         self.clients
             .lock()
             .unwrap()
-            .entry(key)
-            .or_insert_with(|| build_clients(Some(Arc::new(Jar::default()))))
+            .entry(session_key(plugin, account))
+            .or_insert_with(|| self.new_session(cookie_store::CookieStore::default()))
+            .clients
             .clone()
+    }
+
+    fn new_session(&self, store: cookie_store::CookieStore) -> Session {
+        let cookies = Arc::new(CookieStoreMutex::new(store));
+        Session {
+            clients: build_clients(&self.user_agent, Some(cookies.clone())),
+            cookies,
+        }
+    }
+
+    /// Whether this account's session is already in memory.
+    pub fn has_session(&self, plugin: &str, account: i64) -> bool {
+        self.clients
+            .lock()
+            .unwrap()
+            .contains_key(&session_key(plugin, Some(account)))
+    }
+
+    /// Restores an account's cookies saved by [`Self::session_json`], e.g. after a restart.
+    pub fn restore_session(&self, plugin: &str, account: i64, json: &str) -> Result<()> {
+        let store =
+            cookie_store::serde::json::load_all(json.as_bytes()).map_err(|e| anyhow!("{e}"))?;
+        let session = self.new_session(store);
+        self.clients
+            .lock()
+            .unwrap()
+            .insert(session_key(plugin, Some(account)), session);
+        Ok(())
+    }
+
+    /// All cookies of an account's session (including session cookies), to persist them.
+    pub fn session_json(&self, plugin: &str, account: i64) -> Option<String> {
+        let cookies = self
+            .clients
+            .lock()
+            .unwrap()
+            .get(&session_key(plugin, Some(account)))?
+            .cookies
+            .clone();
+        let store = cookies.lock().ok()?;
+        let mut out = Vec::new();
+        cookie_store::serde::json::save_incl_expired_and_nonpersistent(&store, &mut out).ok()?;
+        String::from_utf8(out).ok()
     }
 
     /// Drops the cookie jar of an account, e.g. after its credentials changed.
@@ -293,7 +350,7 @@ impl PluginManager {
         self.clients
             .lock()
             .unwrap()
-            .remove(&format!("{plugin}:{account}"));
+            .remove(&session_key(plugin, Some(account)));
     }
 
     async fn call<T: serde::de::DeserializeOwned>(
@@ -392,5 +449,72 @@ mod tests {
         .unwrap();
         assert!(r.is_match("https://DDownload.com/abcdefghijkl"));
         assert!(!r.is_match("https://example.com/abcdefghijkl"));
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use axum::http::{header, HeaderMap};
+    use axum::routing::get;
+
+    /// A login sets a session cookie; after saving and restoring (= server restart) the new
+    /// client must still send it.
+    #[tokio::test]
+    async fn session_survives_restart() {
+        let app = axum::Router::new()
+            .route(
+                "/login",
+                get(|| async {
+                    (
+                        [(header::SET_COOKIE, "xfss=SESSION123; path=/; HttpOnly")],
+                        "ok",
+                    )
+                }),
+            )
+            .route(
+                "/whoami",
+                get(|h: HeaderMap| async move {
+                    h.get(header::COOKIE)
+                        .map(|v| v.to_str().unwrap().to_string())
+                        .unwrap_or_default()
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let first = PluginManager::new(vec![], None);
+        let c = first.clients_for("ddownload", Some(7));
+        c.follow.get(format!("{base}/login")).send().await.unwrap();
+        let saved = first.session_json("ddownload", 7).unwrap();
+        assert!(saved.contains("SESSION123"));
+
+        let restarted = PluginManager::new(vec![], Some("Test/1".into()));
+        assert!(!restarted.has_session("ddownload", 7));
+        restarted.restore_session("ddownload", 7, &saved).unwrap();
+        let c = restarted.clients_for("ddownload", Some(7));
+        let cookie = c
+            .follow
+            .get(format!("{base}/whoami"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(cookie, "xfss=SESSION123");
+        // Other accounts do not see it.
+        let other = restarted.clients_for("ddownload", Some(8));
+        let cookie = other
+            .follow
+            .get(format!("{base}/whoami"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(cookie, "");
     }
 }

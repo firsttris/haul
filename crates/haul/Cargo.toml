@@ -25,6 +25,8 @@ percent-encoding = "2"
 rand = "0.8"
 regex = "1"
 reqwest.workspace = true
+reqwest_cookie_store = "0.9"
+cookie_store = "0.22"
 rquickjs = { version = "0.9", features = ["futures", "parallel", "macro"] }
 rust-embed = "8"
 serde.workspace = true
