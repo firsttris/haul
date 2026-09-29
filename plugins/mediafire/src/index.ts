@@ -13,12 +13,20 @@
  *   rarely a reCaptcha. The IP limit (`limitReachedTTL`) sits on IP + User-Agent; JD retries
  *   with another User-Agent.
  * - A direct link (`downloadNNN.mediafire.com/…`) is tried first, like JD's stored direct URL.
+ * - Account (JD MediafireCom.login / fetchAccountInfo): e-mail and password through the
+ *   website's login form (`form_login1`, `security`, `login_remember`), the cookie `user` proves
+ *   it; the API session token comes from `/myaccount/` and is checked with `user/get_info`.
+ *   Premium (`premium: yes`, `bandwidth` = traffic left) downloads via `file/get_links`
+ *   (`direct_download`) with any number of connections; a free account downloads like a guest,
+ *   with its session.
  * - Password-protected files (JD handlePW / PasswordSolver, pyLoad PASSWORD_PATTERN): the page
  *   shows a password prompt; the password goes as `downloadp` in its form, sent without
  *   following redirects ("pw protected files can directly redirect to download"). If the prompt
  *   comes back, the password was wrong: three tries.
  */
 import {
+  AccountError,
+  memo,
   base64Decode,
   CAPTCHA_FIELD,
   findCaptcha,
@@ -33,7 +41,7 @@ import {
   withPassword,
   WRONG_PASSWORD,
 } from '@haul/plugin-sdk';
-import type { Bilingual, Ctx, CrawledFile, FileHash, HttpResponse } from '@haul/plugin-sdk';
+import type { AccountInfo, Bilingual, Ctx, CrawledFile, FileHash, HttpResponse, Resolved } from '@haul/plugin-sdk';
 
 const SITE = 'https://www.mediafire.com';
 const API = `${SITE}/api/1.5`;
@@ -146,6 +154,102 @@ async function api(ctx: Ctx, command: string, query: Record<string, string>): Pr
     throw new TemporaryError(`Mediafire-API: ${r.message ?? r.error}`);
   }
   return r;
+}
+
+// ---- account (JD MediafireCom.login / apiCommand) ---------------------------------------
+
+interface UserInfo {
+  email?: string;
+  premium?: string;
+  bandwidth?: string | number;
+}
+
+/** An API call with the account's session token; `undefined` when the session is not valid. */
+async function sessionApi(ctx: Ctx, command: string, query: Record<string, string> = {}): Promise<Record<string, unknown> | undefined> {
+  const token = memo.get(ctx, SITE, 'mf_session');
+  if (!token) return undefined;
+  const qs = Object.entries({ ...query, session_token: token, response_format: 'json' })
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+  const res = await ctx.http.get(`${API}/${command}.php?${qs}`, {
+    headers: { Accept: '*/*', 'X-Requested-With': 'XMLHttpRequest', 'User-Agent': USER_AGENTS[0] },
+  });
+  let r: Record<string, unknown> | undefined;
+  try {
+    r = res.json<{ response?: Record<string, unknown> }>().response;
+  } catch {
+    throw new TemporaryError(`Mediafire-API: HTTP ${res.status}`);
+  }
+  if (!r) throw new TemporaryError(`Mediafire-API: HTTP ${res.status}`);
+  // E.g. 105 "The supplied Session Token is expired or invalid".
+  if (r.result === 'Error') return Number(r.error) === 105 ? undefined : r;
+  return r;
+}
+
+/** JD login(): the saved session if it still belongs to the account, else the login form. */
+async function login(ctx: Ctx): Promise<UserInfo> {
+  const acc = ctx.account.get()!;
+  const saved = await sessionApi(ctx, 'user/get_info');
+  const known = saved?.user_info as UserInfo | undefined;
+  if (known && saved?.result !== 'Error' && (known.email ?? '').toLowerCase() === acc.user.trim().toLowerCase()) return known;
+  const page = await ctx.http.get(`${SITE}/login/`, { headers: { 'User-Agent': USER_AGENTS[0] } });
+  const form = parseForms(page.body).find((f) => /id=["']form_login1["']/i.test(f.html));
+  if (!form) throw new TemporaryError({ de: 'Mediafire: Login-Formular nicht gefunden', en: 'Mediafire: login form not found' });
+  const posts = [...page.body.matchAll(/mSendDataByPostJSON\('(\/[^'"]+)'/g)].map((m) => m[1]);
+  const action = form.action || (posts.length === 1 ? posts[0] : '/dynamic/client_login/mediafire.php');
+  const security = /security\s*:\s*"([^"]+)/.exec(page.body)?.[1];
+  const fields: Record<string, string> = { ...form.fields, login_remember: 'true', login_email: acc.user.trim(), login_pass: acc.secret };
+  if (security) fields.security = security;
+  await ctx.http.post(resolveUrl(page.url, action), fields, { headers: { 'User-Agent': USER_AGENTS[0], Referer: page.url } });
+  // JD: "This might return an error via json but as long as we get the cookie all is fine".
+  const user = /(?:^|;\s*)user=([^;]*)/.exec(ctx.cookies.get(`${SITE}/`))?.[1];
+  if (!user || user.toLowerCase() === 'x') {
+    throw new AccountError({ de: 'Mediafire: E-Mail oder Passwort falsch', en: 'Mediafire: wrong e-mail or password' });
+  }
+  const my = await ctx.http.get(`${SITE}/myaccount/`, { headers: { 'User-Agent': USER_AGENTS[0] } });
+  const token =
+    /parent\.bqx\("([a-f0-9]+)"\)/.exec(my.body)?.[1] ?? /LoadIframeLightbox\('\/templates\/tos\.php\?token=([a-f0-9]+)/.exec(my.body)?.[1];
+  if (!token) throw new TemporaryError({ de: 'Mediafire: Session-Token nicht gefunden', en: 'Mediafire: session token not found' });
+  memo.set(ctx, SITE, 'mf_session', token, 30 * 86400);
+  const r = await sessionApi(ctx, 'user/get_info');
+  const info = r?.user_info as UserInfo | undefined;
+  if (!r || r.result === 'Error' || !info) throw new AccountError(`Mediafire: ${String(r?.message ?? 'login failed')}`);
+  return info;
+}
+
+const isPremium = (u: UserInfo) => String(u.premium ?? '').toLowerCase() === 'yes';
+
+/** JD fetchAccountInfo. */
+async function accountInfo(ctx: Ctx): Promise<AccountInfo> {
+  const u = await login(ctx);
+  memo.set(ctx, SITE, 'mf_premium', isPremium(u) ? '1' : '0', 30 * 86400);
+  if (!isPremium(u)) return { valid: true, premium: false, message: 'Free' };
+  const traffic = Number(u.bandwidth);
+  return { valid: true, premium: true, trafficLeft: Number.isFinite(traffic) ? traffic : undefined, message: 'Premium' };
+}
+
+/** JD handleDownload, premium: `file/get_links` with `link_type=direct_download`. */
+async function resolvePremium(ctx: Ctx, quickKey: string, info?: FileInfo): Promise<Resolved | undefined> {
+  let premium = memo.get(ctx, SITE, 'mf_premium');
+  if (premium === undefined) {
+    premium = isPremium(await login(ctx)) ? '1' : '0';
+    memo.set(ctx, SITE, 'mf_premium', premium, 30 * 86400);
+  }
+  if (premium !== '1') return undefined;
+  let r = await sessionApi(ctx, 'file/get_links', { link_type: 'direct_download', quick_key: quickKey });
+  if (!r) {
+    // Session expired: log in again once.
+    await login(ctx);
+    r = await sessionApi(ctx, 'file/get_links', { link_type: 'direct_download', quick_key: quickKey });
+  }
+  const link = (r?.links as Array<{ direct_download?: string; error?: string }> | undefined)?.[0];
+  if (link?.direct_download) {
+    return { url: link.direct_download, headers: { 'User-Agent': USER_AGENTS[0] }, name: info?.filename, size: info ? sizeOf(info) : undefined, hash: info ? hashOf(info) : undefined };
+  }
+  if (/User lacks permissions/i.test(link?.error ?? '')) {
+    throw new PluginError('fatal', { de: 'Mediafire: dieser Account darf die Datei nicht laden', en: 'Mediafire: this account may not download the file' });
+  }
+  throw new TemporaryError({ de: `Mediafire: kein Premium-Link (${link?.error ?? r?.message ?? '?'})`, en: `Mediafire: no premium link (${link?.error ?? r?.message ?? '?'})` });
 }
 
 const deleted = (f: FileInfo) => !!f.delete_date && /^\d{4}-\d{2}-\d{2}/.test(f.delete_date);
@@ -313,9 +417,21 @@ function download(url: string, ua: string, referer: string) {
 export default definePlugin({
   id: 'mediafire',
   name: 'Mediafire',
-  version: 3,
+  version: 4,
   matches: [new RegExp(`^https?://${HOSTS}/.+`, 'i'), /^https?:\/\/download\d+\.mediafire(?:cdn)?\.com\//i],
   accountRequired: false,
+  account: {
+    userLabel: { de: 'E-Mail', en: 'E-mail' },
+    secretLabel: { de: 'Passwort', en: 'Password' },
+    help: {
+      de: 'Wie bei JDownloader: E-Mail und Passwort des Mediafire-Accounts. Premium lädt über den Direktlink der API, ein Free-Account wie ohne Account.',
+      en: 'Like JDownloader: the Mediafire account\'s e-mail and password. Premium downloads through the API\'s direct link, a free account like without one.',
+    },
+  },
+
+  async checkAccount(ctx) {
+    return accountInfo(ctx);
+  },
 
   async crawl(link, ctx) {
     const t = target(link);
@@ -370,6 +486,11 @@ export default definePlugin({
         de: 'Mediafire: Datei nicht gefunden',
         en: 'Mediafire: file not found',
       });
+    }
+    // Premium account: the API's direct link (JD); a private file may belong to the account.
+    if (ctx.account.get()) {
+      const premium = await resolvePremium(ctx, t.id, info);
+      if (premium) return premium;
     }
     if (info.privacy && info.privacy !== 'public') {
       throw new PluginError('fatal', {

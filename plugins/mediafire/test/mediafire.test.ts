@@ -257,3 +257,64 @@ describe('mediafire resolve', () => {
     expect((await plugin.resolve(LINK, ctx)).url).toBe('https://www.mediafire.com/file/q1w2e3r4t5y6u7i');
   });
 });
+
+describe('mediafire account (JD login / fetchAccountInfo)', () => {
+  const acc = { id: 1, user: 'Me@Example.org', secret: 'geheim' };
+  const LOGIN_PAGE = `<form id="form_login1" method="post"><input type="hidden" name="security" value=""><input name="login_email"></form>
+    <script>var cfg = { security: "sec123" }; mSendDataByPostJSON('/dynamic/client_login/mediafire.php', x);</script>`;
+  const routes = (premium: 'yes' | 'no', seen: string[] = []) => ({
+    'GET https://www.mediafire.com/login/': { body: LOGIN_PAGE },
+    'POST https://www.mediafire.com/dynamic/client_login/mediafire.php': (req: HttpRequest) => {
+      expect(req.form).toMatchObject({ login_email: 'Me@Example.org', login_pass: 'geheim', login_remember: 'true', security: 'sec123' });
+      return { headers: { 'set-cookie': 'user=abc123; Path=/' }, body: '{}' };
+    },
+    'GET https://www.mediafire.com/myaccount/': { body: '<script>parent.bqx("0a1b2c3d")</script>' },
+    [`GET ${API}/user/get_info.php`]: (req: HttpRequest) => {
+      seen.push(req.url);
+      return /session_token=0a1b2c3d/.test(req.url)
+        ? ok({ user_info: { email: 'me@example.org', premium: premium, bandwidth: '5000' } })
+        : { body: JSON.stringify({ response: { result: 'Error', error: 105, message: 'expired' } }) };
+    },
+  });
+
+  it('logs in through the form and reads premium and traffic', async () => {
+    const ctx = fakeCtx(routes('yes'), acc);
+    expect(await plugin.checkAccount!(ctx)).toEqual({ valid: true, premium: true, trafficLeft: 5000, message: 'Premium' });
+    // The saved session is reused without the form.
+    const again = fakeCtx({ [`GET ${API}/user/get_info.php`]: routes('yes')[`GET ${API}/user/get_info.php`] }, acc);
+    again.jar.clear();
+    for (const [k, v] of ctx.jar) again.jar.set(k, v);
+    expect(await plugin.checkAccount!(again)).toMatchObject({ premium: true });
+  });
+
+  it('reports wrong credentials', async () => {
+    const ctx = fakeCtx({ ...routes('yes'), 'POST https://www.mediafire.com/dynamic/client_login/mediafire.php': { body: '{"error":1}' } }, acc);
+    await expect(plugin.checkAccount!(ctx)).rejects.toMatchObject({ haulKind: 'account' });
+  });
+
+  it('downloads premium through file/get_links', async () => {
+    const ctx = fakeCtx(
+      {
+        ...routes('yes'),
+        [`GET ${API}/file/get_info.php`]: ok({ file_info: INFO }),
+        [`GET ${API}/file/get_links.php`]: (req: HttpRequest) => {
+          expect(req.url).toContain('link_type=direct_download');
+          expect(req.url).toContain('quick_key=q1w2e3r4t5y6u7i');
+          return ok({ links: [{ quickkey: 'q1w2e3r4t5y6u7i', direct_download: DL }] });
+        },
+      },
+      acc,
+    );
+    await plugin.checkAccount!(ctx);
+    expect(await plugin.resolve(LINK, ctx)).toMatchObject({ url: DL, name: 'Film.part1.rar' });
+  });
+
+  it('downloads like a guest with a free account', async () => {
+    const ctx = fakeCtx(
+      { ...routes('no'), [`GET ${API}/file/get_info.php`]: ok({ file_info: INFO }), 'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: PAGE } },
+      acc,
+    );
+    await plugin.checkAccount!(ctx);
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(DL);
+  });
+});
