@@ -360,9 +360,12 @@ function PackageRow({
   const done = pkg.downloads.reduce((n, d) => n + (d.status === 'finished' ? (d.size ?? 0) : progressOf(d, live).done), 0);
   const running = pkg.downloads.some((d) => isActive(d) || d.status === 'queued');
   const resumable = pkg.downloads.some((d) => d.status === 'paused' || d.status === 'failed');
+  const extractPercent = useLive().extract.get(pkg.id);
   const extract =
     pkg.extract === 'running'
-      ? 'entpackt …'
+      ? extractPercent !== undefined
+        ? `entpackt ${extractPercent} %`
+        : 'entpackt …'
       : pkg.extract === 'done'
         ? 'entpackt'
         : pkg.extract === 'failed'
@@ -387,6 +390,20 @@ function PackageRow({
         )}
       </div>
       <div className="grow" />
+      {pkg.extract === 'running' && (
+        <div
+          className="extract-bar"
+          role="progressbar"
+          aria-label={`${pkg.name} wird entpackt`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={extractPercent ?? 0}
+        >
+          <div className="bar">
+            <div style={{ width: `${extractPercent ?? 0}%`, background: 'var(--accent)' }} />
+          </div>
+        </div>
+      )}
       <button
         type="button"
         className="icon-btn"

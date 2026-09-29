@@ -13,6 +13,8 @@ pub enum Event {
     Progress {
         items: Vec<ProgressItem>,
         total_speed: u64,
+        /// Packages being extracted and their percentage.
+        extract: Vec<ExtractProgress>,
     },
 }
 
@@ -33,6 +35,13 @@ pub struct ProgressItem {
     pub size: Option<u64>,
     /// Bytes per second, averaged over the last few seconds.
     pub speed: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractProgress {
+    pub package_id: i64,
+    pub percent: u8,
 }
 
 #[derive(Clone)]

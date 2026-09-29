@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config::Config;
 use crate::crypto::SecretBox;
 use crate::db::{self, status, Db, Download, Settings};
-use crate::events::{Event, Events, ProgressItem, Topic};
+use crate::events::{Event, Events, ExtractProgress, ProgressItem, Topic};
 use crate::plugins::{AccountCreds, ErrorKind, PluginManager};
 use crate::util::{self, now_ms};
 
@@ -51,6 +51,8 @@ pub struct Engine {
     wake: Notify,
     limiter: Limiter,
     shutdown: CancellationToken,
+    /// Extraction progress per package, sent with the progress events.
+    extracting: Mutex<HashMap<i64, u8>>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -97,6 +99,7 @@ impl Engine {
             wake: Notify::new(),
             limiter,
             shutdown: CancellationToken::new(),
+            extracting: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -116,6 +119,18 @@ impl Engine {
 
     pub fn wake(&self) {
         self.wake.notify_one();
+    }
+
+    pub(crate) fn set_extract_progress(&self, package_id: i64, percent: Option<u8>) {
+        let mut map = self.extracting.lock().unwrap();
+        match percent {
+            Some(p) => {
+                map.insert(package_id, p);
+            }
+            None => {
+                map.remove(&package_id);
+            }
+        }
     }
 
     pub fn active_count(&self) -> usize {
@@ -249,6 +264,7 @@ impl Engine {
 
     async fn progress_loop(self: Arc<Self>) {
         let mut last: HashMap<i64, (u64, f64)> = HashMap::new();
+        let mut extracted_before = false;
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
@@ -287,12 +303,24 @@ impl Engine {
                 });
             }
             last = next;
-            if !items.is_empty() || !last.is_empty() {
+            let extract: Vec<ExtractProgress> = self
+                .extracting
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(&package_id, &percent)| ExtractProgress {
+                    package_id,
+                    percent,
+                })
+                .collect();
+            if !items.is_empty() || !last.is_empty() || !extract.is_empty() || extracted_before {
                 self.events.send(Event::Progress {
                     items,
                     total_speed: total,
+                    extract: extract.clone(),
                 });
             }
+            extracted_before = !extract.is_empty();
         }
     }
 

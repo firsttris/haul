@@ -7,9 +7,15 @@ export interface LiveProgress {
   speed: number;
 }
 
-type Snapshot = { items: Map<number, LiveProgress>; totalSpeed: number; connected: boolean };
+type Snapshot = {
+  items: Map<number, LiveProgress>;
+  totalSpeed: number;
+  connected: boolean;
+  /** Extraction progress in percent per package id. */
+  extract: Map<number, number>;
+};
 
-let snapshot: Snapshot = { items: new Map(), totalSpeed: 0, connected: false };
+let snapshot: Snapshot = { items: new Map(), totalSpeed: 0, connected: false, extract: new Map() };
 const listeners = new Set<() => void>();
 
 function publish(next: Partial<Snapshot>) {
@@ -72,7 +78,9 @@ export function useLiveEvents(enabled: boolean) {
           const items = new Map<number, LiveProgress>();
           for (const i of e.items) items.set(i.id, { bytesDone: i.bytesDone, size: i.size, speed: i.speed });
           const finished = [...snapshot.items.keys()].some((id) => !items.has(id));
-          publish({ items, totalSpeed: e.totalSpeed });
+          const extract = new Map<number, number>();
+          for (const x of e.extract ?? []) extract.set(x.packageId, x.percent);
+          publish({ items, totalSpeed: e.totalSpeed, extract });
           if (finished) invalidate('downloads');
         } else if (e.type === 'changed') {
           invalidate(e.topic);

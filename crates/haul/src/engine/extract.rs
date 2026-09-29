@@ -40,14 +40,64 @@ pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
     (first, all)
 }
 
-async fn run_tool(mut cmd: Command) -> Result<(bool, String)> {
-    let out = cmd.stdin(std::process::Stdio::null()).output().await?;
+/// Last `NN%` in a chunk of tool output (7-Zip `-bsp1` and unrar redraw it with `\b`/`\r`).
+fn last_percent(text: &str) -> Option<u8> {
+    let re = Regex::new(r"(\d{1,3})%").unwrap();
+    re.captures_iter(text)
+        .filter_map(|c| c[1].parse::<u8>().ok())
+        .filter(|p| *p <= 100)
+        .last()
+}
+
+/// Runs an extractor, reporting its percentage while it runs. Returns success and the
+/// output without the progress redraws, for error messages.
+async fn run_tool(
+    mut cmd: Command,
+    on_progress: &mut (dyn FnMut(u8) + Send),
+) -> Result<(bool, String)> {
+    use tokio::io::AsyncReadExt;
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let err_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf).await;
+        buf
+    });
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = stdout.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        if let Some(p) = last_percent(&String::from_utf8_lossy(&chunk[..n])) {
+            on_progress(p);
+        }
+        out.extend_from_slice(&chunk[..n]);
+        if out.len() > 256 * 1024 {
+            out.drain(..out.len() - 64 * 1024);
+        }
+    }
+    let status = child.wait().await?;
+    let err = err_task.await.unwrap_or_default();
     let text = format!(
         "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    Ok((out.status.success(), text))
+        String::from_utf8_lossy(&out),
+        String::from_utf8_lossy(&err)
+    )
+    .replace(['\u{8}', '\r'], "\n");
+    let text = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && last_percent(l).is_none_or(|_| l.len() > 12))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok((status.success(), text))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +169,10 @@ fn command(tool: &Tool, archive: &Path, dest: &Path, pw: &str) -> Command {
     let mut cmd = Command::new(&tool.path);
     match tool.kind {
         Kind::SevenZip => {
+            // -bsp1: progress in percent on stdout.
             cmd.arg("x")
                 .arg("-y")
+                .arg("-bsp1")
                 .arg(format!("-o{}", dest.display()))
                 .arg(format!("-p{pw}"))
                 .arg(archive);
@@ -148,7 +200,12 @@ fn command(tool: &Tool, archive: &Path, dest: &Path, pw: &str) -> Command {
     cmd
 }
 
-async fn extract_one(archive: &Path, dest: &Path, passwords: &[String]) -> Result<()> {
+async fn extract_one(
+    archive: &Path,
+    dest: &Path,
+    passwords: &[String],
+    on_progress: &mut (dyn FnMut(u8) + Send),
+) -> Result<()> {
     // unrar handles RAR best (RAR5, volumes); 7-Zip builds without the RAR codec cannot.
     let tools: Vec<Tool> = available_tools()
         .into_iter()
@@ -164,7 +221,7 @@ async fn extract_one(archive: &Path, dest: &Path, passwords: &[String]) -> Resul
     let mut last = String::new();
     for pw in &candidates {
         for tool in &tools {
-            match run_tool(command(tool, archive, dest, pw)).await {
+            match run_tool(command(tool, archive, dest, pw), on_progress).await {
                 Ok((true, _)) => return Ok(()),
                 Ok((false, out)) => last = format!("{}: {out}", tool.describe()),
                 Err(e) => last = format!("{}: {e}", tool.describe()),
@@ -242,12 +299,22 @@ impl Engine {
             .map(str::to_string)
             .collect();
         let mut error = None;
-        for a in &first {
-            if let Err(e) = extract_one(&dir.join(a), &dir, &passwords).await {
+        let n = first.len() as u32;
+        self.set_extract_progress(package_id, Some(0));
+        for (i, a) in first.iter().enumerate() {
+            // Overall percent over all archives of the package.
+            let mut report = |p: u8| {
+                self.set_extract_progress(
+                    package_id,
+                    Some(((i as u32 * 100 + p as u32) / n) as u8),
+                );
+            };
+            if let Err(e) = extract_one(&dir.join(a), &dir, &passwords, &mut report).await {
                 error = Some(format!("{a}: {e:#}"));
                 break;
             }
         }
+        self.set_extract_progress(package_id, None);
         if error.is_none() && self.settings().delete_archives {
             for a in &all {
                 let _ = tokio::fs::remove_file(dir.join(a)).await;
@@ -270,6 +337,19 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percent_parsing() {
+        assert_eq!(
+            last_percent("  3% 1 - a.mkv\u{8}\u{8}\u{8}\u{8} 17% 1 - a.mkv"),
+            Some(17)
+        );
+        assert_eq!(
+            last_percent("Extracting  a.mkv   45%\u{8}\u{8}\u{8}\u{8}  46%"),
+            Some(46)
+        );
+        assert_eq!(last_percent("Everything is Ok"), None);
+    }
 
     #[test]
     fn archive_sets() {
@@ -322,19 +402,21 @@ mod tool_tests {
 
         std::env::set_var("PATH", &bin);
         assert!(available_tools().is_empty());
-        let err = extract_one(&archive, &out, &[])
+        let err = extract_one(&archive, &out, &[], &mut |_| {})
             .await
             .unwrap_err()
             .to_string();
         assert!(err.contains("kein Entpacker gefunden"), "{err}");
         assert!(err.contains("apt install 7zip 7zip-rar"), "{err}");
 
-        // Stand-in for 7-Zip: `7zz x -y -o<dir> -p<pw> <archive>`.
+        // Stand-in for 7-Zip: `7zz x -y -bsp1 -o<dir> -p<pw> <archive>`, printing progress like 7-Zip.
         let fake = bin.join("7zz");
         std::fs::write(
             &fake,
-            "#!/usr/bin/env python3\nimport sys, zipfile\na = sys.argv[1:]\nassert a[0] == 'x' and a[1] == '-y'\n\
-             zipfile.ZipFile(a[4]).extractall(a[2][2:])\n",
+            "#!/usr/bin/env python3\nimport sys, zipfile\na = sys.argv[1:]\nassert a[:3] == ['x', '-y', '-bsp1']\n\
+             for p in (0, 40, 80):\n    sys.stdout.write('%3d%% 1 - hello.txt' % p + '\\b' * 20); sys.stdout.flush()\n\
+             zipfile.ZipFile(a[-1]).extractall(next(x[2:] for x in a if x.startswith('-o')))\n\
+             print('Everything is Ok')\n",
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -342,7 +424,11 @@ mod tool_tests {
         let tools = available_tools();
         assert_eq!(tools.len(), 1);
         assert!(tools[0].describe().ends_with("/7zz"));
-        extract_one(&archive, &out, &[]).await.unwrap();
+        let mut seen = Vec::new();
+        extract_one(&archive, &out, &[], &mut |p| seen.push(p))
+            .await
+            .unwrap();
+        assert_eq!(seen.last(), Some(&80), "{seen:?}");
         assert_eq!(
             std::fs::read_to_string(out.join("hello.txt")).unwrap(),
             "hi"
