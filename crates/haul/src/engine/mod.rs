@@ -456,7 +456,7 @@ impl Engine {
             .bind(if req.start { status::QUEUED } else { status::COLLECTED })
             .bind(fname)
             .bind(link.size)
-            .bind(if link.crawled { "online" } else { "unknown" })
+            .bind(link.online)
             .bind(&link.error)
             .bind(now)
             .execute(&mut *tx)
@@ -494,7 +494,11 @@ impl Engine {
                 Ok(r) if !r.files.is_empty() => {
                     folder_name = folder_name.or(r.package_name.filter(|n| !n.trim().is_empty()));
                     out.extend(r.files.into_iter().map(|f| NewLink {
-                        crawled: f.name.is_some(),
+                        online: if f.name.is_some() {
+                            "online"
+                        } else {
+                            "unknown"
+                        },
                         url: f.url,
                         name: f.name,
                         size: f.size,
@@ -508,6 +512,11 @@ impl Engine {
                 Err(e) => {
                     tracing::warn!(%url, "crawl: {}", e.message);
                     out.push(NewLink {
+                        online: if e.kind == ErrorKind::Offline {
+                            "offline"
+                        } else {
+                            "unknown"
+                        },
                         error: Some(e.message),
                         ..NewLink::plain(url)
                     });
@@ -702,8 +711,8 @@ struct NewLink {
     url: String,
     name: Option<String>,
     size: Option<i64>,
-    /// Name and size come from the hoster, so the link counts as checked.
-    crawled: bool,
+    /// `online` when name and size came from the hoster: the link counts as checked.
+    online: &'static str,
     error: Option<String>,
 }
 
@@ -713,7 +722,7 @@ impl NewLink {
             url,
             name: None,
             size: None,
-            crawled: false,
+            online: "unknown",
             error: None,
         }
     }
@@ -1081,10 +1090,117 @@ mod engine_tests {
                     Some(50),
                     "online"
                 ),
-                ("https://folder.test/gone", "gone", None, "unknown"),
+                ("https://folder.test/gone", "gone", None, "offline"),
             ]
         );
         assert_eq!(d[2].error.as_deref(), Some("Ordner gelöscht"));
+        e.shutdown().await;
+    }
+
+    /// The built Mediafire plugin (skipped if not built) against a local copy of the site:
+    /// API name check when the link is added, file page with the checkbox captcha, the link
+    /// base64-encoded on the button, then the real download through the engine.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mediafire_plugin_end_to_end() {
+        use base64::Engine as _;
+        let bundle = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugins/dist/mediafire.js"
+        );
+        let Ok(code) = std::fs::read_to_string(bundle) else {
+            eprintln!("plugins/dist/mediafire.js not built, skipping");
+            return;
+        };
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base = format!("http://127.0.0.1:{port}");
+        let scrambled =
+            base64::engine::general_purpose::STANDARD.encode(format!("{base}/dl/Film.part1.rar"));
+        let size = data.len();
+        let body = data.clone();
+        let app = axum::Router::new()
+            .route(
+                "/api/1.5/file/get_info.php",
+                get(move |q: axum::extract::Query<HashMap<String, String>>| async move {
+                    assert_eq!(q.0["quick_key"], "q1w2e3r4t5y6u7i");
+                    assert_eq!(q.0["response_format"], "json");
+                    axum::Json(serde_json::json!({"response": {"action": "file/get_info", "result": "Success",
+                        "file_info": {"quickkey": "q1w2e3r4t5y6u7i", "filename": "Film.part1.rar",
+                            "size": size.to_string(), "privacy": "public", "password_protected": "no"}}}))
+                }),
+            )
+            .route(
+                "/file/q1w2e3r4t5y6u7i",
+                get(|| async {
+                    axum::response::Html(
+                        r#"<form name="form_captcha" method="post" action="/file/q1w2e3r4t5y6u7i">
+                        <input type="hidden" name="security" value="s1"><input type="checkbox" id="customCaptchaCheckbox">
+                        <label for="customCaptchaCheckbox">I'm not a robot</label></form>"#,
+                    )
+                })
+                .post(move |form: axum::Form<HashMap<String, String>>| async move {
+                    assert_eq!(form.0["mf_captcha_response"], "1");
+                    assert_eq!(form.0["security"], "s1");
+                    axum::response::Html(format!(
+                        r#"<a class="input popsok" aria-label="Download file" href="javascript:void(0)" id="downloadButton" data-scrambled-url="{scrambled}">Download</a>"#
+                    ))
+                }),
+            )
+            .route(
+                "/dl/Film.part1.rar",
+                get(move |h: HeaderMap| {
+                    let body = body.clone();
+                    async move {
+                        assert!(h[header::USER_AGENT].to_str().unwrap().starts_with("Mozilla/5.0"));
+                        Response::builder()
+                            .header(header::CONTENT_TYPE, "application/x-rar-compressed")
+                            .header(header::CONTENT_DISPOSITION, "attachment; filename=\"Film.part1.rar\"")
+                            .body(Body::from(body))
+                            .unwrap()
+                    }
+                }),
+            );
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = code
+            .replace("https://www.mediafire.com", &base)
+            .replace(r"mediafire\\.com|", &format!(r"127\\.0\\.0\\.1:{port}|"));
+        std::fs::write(plugin_dir.join("mediafire.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        assert!(plugins.errors().is_empty(), "{:?}", plugins.errors());
+        let e = engine_with(dir.path(), plugins).await;
+
+        let link = format!("{base}/file/q1w2e3r4t5y6u7i/Film.part1.rar/file");
+        let pkg = e
+            .add_links(AddLinks {
+                links: link.clone(),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let d = &db::package_downloads(&e.db, pkg).await.unwrap()[0];
+        assert_eq!(
+            (d.url.as_str(), d.name.as_str(), d.size, d.online.as_str()),
+            (link.as_str(), "Film.part1.rar", Some(size as i64), "online"),
+            "{:?}",
+            d.error
+        );
+        e.start_package(pkg).await.unwrap();
+        let done = wait_for(&e, d.id, status::FINISHED).await;
+        let pkg_dir = db::get_package(&e.db, pkg)
+            .await
+            .unwrap()
+            .unwrap()
+            .target_dir;
+        let written =
+            std::fs::read(dir.path().join("done").join(pkg_dir).join(&done.name)).unwrap();
+        assert!(written == data, "file content differs");
         e.shutdown().await;
     }
 }

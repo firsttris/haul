@@ -10,6 +10,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
   Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
+- Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
+  die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
+  beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
 - Linksammler mit Online-Check, Paketname, Zielordner und Archiv-Passwörtern
@@ -123,6 +126,7 @@ crates/haul-cnl     Click'n'Load-Forwarder für den Desktop
 packages/plugin-sdk Typen, Helfer, XFileSharing-Basis, Test-ctx für Plugins
 plugins/ddownload   ddownload-Plugin
 plugins/gofile      Gofile-Plugin (mit Ordner-Crawler)
+plugins/mediafire   Mediafire-Plugin (mit Ordner-Crawler)
 ui                  Web-UI
 ```
 
@@ -199,7 +203,7 @@ Tests und Checks:
 ```sh
 cargo test --workspace        # Engine (Segmente, Pause/Resume), CNL2, QuickJS-Host, Limiter …
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm test                     # SDK-Helfer, ddownload- und Gofile-Plugin gegen Fake-ctx
+pnpm test                     # SDK-Helfer und Hoster-Plugins gegen Fake-ctx
 pnpm typecheck
 ```
 

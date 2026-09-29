@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cookiesFrom, decodeHtml, match, parseForms, parseSize, resolveUrl } from './index';
+import { base64Decode, cookiesFrom, decodeHtml, match, parseForms, parseSize, resolveUrl } from './index';
 import { fakeCtx } from './testing';
 
 describe('parseSize', () => {
@@ -42,5 +42,15 @@ describe('html helpers', () => {
   it('reads cookies', async () => {
     const ctx = fakeCtx({ 'GET https://a.com': { headers: { 'Set-Cookie': 'a=1; Path=/\nb=2' } } });
     expect(cookiesFrom(await ctx.http.get('https://a.com/'))).toEqual({ a: '1', b: '2' });
+  });
+});
+
+describe('base64Decode', () => {
+  it('matches Buffer for URLs and UTF-8', () => {
+    for (const text of ['https://download1234.mediafire.com/abc/q1w2e3/Film.part1.rar', 'Größe ✓', 'a', 'ab']) {
+      const b64 = Buffer.from(text, 'utf8').toString('base64');
+      expect(base64Decode(b64)).toBe(text);
+      expect(base64Decode(b64.replace(/=+$/, ''))).toBe(text);
+    }
   });
 });

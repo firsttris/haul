@@ -11,6 +11,8 @@ export interface FakeRoute {
   headers?: Record<string, string>;
   /** Simulates a file response (attachment). */
   file?: boolean;
+  /** Final URL after redirects; default the request URL. */
+  url?: string;
 }
 
 export type Handler = (req: HttpRequest) => FakeRoute;
@@ -27,7 +29,7 @@ function response(req: HttpRequest, r: FakeRoute): HttpResponse {
   const body = r.body ?? '';
   return {
     status: r.status ?? 200,
-    url: req.url,
+    url: r.url ?? req.url,
     headers,
     body,
     file: !!r.file,

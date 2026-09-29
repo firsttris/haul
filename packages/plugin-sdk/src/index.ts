@@ -309,3 +309,32 @@ export function cookiesFrom(res: HttpResponse): Record<string, string> {
   }
   return out;
 }
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Base64 (also URL-safe, with or without padding) → UTF-8 text. QuickJS has no `atob`. */
+export function base64Decode(input: string): string {
+  const clean = input.replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/]/g, '');
+  const bytes: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const ch of clean) {
+    buffer = (buffer << 6) | B64.indexOf(ch);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((buffer >> bits) & 0xff);
+    }
+  }
+  let out = '';
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i++];
+    let cp: number;
+    if (b < 0x80) cp = b;
+    else if (b < 0xe0) cp = ((b & 0x1f) << 6) | (bytes[i++] & 0x3f);
+    else if (b < 0xf0) cp = ((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+    else cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+    out += String.fromCodePoint(cp);
+  }
+  return out;
+}
