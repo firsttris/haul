@@ -167,6 +167,7 @@ impl Engine {
         let ticker = tokio::spawn(self.clone().progress_loop());
         let this = self.clone();
         tokio::spawn(async move { this.resume_pending_extractions().await });
+        tokio::spawn(self.clone().resume_crawls());
         loop {
             if let Err(e) = self.fill_slots().await {
                 tracing::error!("scheduler: {e:#}");
@@ -403,6 +404,9 @@ impl Engine {
 
     // ---- operations used by the API ------------------------------------------------
 
+    /// Stores the links right away and returns. Folder links (plugins with `crawl`) are
+    /// expanded afterwards in the background, so a slow crawl never holds up the request:
+    /// Click'n'Load forwarders give up after a while, and a dropped request would lose the links.
     pub async fn add_links(self: &Arc<Self>, req: AddLinks) -> Result<i64> {
         let links = parse_links(&req.links);
         if links.is_empty() {
@@ -411,25 +415,16 @@ impl Engine {
                 "no valid links found"
             )));
         }
-        let (links, folder_name) = self.crawl_links(links).await;
         let names: Vec<String> = links
             .iter()
-            .map(|l| {
-                l.name
-                    .as_deref()
-                    .map(util::sanitize_filename)
-                    .or_else(|| util::filename_from_url(&l.url))
-                    .unwrap_or_else(|| "download".into())
-            })
+            .map(|l| util::filename_from_url(l).unwrap_or_else(|| "download".into()))
             .collect();
-        let name = req
-            .package_name
-            .filter(|n| !n.trim().is_empty())
-            .or(folder_name)
-            .unwrap_or_else(|| guess_package_name(&names));
-        let target_dir = req
-            .target_dir
-            .filter(|d| !d.trim().is_empty())
+        let given_name = req.package_name.filter(|n| !n.trim().is_empty());
+        let named_by_user = given_name.is_some();
+        let name = given_name.unwrap_or_else(|| guess_package_name(&names));
+        let given_dir = req.target_dir.filter(|d| !d.trim().is_empty());
+        let dir_by_user = given_dir.is_some();
+        let target_dir = given_dir
             .map(|d| util::sanitize_rel_dir(&d))
             .unwrap_or_else(|| util::sanitize_filename(&name));
         let now = now_ms();
@@ -447,20 +442,26 @@ impl Engine {
         .bind(now)
         .fetch_one(&mut *tx)
         .await?;
+        let mut crawls = false;
         for (link, fname) in links.iter().zip(names) {
-            let plugin = self.plugins.find_for(&link.url).map(|p| p.id.clone());
+            let plugin = self.plugins.find_for(link);
+            let crawl = plugin.as_ref().is_some_and(|p| p.has_crawl);
+            crawls |= crawl;
+            let status = if crawl {
+                status::CRAWLING
+            } else if req.start {
+                status::QUEUED
+            } else {
+                status::COLLECTED
+            };
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, created_at) VALUES(?, ?, ?, ?, ?, ?)",
             )
             .bind(pkg_id)
-            .bind(&link.url)
-            .bind(plugin)
-            .bind(if req.start { status::QUEUED } else { status::COLLECTED })
+            .bind(link)
+            .bind(plugin.map(|p| p.id.clone()))
+            .bind(status)
             .bind(fname)
-            .bind(link.size)
-            .bind(link.online)
-            .bind(&link.error)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -469,64 +470,196 @@ impl Engine {
         self.events.changed(Topic::Downloads);
         if req.start {
             self.wake();
-        } else {
-            let this = self.clone();
-            tokio::spawn(async move {
+        }
+        let this = self.clone();
+        // A task of its own: it must not end with the request that added the links.
+        tokio::spawn(async move {
+            if crawls {
+                let rename = Rename {
+                    name: (!named_by_user).then(|| name.clone()),
+                    dir: (!dir_by_user).then(|| target_dir.clone()),
+                };
+                if let Err(e) = this.crawl_package(pkg_id, rename).await {
+                    tracing::warn!(pkg_id, "crawl: {e:#}");
+                }
+            }
+            if !req.start {
                 // Files from a folder crawl are known already; checking each one again would
                 // only cost the hoster's rate limit.
                 if let Err(e) = this.check_downloads(pkg_id, true).await {
                     tracing::warn!("online check: {e:#}");
                 }
-            });
-        }
+            }
+        });
         Ok(pkg_id)
     }
 
-    /// Expands folder links through their plugin's `crawl`, like JD's link crawler does when
-    /// links are added. A failing crawl keeps the link, with the error, so it stays visible.
-    async fn crawl_links(&self, links: Vec<String>) -> (Vec<NewLink>, Option<String>) {
-        let mut out = Vec::new();
+    /// Expands the folder links of a package (status `crawling`) through their plugin's
+    /// `crawl`, like JD's link crawler: each link is replaced by the files behind it. A failing
+    /// crawl keeps the link, with the error, so it stays visible. Links deleted meanwhile are
+    /// skipped.
+    async fn crawl_package(self: &Arc<Self>, pkg_id: i64, rename: Rename) -> Result<()> {
+        let links: Vec<Download> = db::package_downloads(&self.db, pkg_id)
+            .await?
+            .into_iter()
+            .filter(|d| d.status == status::CRAWLING)
+            .collect();
         let mut folder_name = None;
-        for url in links {
-            let plugin = self.plugins.find_for(&url).filter(|p| p.has_crawl);
-            let Some(plugin) = plugin else {
-                out.push(NewLink::plain(url));
-                continue;
+        for d in links {
+            let result = match self.plugins.find_for(&d.url).filter(|p| p.has_crawl) {
+                Some(plugin) => self.plugins.crawl(&plugin, &d.url).await,
+                // The plugin is gone (reloaded without it): keep the link as it is.
+                None => Ok(crate::plugins::CrawlResult {
+                    package_name: None,
+                    files: vec![crate::plugins::CrawledFile {
+                        url: d.url.clone(),
+                        name: None,
+                        size: None,
+                    }],
+                }),
             };
-            match self.plugins.crawl(&plugin, &url).await {
+            let Some(pkg) = db::get_package(&self.db, pkg_id).await? else {
+                return Ok(());
+            };
+            // The package may have been started from the Linksammler meanwhile.
+            let target = if pkg.collector {
+                status::COLLECTED
+            } else {
+                status::QUEUED
+            };
+            let links = match result {
                 Ok(r) if !r.files.is_empty() => {
                     folder_name = folder_name.or(r.package_name.filter(|n| !n.trim().is_empty()));
-                    out.extend(r.files.into_iter().map(|f| NewLink {
-                        online: if f.name.is_some() {
-                            "online"
-                        } else {
-                            "unknown"
-                        },
-                        url: f.url,
-                        name: f.name,
-                        size: f.size,
-                        error: None,
-                    }));
+                    r.files
+                        .into_iter()
+                        .map(|f| NewLink {
+                            online: if f.name.is_some() {
+                                "online"
+                            } else {
+                                "unknown"
+                            },
+                            name: f
+                                .name
+                                .as_deref()
+                                .map(util::sanitize_filename)
+                                .or_else(|| util::filename_from_url(&f.url))
+                                .unwrap_or_else(|| "download".into()),
+                            url: f.url,
+                            size: f.size,
+                            error: None,
+                        })
+                        .collect()
                 }
-                Ok(_) => out.push(NewLink {
+                Ok(_) => vec![NewLink {
                     error: Some(crate::tr!("Ordner ist leer", "Folder is empty")),
-                    ..NewLink::plain(url)
-                }),
+                    ..NewLink::keep(&d)
+                }],
                 Err(e) => {
-                    tracing::warn!(%url, "crawl: {}", e.message);
-                    out.push(NewLink {
+                    tracing::warn!(url = %d.url, "crawl: {}", crate::i18n::pick(&e.message, false));
+                    vec![NewLink {
                         online: if e.kind == ErrorKind::Offline {
                             "offline"
                         } else {
                             "unknown"
                         },
                         error: Some(e.message),
-                        ..NewLink::plain(url)
-                    });
+                        ..NewLink::keep(&d)
+                    }]
                 }
+            };
+            self.replace_link(&d, &links, target).await?;
+            if target == status::QUEUED {
+                self.wake();
             }
         }
-        (out, folder_name)
+        if let Some(folder) = folder_name {
+            self.rename_after_crawl(pkg_id, &rename, &folder).await?;
+        }
+        Ok(())
+    }
+
+    /// Swaps a crawled link for its files, in one transaction; nothing if it was deleted.
+    async fn replace_link(&self, d: &Download, links: &[NewLink], status: &str) -> Result<()> {
+        let mut tx = self.db.begin().await?;
+        let gone = sqlx::query("DELETE FROM downloads WHERE id = ? AND status = ?")
+            .bind(d.id)
+            .bind(status::CRAWLING)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+            == 0;
+        if gone {
+            return Ok(());
+        }
+        let now = now_ms();
+        for l in links {
+            sqlx::query(
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(d.package_id)
+            .bind(&l.url)
+            .bind(self.plugins.find_for(&l.url).map(|p| p.id.clone()))
+            .bind(status)
+            .bind(&l.name)
+            .bind(l.size)
+            .bind(l.online)
+            .bind(&l.error)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.events.changed(Topic::Downloads);
+        Ok(())
+    }
+
+    /// Names the package after the crawled folder, unless the user named it (then or since).
+    async fn rename_after_crawl(&self, pkg_id: i64, rename: &Rename, folder: &str) -> Result<()> {
+        if let Some(old) = &rename.name {
+            sqlx::query("UPDATE packages SET name = ? WHERE id = ? AND name = ?")
+                .bind(folder)
+                .bind(pkg_id)
+                .bind(old)
+                .execute(&self.db)
+                .await?;
+        }
+        if let Some(old) = &rename.dir {
+            sqlx::query("UPDATE packages SET target_dir = ? WHERE id = ? AND target_dir = ?")
+                .bind(util::sanitize_filename(folder))
+                .bind(pkg_id)
+                .bind(old)
+                .execute(&self.db)
+                .await?;
+        }
+        self.events.changed(Topic::Downloads);
+        Ok(())
+    }
+
+    /// Crawls cut short by a restart start over.
+    async fn resume_crawls(self: Arc<Self>) {
+        let pkgs: Vec<i64> =
+            match sqlx::query_scalar("SELECT DISTINCT package_id FROM downloads WHERE status = ?")
+                .bind(status::CRAWLING)
+                .fetch_all(&self.db)
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("resume crawls: {e:#}");
+                    return;
+                }
+            };
+        for pkg in pkgs {
+            // The name given before the restart is unknown now: keep it.
+            let rename = Rename {
+                name: None,
+                dir: None,
+            };
+            if let Err(e) = self.crawl_package(pkg, rename).await {
+                tracing::warn!(pkg, "crawl: {e:#}");
+            }
+        }
     }
 
     /// Online check for all downloads of a package: plugin `check` or an HTTP probe.
@@ -538,6 +671,7 @@ impl Engine {
         let downloads = db::package_downloads(&self.db, package_id)
             .await?
             .into_iter()
+            .filter(|d| d.status != status::CRAWLING)
             .filter(|d| !only_unknown || (d.online == "unknown" && d.error.is_none()));
         futures::stream::iter(downloads)
             .for_each_concurrent(4, |d| {
@@ -708,11 +842,10 @@ impl Engine {
     }
 }
 
-/// Extracts http(s) links from free text, one per whitespace-separated token, deduplicated.
-/// A link about to be added, possibly found by a folder crawl.
+/// What replaces a crawled link: its files, or the link itself with an error.
 struct NewLink {
     url: String,
-    name: Option<String>,
+    name: String,
     size: Option<i64>,
     /// `online` when name and size came from the hoster: the link counts as checked.
     online: &'static str,
@@ -720,17 +853,24 @@ struct NewLink {
 }
 
 impl NewLink {
-    fn plain(url: String) -> Self {
+    fn keep(d: &Download) -> Self {
         Self {
-            url,
-            name: None,
-            size: None,
+            url: d.url.clone(),
+            name: d.name.clone(),
+            size: d.size,
             online: "unknown",
             error: None,
         }
     }
 }
 
+/// Which package names `crawl_package` may replace with the folder name: the ones it set itself.
+struct Rename {
+    name: Option<String>,
+    dir: Option<String>,
+}
+
+/// Extracts http(s) links from free text, one per whitespace-separated token, deduplicated.
 pub fn parse_links(text: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     // Control characters separate too: decrypted Click'n'Load payloads end in padding bytes.
@@ -1043,12 +1183,130 @@ mod engine_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn folder_links_are_crawled() {
         let dir = tempfile::tempdir().unwrap();
-        let plugin_dir = dir.path().join("plugins");
+        let e = engine_with(dir.path(), folder_plugin(dir.path()).await).await;
+
+        let started = std::time::Instant::now();
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://folder.test/d/x https://folder.test/gone".into(),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // The request returns before the (slow) crawl; the links are stored already.
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            started.elapsed()
+        );
+        let d = db::package_downloads(&e.db, pkg).await.unwrap();
+        assert!(d.iter().all(|d| d.status == status::CRAWLING), "{d:?}");
+
+        wait_crawled(&e, pkg).await;
+        let p = db::get_package(&e.db, pkg).await.unwrap().unwrap();
+        assert_eq!(
+            (p.name.as_str(), p.target_dir.as_str()),
+            ("My Folder", "My Folder")
+        );
+        let d = db::package_downloads(&e.db, pkg).await.unwrap();
+        let got: Vec<_> = d
+            .iter()
+            .map(|d| {
+                (
+                    d.url.as_str(),
+                    d.name.as_str(),
+                    d.size,
+                    d.online.as_str(),
+                    d.status.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "https://folder.test/f#file=1",
+                    "a.part1.rar",
+                    Some(100),
+                    "online",
+                    "collected"
+                ),
+                (
+                    "https://folder.test/f#file=2",
+                    "a.part2.rar",
+                    Some(50),
+                    "online",
+                    "collected"
+                ),
+                (
+                    "https://folder.test/gone",
+                    "gone",
+                    None,
+                    "offline",
+                    "collected"
+                ),
+            ]
+        );
+        assert_eq!(d[2].error.as_deref(), Some("Ordner gelöscht"));
+        e.shutdown().await;
+    }
+
+    /// A name typed by the user stays; a link deleted during the crawl stays deleted; a package
+    /// started from the Linksammler meanwhile gets its files queued.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn crawl_respects_changes_made_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine_with(dir.path(), folder_plugin(dir.path()).await).await;
+
+        let named = e
+            .add_links(AddLinks {
+                links: "https://folder.test/d/x".into(),
+                package_name: Some("Mein Name".into()),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let deleted = e
+            .add_links(AddLinks {
+                links: "https://folder.test/d/y".into(),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(deleted).await.unwrap()[0];
+        e.delete(&[id]).await.unwrap();
+        e.start_package(named).await.unwrap();
+
+        wait_crawled(&e, named).await;
+        wait_crawled(&e, deleted).await;
+        let p = db::get_package(&e.db, named).await.unwrap().unwrap();
+        assert_eq!(p.name, "Mein Name");
+        let d = db::package_downloads(&e.db, named).await.unwrap();
+        assert_eq!(d.len(), 2);
+        assert!(
+            d.iter()
+                .all(|d| d.status != status::CRAWLING && d.status != status::COLLECTED),
+            "{d:?}"
+        );
+        assert!(db::package_downloads(&e.db, deleted)
+            .await
+            .unwrap()
+            .is_empty());
+        e.shutdown().await;
+    }
+
+    /// A plugin whose `crawl` takes a second, like a slow hoster.
+    async fn folder_plugin(dir: &std::path::Path) -> PluginManager {
+        let plugin_dir = dir.join("plugins");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::write(
             plugin_dir.join("folder.js"),
             r#"var __plugin = { default: { id: "folder", version: 1, matches: [/https?:\/\/folder\.test\//],
-                async crawl(link) {
+                async crawl(link, ctx) {
+                    await ctx.wait(1);
                     if (link.endsWith("/gone")) { const e = new Error("Ordner gelöscht"); e.haulKind = "offline"; throw e; }
                     return { packageName: "My Folder", files: [
                         { url: "https://folder.test/f#file=1", name: "a.part1.rar", size: 100 },
@@ -1061,43 +1319,20 @@ mod engine_tests {
         .unwrap();
         let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
         plugins.reload().await;
-        let e = engine_with(dir.path(), plugins).await;
+        plugins
+    }
 
-        let pkg = e
-            .add_links(AddLinks {
-                links: "https://folder.test/d/x https://folder.test/gone".into(),
-                start: false,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        let p = db::get_package(&e.db, pkg).await.unwrap().unwrap();
-        assert_eq!(p.name, "My Folder");
-        let d = db::package_downloads(&e.db, pkg).await.unwrap();
-        let got: Vec<_> = d
-            .iter()
-            .map(|d| (d.url.as_str(), d.name.as_str(), d.size, d.online.as_str()))
-            .collect();
-        assert_eq!(
-            got,
-            [
-                (
-                    "https://folder.test/f#file=1",
-                    "a.part1.rar",
-                    Some(100),
-                    "online"
-                ),
-                (
-                    "https://folder.test/f#file=2",
-                    "a.part2.rar",
-                    Some(50),
-                    "online"
-                ),
-                ("https://folder.test/gone", "gone", None, "offline"),
-            ]
-        );
-        assert_eq!(d[2].error.as_deref(), Some("Ordner gelöscht"));
-        e.shutdown().await;
+    async fn wait_crawled(e: &Engine, pkg: i64) {
+        for _ in 0..200 {
+            let d = db::package_downloads(&e.db, pkg).await.unwrap();
+            if d.iter().all(|d| d.status != status::CRAWLING) {
+                // Let the rename after the last link land too.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("crawl of package {pkg} did not finish");
     }
 
     /// The built Mediafire plugin (skipped if not built) against a local copy of the site:
@@ -1187,6 +1422,7 @@ mod engine_tests {
             })
             .await
             .unwrap();
+        wait_crawled(&e, pkg).await;
         let d = &db::package_downloads(&e.db, pkg).await.unwrap()[0];
         assert_eq!(
             (d.url.as_str(), d.name.as_str(), d.size, d.online.as_str()),

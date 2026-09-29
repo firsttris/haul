@@ -198,6 +198,11 @@ export function AccountsPage() {
                   </span>
                   <span className="sub mono">{p.matches.map((m) => `/${m.source}/${m.flags}`).join('  ')}</span>
                   <span className="sub mono">{p.file}</span>
+                  {p.replaces && (
+                    <span className="sub" style={{ color: p.replaces.newer ? 'var(--err)' : undefined }} role={p.replaces.newer ? 'alert' : undefined}>
+                      {p.replaces.newer ? t.accounts.replacesNewer(p.replaces.version, p.version) : t.accounts.replaces(p.replaces.version)}
+                    </span>
+                  )}
                 </div>
                 <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
                 <span className="subtitle" style={{ fontSize: 13 }}>

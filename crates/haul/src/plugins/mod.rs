@@ -68,10 +68,29 @@ pub struct Plugin {
     pub serial: bool,
     pub builtin: bool,
     pub file: PathBuf,
+    /// A custom plugin that hides the built-in one with the same id.
+    pub replaces: Option<Replaced>,
     #[serde(skip)]
     regexes: Vec<Regex>,
     #[serde(skip)]
     code: Arc<String>,
+}
+
+/// The built-in plugin a custom one hides; `newer` when the built-in version is higher, i.e.
+/// the custom copy is probably outdated.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Replaced {
+    pub version: String,
+    pub file: PathBuf,
+    pub newer: bool,
+}
+
+/// `8` > `7`, `1.10` > `1.9`; `None` if either is not a dotted number.
+fn version_newer(a: &str, b: &str) -> Option<bool> {
+    let parse =
+        |v: &str| -> Option<Vec<u64>> { v.trim().split('.').map(|p| p.parse().ok()).collect() };
+    Some(parse(a)? > parse(b)?)
 }
 
 impl Plugin {
@@ -267,8 +286,25 @@ impl PluginManager {
             files.sort();
             for file in files {
                 match load_plugin(&file, *builtin).await {
-                    Ok(p) => {
+                    Ok(mut p) => {
                         tracing::info!(id = %p.id, version = %p.version, file = %file.display(), "plugin loaded");
+                        if let Some(old) = by_id.get(&p.id).filter(|old| old.builtin && !p.builtin)
+                        {
+                            let newer = version_newer(&old.version, &p.version).unwrap_or(false);
+                            if newer {
+                                tracing::warn!(
+                                    id = %p.id,
+                                    custom = %p.version,
+                                    builtin = %old.version,
+                                    "custom plugin hides a newer built-in one"
+                                );
+                            }
+                            p.replaces = Some(Replaced {
+                                version: old.version.clone(),
+                                file: old.file.clone(),
+                                newer,
+                            });
+                        }
                         by_id.insert(p.id.clone(), Arc::new(p));
                     }
                     Err(e) => {
@@ -482,6 +518,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
         serial: meta.serial,
         builtin,
         file: file.to_path_buf(),
+        replaces: None,
         regexes,
         code: Arc::new(code),
     })
@@ -567,5 +604,41 @@ mod session_tests {
             .await
             .unwrap();
         assert_eq!(cookie, "");
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+
+    #[test]
+    fn versions() {
+        assert_eq!(version_newer("8", "7"), Some(true));
+        assert_eq!(version_newer("1.10", "1.9"), Some(true));
+        assert_eq!(version_newer("2", "2"), Some(false));
+        assert_eq!(version_newer("2", "beta"), None);
+    }
+
+    /// A custom plugin with the id of a built-in one wins, and says which one it hides.
+    #[tokio::test]
+    async fn custom_plugin_hides_builtin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (builtin, custom) = (tmp.path().join("builtin"), tmp.path().join("custom"));
+        std::fs::create_dir_all(&builtin).unwrap();
+        std::fs::create_dir_all(&custom).unwrap();
+        let code = |v: u32| {
+            format!(
+                r#"var __plugin = {{ default: {{ id: "x", version: {v}, matches: [/x\.test/], async resolve() {{ return {{ url: "" }}; }} }} }};"#
+            )
+        };
+        std::fs::write(builtin.join("x.js"), code(8)).unwrap();
+        std::fs::write(custom.join("x.js"), code(5)).unwrap();
+        let pm = PluginManager::new(vec![(builtin.clone(), true), (custom, false)], None);
+        pm.reload().await;
+        let p = pm.get("x").unwrap();
+        assert!(!p.builtin);
+        let r = p.replaces.as_ref().unwrap();
+        assert_eq!((r.version.as_str(), r.newer), ("8", true));
+        assert_eq!(r.file, builtin.join("x.js"));
     }
 }

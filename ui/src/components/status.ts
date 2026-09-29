@@ -23,6 +23,8 @@ export function describe(d: Download, t: Messages, now = Date.now()): { label: s
       return { label: s.resolving, tone: 'run' };
     case 'paused':
       return { label: s.paused, tone: 'wait' };
+    case 'crawling':
+      return { label: s.crawling, tone: 'run' };
     case 'collected':
       return d.online === 'offline'
         ? { label: s.offline, tone: 'err' }
@@ -39,4 +41,4 @@ export function describe(d: Download, t: Messages, now = Date.now()): { label: s
 }
 
 export const isActive = (d: Download) => d.status === 'downloading' || d.status === 'resolving';
-export const isWaiting = (d: Download) => d.status === 'queued' || d.status === 'paused';
+export const isWaiting = (d: Download) => d.status === 'queued' || d.status === 'paused' || d.status === 'crawling';

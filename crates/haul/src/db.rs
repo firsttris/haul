@@ -25,6 +25,8 @@ pub async fn connect(path: &Path) -> Result<Db> {
 pub mod status {
     /// In the Linksammler, never started automatically.
     pub const COLLECTED: &str = "collected";
+    /// A folder link waiting to be expanded into its files; the downloader leaves it alone.
+    pub const CRAWLING: &str = "crawling";
     pub const QUEUED: &str = "queued";
     pub const RESOLVING: &str = "resolving";
     pub const DOWNLOADING: &str = "downloading";

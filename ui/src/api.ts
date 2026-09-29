@@ -1,6 +1,6 @@
 import { localize, type PluginText } from './i18n';
 
-export type Status = 'collected' | 'queued' | 'resolving' | 'downloading' | 'paused' | 'finished' | 'failed';
+export type Status = 'collected' | 'crawling' | 'queued' | 'resolving' | 'downloading' | 'paused' | 'finished' | 'failed';
 
 export interface Download {
   id: number;
@@ -72,6 +72,8 @@ export interface Plugin {
   hasCheckAccount: boolean;
   builtin: boolean;
   file: string;
+  /** A custom plugin that hides the built-in one; `newer`: the built-in version is higher. */
+  replaces: { version: string; file: string; newer: boolean } | null;
 }
 
 export interface PluginList {

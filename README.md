@@ -177,7 +177,12 @@ fünf Zeilen Konfiguration.
 
 Plugins werden mit `pnpm build:plugins` nach `plugins/dist/<name>.js` gebaut. Eigene oder
 aktualisierte Plugins nach `/config/plugins/` legen und unter *Accounts & Plugins* auf
-*Neu laden* klicken; sie überschreiben mitgelieferte mit derselben `id`.
+*Neu laden* klicken; sie überschreiben mitgelieferte mit derselben `id`. Ist das mitgelieferte
+neuer als die eigene Kopie, zeigt die UI eine Warnung (die Kopie löschen, um Updates zu bekommen).
+
+Ordner-Links (Plugins mit `crawl`) werden nach dem Speichern im Hintergrund aufgelöst; das
+Hinzufügen, auch per Click'n'Load, wartet nicht darauf. Bis dahin steht der Link als
+„Ordner wird gelesen …“ da, ein Neustart setzt offene Crawls fort.
 
 Plugins lassen sich ohne Server testen, mit dem Fake-`ctx` aus `@haul/plugin-sdk/testing`
 (siehe `plugins/ddownload/test`).

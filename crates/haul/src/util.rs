@@ -38,14 +38,30 @@ pub fn sanitize_rel_dir(dir: &str) -> String {
 /// Best-effort file name from a URL's last path segment.
 pub fn filename_from_url(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
-    let last = parsed
+    let segments: Vec<String> = parsed
         .path_segments()?
-        .rfind(|s| !s.is_empty())?
-        .to_string();
-    let decoded = percent_encoding::percent_decode_str(&last)
-        .decode_utf8_lossy()
-        .to_string();
-    Some(sanitize_filename(&decoded))
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            percent_encoding::percent_decode_str(s)
+                .decode_utf8_lossy()
+                .to_string()
+        })
+        .collect();
+    let last = segments.last()?;
+    // `/file/<id>/Name.rar/file` (Mediafire) and the like: the name is the segment before.
+    let named = |s: &&String| {
+        s.rsplit_once('.').is_some_and(|(stem, ext)| {
+            !stem.is_empty()
+                && (2..=5).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+    };
+    let pick = if named(&last) {
+        last
+    } else {
+        segments.iter().rev().find(named).unwrap_or(last)
+    };
+    Some(sanitize_filename(pick))
 }
 
 /// Parses `Content-Disposition` for `filename*=` (RFC 5987) or `filename=`.
@@ -83,6 +99,18 @@ mod tests {
         assert_eq!(
             filename_from_url("https://x.org/a/Some%20File.iso?x=1").unwrap(),
             "Some File.iso"
+        );
+        assert_eq!(
+            filename_from_url("https://www.mediafire.com/file/q1w2/Film.part1.rar/file").unwrap(),
+            "Film.part1.rar"
+        );
+        assert_eq!(
+            filename_from_url("https://ddownload.com/abcdefghijkl").unwrap(),
+            "abcdefghijkl"
+        );
+        assert_eq!(
+            filename_from_url("https://x.org/v1.2/download").unwrap(),
+            "download"
         );
         assert_eq!(
             filename_from_disposition("attachment; filename=\"a b.zip\"").unwrap(),
