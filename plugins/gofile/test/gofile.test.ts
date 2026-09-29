@@ -219,3 +219,53 @@ describe('gofile', () => {
     });
   });
 });
+
+describe('gofile account (JD fetchAccountInfo)', () => {
+  const TOKEN = 'A'.repeat(16) + 'b'.repeat(16);
+  const acc = { id: 1, user: '', secret: TOKEN };
+  const website = (data: object, status = 'ok') => ({
+    'GET https://api.gofile.io/accounts/website': (req: HttpRequest): FakeRoute => {
+      expect(req.headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+      return { body: JSON.stringify({ status, data }), headers: { 'content-type': 'application/json' } };
+    },
+  });
+
+  it('reads tier, subscription end and traffic', async () => {
+    const ctx = fakeCtx(
+      website({
+        tier: 'premium',
+        premiumType: 'subscription',
+        subscriptionProvider: 'stripe',
+        subscriptionEndDate: 4102444800,
+        subscriptionLimitDirectTraffic: 1000,
+        statsCurrent: { trafficWebDownloaded: 100 },
+        statsHistory: { '2026': { '8': { '1': { trafficWebDownloaded: 999 } }, '9': { '1': { trafficWebDownloaded: 50 }, '2': { trafficWebDownloaded: 25 } } } },
+      }),
+      acc,
+    );
+    expect(await plugin.checkAccount!(ctx)).toEqual({ valid: true, premium: true, validUntil: 4102444800000, trafficLeft: 825, message: 'Premium (stripe)' });
+    expect(ctx.jar.get('accountToken')).toBe(TOKEN);
+  });
+
+  it('knows expired premium, guests and wrong tokens', async () => {
+    expect(await plugin.checkAccount!(fakeCtx(website({ tier: 'standard' }), acc))).toMatchObject({ premium: false });
+    await expect(plugin.checkAccount!(fakeCtx(website({}, 'error-wrongToken'), acc))).rejects.toMatchObject({ haulKind: 'account' });
+    await expect(plugin.checkAccount!(fakeCtx({}, { id: 1, user: '', secret: 'short' }))).rejects.toMatchObject({ haulKind: 'account' });
+  });
+
+  it('lists the folder again with the account token instead of reusing the guest link', async () => {
+    const seen: string[] = [];
+    const ctx = fakeCtx(
+      {
+        'GET https://api.gofile.io/contents/AbC123?': (req: HttpRequest): FakeRoute => {
+          seen.push(req.headers!.Authorization!);
+          return { body: JSON.stringify({ status: 'ok', data: FOLDER }) };
+        },
+      },
+      acc,
+    );
+    const r = await plugin.resolve(crawled('f1', f1), ctx);
+    expect(seen).toEqual([`Bearer ${TOKEN}`]);
+    expect(r).toMatchObject({ url: f1, cookies: { accountToken: TOKEN } });
+  });
+});

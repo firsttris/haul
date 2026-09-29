@@ -15,13 +15,17 @@
  *   its token, so `resolve` normally needs no API call; JD's checkDirectLink tests it first and
  *   only an expired link lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
+ * - Account (JD GofileIo.getAndSetToken / fetchAccountInfo): the API token from the gofile
+ *   profile replaces the guest token everywhere; download links are bound to the token, so
+ *   with an account the folder is listed again with it. `GET /accounts/website` gives the tier
+ *   (guest, standard = expired premium, premium), the subscription end and the traffic.
  * - Password-protected folders (JD GoFileIoCrawler): `passwordStatus` is `passwordRequired` or
  *   `passwordWrong` until the listing is requested with `password=sha256(<password>)`; a known
  *   password goes along with the first request, the user is asked up to 3 times. The files get
  *   the folder's password, so an expired link can be listed again without asking.
  */
-import { definePlugin, HosterLimitError, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
-import type { Ctx, CrawledFile, FileHash, HttpResponse } from '@haul/plugin-sdk';
+import { AccountError, definePlugin, HosterLimitError, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
+import type { AccountInfo, Ctx, CrawledFile, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://gofile.io';
 const API = 'https://api.gofile.io';
@@ -168,6 +172,22 @@ function variantOrder(ctx: Ctx): WtVariant[] {
  * The guest token, kept as the site's own cookie so it also goes along with downloads. A
  * guest account does not expire quickly; creating new ones is what gets rate-limited.
  */
+/** JD looksLikeValidAPIKey. */
+const looksLikeToken = (s: string) => /^[a-zA-Z0-9]{32}$/.test(s);
+
+/** The account's API token (JD getAccountTokenOrFail), else the guest token. */
+async function tokenFor(ctx: Ctx): Promise<string> {
+  const acc = ctx.account.get();
+  if (!acc) return guestToken(ctx);
+  const token = acc.secret.trim();
+  if (!looksLikeToken(token)) {
+    throw new AccountError({ de: 'Gofile: ungültiger API-Token (32 Zeichen, gofile.io → Profil)', en: 'Gofile: invalid API token (32 characters, gofile.io → profile)' });
+  }
+  // JD: the token as cookie too, downloads check it.
+  ctx.cookies.set(SITE + '/', `${TOKEN_COOKIE}=${token}; Domain=gofile.io; Path=/`);
+  return token;
+}
+
 async function guestToken(ctx: Ctx): Promise<string> {
   const saved = /(?:^|;\s*)accountToken=([^;]+)/.exec(ctx.cookies.get(SITE + '/'))?.[1];
   if (saved) return saved;
@@ -194,7 +214,7 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
 
 /** Like `contents`; without `ask`, null for a protected folder whose password is not known. */
 async function listing(ctx: Ctx, code: string, ask: boolean): Promise<{ data: Item; token: string } | null> {
-  const token = await guestToken(ctx);
+  const token = await tokenFor(ctx);
   let password = (await ctx.password.saved()) ?? undefined;
   let r = await list(ctx, code, token, password);
   // JD: a pre-given password that fails, or none: ask the user; 3 times.
@@ -300,14 +320,64 @@ function download(url: string, token: string, item?: Item) {
   };
 }
 
+/** JD fetchAccountInfo: `GET /accounts/website`. */
+async function accountInfo(ctx: Ctx): Promise<AccountInfo> {
+  const token = await tokenFor(ctx);
+  const r = await api(ctx, () => ctx.http.get(`${API}/accounts/website`, { headers: { ...headers(token), Accept: '*/*' } }));
+  if (r.status === 'error-wrongToken') throw new AccountError({ de: 'Gofile: API-Token ungültig', en: 'Gofile: invalid API token' });
+  const data = r.data as unknown as Record<string, unknown> | undefined;
+  if (!data || r.status !== 'ok') throw new AccountError(`Gofile: ${r.status}`);
+  const tier = String(data.tier ?? '');
+  if (tier === 'guest') return { valid: true, premium: false, message: 'Guest' };
+  // JD: standard = expired premium.
+  if (tier === 'standard') return { valid: true, premium: false, message: 'Standard' };
+  if (tier !== 'premium') throw new AccountError(`Gofile: unknown tier ${tier}`);
+  const info: AccountInfo = { valid: true, premium: true, message: 'Premium' };
+  const max = Number(data.subscriptionLimitDirectTraffic);
+  if (Number.isFinite(max) && max > 0) {
+    // JD: today's traffic plus every day of the latest month in the history.
+    let used = Number((data.statsCurrent as Record<string, unknown> | undefined)?.trafficWebDownloaded ?? 0) || 0;
+    const history = (data.statsHistory ?? {}) as Record<string, Record<string, Record<string, { trafficWebDownloaded?: number }>>>;
+    const year = Object.keys(history).sort((a, b) => +b - +a)[0];
+    const month = year ? Object.keys(history[year]).sort((a, b) => +b - +a)[0] : undefined;
+    if (year && month) for (const day of Object.values(history[year][month])) used += Number(day?.trafficWebDownloaded ?? 0) || 0;
+    info.trafficLeft = max - used;
+  }
+  if (data.premiumType === 'credit') {
+    // JD: credit / creditTrafficRate per TB.
+    const credit = Number(data.credit);
+    const rate = Number(data.creditTrafficRate);
+    if (credit >= 0 && rate > 0) info.trafficLeft = Math.floor((credit / rate) * 1e12);
+    info.message = `Credits ${credit} ${String(data.currency ?? '')}`.trim();
+  } else if (data.premiumType === 'subscription') {
+    const end = Number(data.subscriptionEndDate);
+    // JD: 9999999999 = no end (e.g. Patreon).
+    if (Number.isFinite(end) && end !== 9999999999) info.validUntil = end * 1000;
+    info.message = `Premium (${String(data.subscriptionProvider ?? '')})`;
+  }
+  return info;
+}
+
 export default definePlugin({
   id: 'gofile',
   name: 'Gofile',
-  version: 4,
+  version: 5,
   matches: [LINK],
   accountRequired: false,
   // JD: getMaxConcurrentProcessingInstances() = 1 "to prevent running into rate-limit".
   serial: true,
+  account: {
+    userLabel: { de: 'E-Mail (optional)', en: 'E-mail (optional)' },
+    secretLabel: 'API-Token',
+    help: {
+      de: 'Wie bei JDownloader: den API-Token aus gofile.io → Profil („My profile“) eintragen.',
+      en: 'Like JDownloader: enter the API token from gofile.io → profile ("My profile").',
+    },
+  },
+
+  async checkAccount(ctx) {
+    return accountInfo(ctx);
+  },
 
   async crawl(link, ctx) {
     const files: CrawledFile[] = [];
@@ -347,8 +417,11 @@ export default definePlugin({
 
   async resolve(link, ctx) {
     const f = fragment(link);
-    // The link from the crawl, as long as it still works: no API request at all.
-    if (f.dl && f.t && (await directLinkWorks(ctx, f.dl, f.t))) return download(f.dl, f.t);
+    // The link from the crawl, as long as it still works: no API request at all. Links are
+    // bound to their token: with an account only one made with its token (JD).
+    const acc = ctx.account.get();
+    const usable = !acc || f.t === acc.secret.trim();
+    if (usable && f.dl && f.t && (await directLinkWorks(ctx, f.dl, f.t))) return download(f.dl, f.t);
     const { data, token } = await contents(ctx, folderCode(link));
     const file = pick(data, link);
     if (!file) {
