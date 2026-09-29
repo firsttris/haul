@@ -15,6 +15,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - 1fichier (und Alias-Domains) ohne Account wie bei JDownloader: Name/Größe über `check_links.pl`,
   Ordner über `?json=1`, Wartezeiten zwischen Downloads und bei fehlenden freien Slots werden
   abgewartet, ohne als Fehlversuch zu zählen
+- Google Drive: öffentliche Dateien ohne Account wie bei JDownloader (schneller Link-Check,
+  Bestätigung bei großen Dateien, Kontingent- und Rate-Limit mit Wartezeit); Ordner und
+  Google-Dokumente noch nicht
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
@@ -137,6 +140,7 @@ plugins/gofile      Gofile-Plugin (mit Ordner-Crawler)
 plugins/mediafire   Mediafire-Plugin (mit Ordner-Crawler)
 plugins/send        Send-Plugin (XFS, free und premium)
 plugins/1fichier    1fichier-Plugin (mit Ordner-Crawler)
+plugins/gdrive      Google-Drive-Plugin (Dateien)
 ui                  Web-UI
 ```
 

@@ -655,7 +655,14 @@ mod replace_tests {
         pm.reload().await;
         assert!(pm.errors().is_empty(), "{:?}", pm.errors());
         let ids: Vec<String> = pm.list().iter().map(|p| p.id.clone()).collect();
-        for id in ["1fichier", "ddownload", "gofile", "mediafire", "send"] {
+        for id in [
+            "1fichier",
+            "ddownload",
+            "gdrive",
+            "gofile",
+            "mediafire",
+            "send",
+        ] {
             assert!(ids.iter().any(|i| i == id), "{id} missing in {ids:?}");
         }
         let one = pm.find_for("https://1fichier.com/?abc123def456").unwrap();

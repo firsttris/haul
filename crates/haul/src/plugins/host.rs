@@ -535,6 +535,40 @@ mod bundled {
         );
     }
 
+    /// Google Drive's confirm-link parsing in QuickJS (no URL class there).
+    #[tokio::test]
+    async fn gdrive_bundle_in_quickjs() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/dist/gdrive.js");
+        let Ok(code) = std::fs::read_to_string(path) else {
+            eprintln!("plugins/dist/gdrive.js not built, skipping");
+            return;
+        };
+        let code = format!(
+            r#"{code}
+            __plugin.default.resolve = async (html) => ({{ url: String(__plugin.confirmUrl(html, "https://drive.usercontent.google.com/download?id=x")) }});"#
+        );
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let html = r#"<form id="download-form" action="https://drive.usercontent.google.com/download" method="get"><input type="hidden" name="id" value="abc"><input type="hidden" name="confirm" value="t"></form>"#;
+        let v = invoke(
+            "gdrive",
+            &code,
+            "resolve",
+            serde_json::json!([html]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v["url"],
+            "https://drive.usercontent.google.com/download?id=abc&confirm=t"
+        );
+    }
+
     /// The gofile bundle declares `crawl`; `ctx.hash.sha256` works in QuickJS.
     #[tokio::test]
     async fn gofile_bundle_crawls_and_hashes() {
