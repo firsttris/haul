@@ -230,15 +230,16 @@ const de = {
     deleteAria: 'Account löschen',
     plugins: 'Plugins',
     reload: 'Neu laden',
-    builtin: 'mitgeliefert',
-    custom: 'eigenes',
+    builtin: 'In Haul enthalten',
+    custom: 'Eigene Datei',
+    patterns: (n: number) => (n === 1 ? 'Linkmuster anzeigen' : `${n} Linkmuster anzeigen`),
     premiumRequired: 'Premium nötig',
     noAccountNeeded: 'ohne Account',
     noPlugins: 'Keine Plugins geladen.',
     replacesNewer: (builtin: string, own: string) =>
-      `Veraltet: Diese eigene Datei (v${own}) verdeckt das mitgelieferte Plugin v${builtin}. ` +
-      'Datei löschen und „Neu laden“, um das mitgelieferte zu nutzen.',
-    replaces: (builtin: string) => `Ersetzt das mitgelieferte Plugin v${builtin}.`,
+      `Veraltet: Diese eigene Datei (v${own}) verdeckt das in Haul enthaltene Plugin v${builtin}. ` +
+      'Datei löschen und „Neu laden“, um das enthaltene zu nutzen.',
+    replaces: (builtin: string) => `Ersetzt das in Haul enthaltene Plugin v${builtin}.`,
   },
   settings: {
     title: 'Einstellungen',
@@ -557,15 +558,16 @@ const en: Messages = {
     deleteAria: 'Delete account',
     plugins: 'Plugins',
     reload: 'Reload',
-    builtin: 'built-in',
-    custom: 'custom',
+    builtin: 'Included in Haul',
+    custom: 'Custom file',
+    patterns: (n) => (n === 1 ? 'Show link pattern' : `Show ${n} link patterns`),
     premiumRequired: 'Premium required',
     noAccountNeeded: 'no account needed',
     noPlugins: 'No plugins loaded.',
     replacesNewer: (builtin, own) =>
-      `Outdated: this custom file (v${own}) hides the built-in plugin v${builtin}. ` +
-      'Delete the file and click “Reload” to use the built-in one.',
-    replaces: (builtin) => `Replaces the built-in plugin v${builtin}.`,
+      `Outdated: this custom file (v${own}) hides the plugin v${builtin} included in Haul. ` +
+      'Delete the file and click “Reload” to use the included one.',
+    replaces: (builtin) => `Replaces the plugin v${builtin} included in Haul.`,
   },
   settings: {
     title: 'Settings',

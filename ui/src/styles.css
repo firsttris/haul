@@ -987,6 +987,49 @@ pre.code {
 .list-row.unchecked > :not(.row-check) {
   opacity: 0.45;
 }
+.plugin-row {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.plugin-row .grow {
+  min-width: 0;
+}
+.plugin-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.wrap-any {
+  overflow-wrap: anywhere;
+}
+.patterns summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--dim);
+  width: fit-content;
+}
+.patterns ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+@media (max-width: 640px) {
+  .plugin-row {
+    flex-wrap: wrap;
+  }
+  .plugin-meta {
+    flex-direction: row;
+    align-items: center;
+    text-align: left;
+  }
+}
 .row-check {
   width: 18px;
   height: 18px;

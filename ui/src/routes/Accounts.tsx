@@ -191,23 +191,32 @@ export function AccountsPage() {
           </div>
           <div className="list">
             {plugins.data?.plugins.map((p) => (
-              <div className="list-row" key={p.id}>
+              <div className="list-row plugin-row" key={p.id}>
                 <div className="grow">
                   <span className="title">
                     {p.name} <span className="pill">v{p.version}</span>
                   </span>
-                  <span className="sub mono">{p.matches.map((m) => `/${m.source}/${m.flags}`).join('  ')}</span>
-                  <span className="sub mono">{p.file}</span>
+                  <span className="sub mono wrap-any">{p.file}</span>
                   {p.replaces && (
                     <span className="sub" style={{ color: p.replaces.newer ? 'var(--err)' : undefined }} role={p.replaces.newer ? 'alert' : undefined}>
                       {p.replaces.newer ? t.accounts.replacesNewer(p.replaces.version, p.version) : t.accounts.replaces(p.replaces.version)}
                     </span>
                   )}
+                  <details className="patterns">
+                    <summary>{t.accounts.patterns(p.matches.length)}</summary>
+                    <ul>
+                      {p.matches.map((m) => (
+                        <li key={m.source} className="mono wrap-any">{`/${m.source}/${m.flags}`}</li>
+                      ))}
+                    </ul>
+                  </details>
                 </div>
-                <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
-                <span className="subtitle" style={{ fontSize: 13 }}>
-                  {p.accountRequired ? t.accounts.premiumRequired : t.accounts.noAccountNeeded}
-                </span>
+                <div className="plugin-meta">
+                  <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
+                  <span className="subtitle" style={{ fontSize: 13 }}>
+                    {p.accountRequired ? t.accounts.premiumRequired : t.accounts.noAccountNeeded}
+                  </span>
+                </div>
               </div>
             ))}
             {plugins.data?.plugins.length === 0 && <div className="subtitle">{t.accounts.noPlugins}</div>}

@@ -96,7 +96,7 @@ Dann `http://server:8080` öffnen und beim ersten Aufruf den Benutzer anlegen (o
 | `HAUL_DONE_DIR` | `/downloads/done` | fertige Dateien, ein Unterordner pro Paket |
 | `HAUL_LISTEN` | `0.0.0.0:8080` | Web-UI und API |
 | `HAUL_CNL_LISTEN` | `127.0.0.1:9666` (im Image `0.0.0.0:9666`) | Click'n'Load; `off` schaltet es ab |
-| `HAUL_BUILTIN_PLUGINS` | im Image `/app/plugins` | mitgelieferte Plugins |
+| `HAUL_BUILTIN_PLUGINS` | im Image `/app/plugins` | in Haul enthaltene Plugins |
 | `HAUL_USER`, `HAUL_PASSWORD` | – | legt den Login beim ersten Start an |
 | `HAUL_USER_AGENT` | Desktop-Browser | User-Agent gegenüber Hostern |
 | `HAUL_7Z`, `HAUL_UNRAR` | `7z`, `unrar` | Programme zum Entpacken |
@@ -275,8 +275,9 @@ Downloads dieses Hosters, statt dass jeder einzeln gegen das Limit läuft.
 
 Plugins werden mit `pnpm build:plugins` nach `plugins/dist/<name>.js` gebaut. Eigene oder
 aktualisierte Plugins nach `/config/plugins/` legen und unter *Accounts & Plugins* auf
-*Neu laden* klicken; sie überschreiben mitgelieferte mit derselben `id`. Ist das mitgelieferte
-neuer als die eigene Kopie, zeigt die UI eine Warnung (die Kopie löschen, um Updates zu bekommen).
+*Neu laden* klicken; sie überschreiben die in Haul enthaltenen mit derselben `id` (in der UI
+„Eigene Datei“ statt „In Haul enthalten“). Ist das enthaltene neuer als die eigene Kopie, zeigt
+die UI eine Warnung (die Kopie löschen, um Updates zu bekommen).
 
 Ordner-Links (Plugins mit `crawl`) werden nach dem Speichern im Hintergrund aufgelöst; das
 Hinzufügen, auch per Click'n'Load, wartet nicht darauf. Bis dahin steht der Link als
