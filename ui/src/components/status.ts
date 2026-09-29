@@ -21,6 +21,8 @@ export function describe(d: Download, t: Messages, waiting?: Map<string, Captcha
     case 'finished':
       return { label: s.finished, tone: 'ok' };
     case 'downloading':
+      // All bytes are there and the hoster published a checksum: the core is verifying.
+      if (d.hashType && d.size !== null && d.size > 0 && d.bytesDone >= d.size) return { label: s.verifying, tone: 'run' };
       return { label: s.downloading, tone: 'run' };
     case 'resolving':
       return { label: s.resolving, tone: 'run' };

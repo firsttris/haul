@@ -3,6 +3,7 @@
 
 pub mod crypt;
 pub mod extract;
+pub mod hash;
 mod limiter;
 mod worker;
 
@@ -587,6 +588,7 @@ impl Engine {
                         url: d.url.clone(),
                         name: None,
                         size: None,
+                        hash: None,
                     }],
                 }),
             };
@@ -621,6 +623,7 @@ impl Engine {
                             error: None,
                             // JD: the crawler gives its files the folder's password.
                             password: password.get(),
+                            hash: f.hash.filter(|h| h.usable()).map(|h| h.to_db()),
                         })
                         .collect()
                 }
@@ -670,8 +673,8 @@ impl Engine {
         let now = now_ms();
         for l in links {
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, password, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, password, hash, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(d.package_id)
             .bind(&l.url)
@@ -682,6 +685,7 @@ impl Engine {
             .bind(l.online)
             .bind(&l.error)
             .bind(&l.password)
+            .bind(&l.hash)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -766,22 +770,26 @@ impl Engine {
 
     async fn check_download(&self, d: &Download) -> Result<()> {
         let plugin = self.plugins.find_for(&d.url);
+        let mut hash = None;
         let (online, name, size, err) = match &plugin {
             Some(p) if p.has_check => {
                 // Like JD's and pyLoad's link check: anonymous, without the premium session.
                 // Logged in, hosters like ddownload redirect the file page straight to the file
                 // ("direct downloads"), so name and size never show up.
                 match self.plugins.check(p, &d.url, None).await {
-                    Ok(r) => (
-                        if r.online.unwrap_or(true) {
-                            "online"
-                        } else {
-                            "offline"
-                        },
-                        r.name.map(|n| util::sanitize_filename(&n)),
-                        r.size,
-                        None,
-                    ),
+                    Ok(r) => {
+                        hash = r.hash.filter(|h| h.usable()).map(|h| h.to_db());
+                        (
+                            if r.online.unwrap_or(true) {
+                                "online"
+                            } else {
+                                "offline"
+                            },
+                            r.name.map(|n| util::sanitize_filename(&n)),
+                            r.size,
+                            None,
+                        )
+                    }
                     Err(e) if e.kind == ErrorKind::Offline => {
                         ("offline", None, None, Some(e.message))
                     }
@@ -805,11 +813,13 @@ impl Engine {
         };
         sqlx::query(
             "UPDATE downloads SET online = ?, name = COALESCE(?, name), size = COALESCE(?, size),
-             plugin_id = ?, error = CASE WHEN status IN ('collected','queued') THEN ? ELSE error END WHERE id = ?",
+             hash = COALESCE(?, hash), plugin_id = ?,
+             error = CASE WHEN status IN ('collected','queued') THEN ? ELSE error END WHERE id = ?",
         )
         .bind(online)
         .bind(name)
         .bind(size)
+        .bind(hash)
         .bind(plugin.map(|p| p.id.clone()))
         .bind(err)
         .bind(d.id)
@@ -928,6 +938,7 @@ struct NewLink {
     online: &'static str,
     error: Option<String>,
     password: Option<String>,
+    hash: Option<String>,
 }
 
 impl NewLink {
@@ -939,6 +950,7 @@ impl NewLink {
             online: "unknown",
             error: None,
             password: d.password.clone(),
+            hash: d.hash.clone(),
         }
     }
 }
@@ -1773,6 +1785,84 @@ mod engine_tests {
         let written = std::fs::read(dir.path().join("done/Enc").join(&done.name))
             .unwrap_or_else(|e| panic!("{e}: {} in {listing:?}", done.name));
         assert!(written == plain, "decrypted content differs");
+        e.shutdown().await;
+    }
+
+    /// The hoster's checksum is verified after the download; a wrong one loads the file once
+    /// more, then fails.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn checksum_verified_after_download() {
+        use sha2::Digest;
+        let data: Arc<Vec<u8>> =
+            Arc::new((0..3 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect());
+        let right = hex::encode(sha2::Sha256::digest(data.as_slice()));
+        let requests: Arc<AtomicU64> = Arc::default();
+        let base = range_server(data.clone(), requests.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = format!(
+            r#"var __plugin = {{ default: {{ id: "sum", version: 1, matches: [/https?:\/\/sum\.test\//],
+                async resolve(link) {{
+                    const value = link.endsWith("/good") ? "{right}" : "{wrong}";
+                    return {{ url: "{base}/file.bin", name: link.split("/").pop() + ".bin", hash: {{ type: "sha256", value }} }};
+                }},
+            }}}};"#,
+            wrong = "0".repeat(64)
+        );
+        std::fs::write(plugin_dir.join("sum.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://sum.test/f/good https://sum.test/f/bad".into(),
+                package_name: Some("Sum".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids = e.package_ids(pkg).await.unwrap();
+        let good = wait_for(&e, ids[0], status::FINISHED).await;
+        assert_eq!(good.hash_ok, Some(true));
+        assert_eq!(
+            good.hash.as_deref(),
+            Some(format!("sha256:{right}").as_str())
+        );
+        let json = serde_json::to_value(&good).unwrap();
+        assert_eq!(json["hashType"], "sha256");
+        assert_eq!(json["hashOk"], true);
+
+        // Wrong: back to the queue with the file deleted, then (without the 10 s backoff)
+        // a second complete download, which fails for good.
+        let bad = ids[1];
+        for _ in 0..200 {
+            let d = db::get_download(&e.db, bad).await.unwrap().unwrap();
+            if d.status == status::QUEUED && d.hash_ok == Some(false) {
+                assert!(
+                    d.error.as_deref().unwrap_or("").contains("SHA256"),
+                    "{:?}",
+                    d.error
+                );
+                assert!(!e.tmp_path(bad).exists());
+                sqlx::query("UPDATE downloads SET retry_at = NULL WHERE id = ?")
+                    .bind(bad)
+                    .execute(&e.db)
+                    .await
+                    .unwrap();
+                e.wake();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let failed = wait_for(&e, bad, status::FAILED).await;
+        assert!(
+            failed.error.as_deref().unwrap_or("").contains("SHA256"),
+            "{:?}",
+            failed.error
+        );
+        assert!(!dir.path().join("done/Sum/bad.bin").exists());
         e.shutdown().await;
     }
 

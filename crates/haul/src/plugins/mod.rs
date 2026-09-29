@@ -112,6 +112,8 @@ pub struct CheckResult {
     pub online: Option<bool>,
     pub name: Option<String>,
     pub size: Option<i64>,
+    #[serde(default)]
+    pub hash: Option<crate::engine::hash::HashSpec>,
 }
 
 /// What `resolve` returns: a direct URL the core can download.
@@ -129,6 +131,9 @@ pub struct Resolved {
     /// The hoster sends the file encrypted (mega.nz): decrypted while writing.
     #[serde(default)]
     pub decrypt: Option<crate::engine::crypt::DecryptSpec>,
+    /// The hoster's checksum of the (decrypted) file, verified after the download.
+    #[serde(default)]
+    pub hash: Option<crate::engine::hash::HashSpec>,
 }
 
 impl Resolved {
@@ -167,6 +172,8 @@ pub struct CrawledFile {
     pub url: String,
     pub name: Option<String>,
     pub size: Option<i64>,
+    #[serde(default)]
+    pub hash: Option<crate::engine::hash::HashSpec>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -69,7 +69,7 @@ const xfs = definePlugin(
   createXfsPlugin({
     id: 'send',
     name: 'Send',
-    version: 4,
+    version: 5,
     // JD: getPluginDomains; usersfiles.com is dead (getDeadDomains), kept for old links.
     domains: DOMAINS,
     fileIdLength: 12,
@@ -87,6 +87,8 @@ const xfs = definePlugin(
       /<input[^>]+name=["']fname["'][^>]+value=["']([^"']+)["']/i,
       /<h1[^>]*class=["'][^"']*file[^"']*["'][^>]*>([^<]+)</i,
     ],
+    // JD SendNow.requestFileInformationWebsite (the MD5 there "doesn't match, maybe just fake").
+    sha256Pattern: /SHA-256\s*:\s*<\/b>\s*([a-f0-9]{64})\s*<\/span>/i,
     sizePatterns: [
       /id="downloadbtn[^>]*><i [^>]*><\/i>\s*Download \[([^<\]]+)\]<\/button>/i,
       /<span[^>]+class=["'][^"']*file-size[^"']*["'][^>]*>([^<]+)</i,

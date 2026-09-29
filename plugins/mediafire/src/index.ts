@@ -33,7 +33,7 @@ import {
   withPassword,
   WRONG_PASSWORD,
 } from '@haul/plugin-sdk';
-import type { Bilingual, Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
+import type { Bilingual, Ctx, CrawledFile, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://www.mediafire.com';
 const API = `${SITE}/api/1.5`;
@@ -93,6 +93,16 @@ interface FileInfo {
   privacy?: string;
   password_protected?: string;
   delete_date?: string;
+  /** SHA-256 of the file (JD parseFileInfo: HashInfo.parse). */
+  hash?: string;
+}
+
+/** JD HashInfo.parse: the type by the length of the hex value. */
+export function hashOf(f: { hash?: string }): FileHash | undefined {
+  const h = (f.hash ?? '').trim().toLowerCase();
+  if (!/^[a-f0-9]+$/.test(h)) return undefined;
+  const type = ({ 32: 'md5', 40: 'sha1', 64: 'sha256' } as const)[h.length as 32 | 40 | 64];
+  return type ? { type, value: h } : undefined;
 }
 
 interface ApiResponse {
@@ -174,7 +184,7 @@ async function walkFolder(ctx: Ctx, key: string, files: CrawledFile[], depth: nu
       const content = r.folder_content ?? {};
       for (const f of content.files ?? []) {
         if (deleted(f)) continue;
-        files.push({ url: fileUrl(f), name: f.filename, size: sizeOf(f) });
+        files.push({ url: fileUrl(f), name: f.filename, size: sizeOf(f), hash: hashOf(f) });
       }
       for (const sub of content.folders ?? []) await walkFolder(ctx, sub.folderkey, files, depth + 1);
       if (content.more_chunks !== 'yes') break;
@@ -303,7 +313,7 @@ function download(url: string, ua: string, referer: string) {
 export default definePlugin({
   id: 'mediafire',
   name: 'Mediafire',
-  version: 2,
+  version: 3,
   matches: [new RegExp(`^https?://${HOSTS}/.+`, 'i'), /^https?:\/\/download\d+\.mediafire(?:cdn)?\.com\//i],
   accountRequired: false,
 
@@ -325,9 +335,9 @@ export default definePlugin({
           en: 'Mediafire: file not found',
         });
       }
-      return { files: [{ url: t.direct ?? link, name: f.filename, size: sizeOf(f) }] };
+      return { files: [{ url: t.direct ?? link, name: f.filename, size: sizeOf(f), hash: hashOf(f) }] };
     }
-    for (const f of infos.values()) if (!deleted(f)) files.push({ url: fileUrl(f), name: f.filename, size: sizeOf(f) });
+    for (const f of infos.values()) if (!deleted(f)) files.push({ url: fileUrl(f), name: f.filename, size: sizeOf(f), hash: hashOf(f) });
     for (const key of folders) await walkFolder(ctx, key, files, 1);
     return { files };
   },
@@ -340,7 +350,7 @@ export default definePlugin({
     }
     const f = (await fileInfos(ctx, [t.id])).get(t.id);
     if (!f || deleted(f)) return { online: false };
-    return { online: true, name: f.filename, size: sizeOf(f) };
+    return { online: true, name: f.filename, size: sizeOf(f), hash: hashOf(f) };
   },
 
   async resolve(link, ctx) {
@@ -371,7 +381,7 @@ export default definePlugin({
     let ua = USER_AGENTS[0];
     let res = await ctx.http.get(pageUrl, { headers: { 'User-Agent': ua } });
     // Hotlinked file (JD: "Found hotlinked item").
-    if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info) };
+    if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info), hash: hashOf(info) };
     // JD: the IP limit sits on IP + User-Agent; another User-Agent often gets around it.
     for (let i = 1; i < USER_AGENTS.length && limitTtl(res.body); i++) {
       ua = USER_AGENTS[i];
@@ -398,7 +408,7 @@ export default definePlugin({
       res = await ctx.http.post(resolveUrl(res.url, form.action || res.url), fields, {
         headers: { 'User-Agent': ua, Referer: res.url },
       });
-      if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info) };
+      if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info), hash: hashOf(info) };
     }
     if (PASSWORD_PROMPT.test(res.body)) {
       let page = res;
@@ -425,7 +435,7 @@ export default definePlugin({
         }
         return { page: next };
       });
-      if ('direct' in unlocked) return { ...download(unlocked.direct, ua, pageUrl), name: info.filename, size: sizeOf(info) };
+      if ('direct' in unlocked) return { ...download(unlocked.direct, ua, pageUrl), name: info.filename, size: sizeOf(info), hash: hashOf(info) };
       res = unlocked.page;
     }
     if (/class="MalwareAdvisory"/i.test(res.body)) {
@@ -442,6 +452,6 @@ export default definePlugin({
         en: `Mediafire: download link not found (${res.url})`,
       });
     }
-    return { ...download(url, ua, res.url), name: info.filename, size: sizeOf(info) };
+    return { ...download(url, ua, res.url), name: info.filename, size: sizeOf(info), hash: hashOf(info) };
   },
 });

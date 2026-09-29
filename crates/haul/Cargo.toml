@@ -20,6 +20,7 @@ ctr = "0.9"
 futures = "0.3"
 governor = "0.10"
 hex = "0.4"
+md-5 = "0.10"
 libc = "0.2"
 mime_guess = "2"
 percent-encoding = "2"
@@ -32,6 +33,7 @@ rquickjs = { version = "0.9", features = ["futures", "parallel", "macro"] }
 rust-embed = "8"
 serde.workspace = true
 serde_json.workspace = true
+sha1 = "0.10"
 sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 thiserror = "2"

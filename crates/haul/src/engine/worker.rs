@@ -351,6 +351,7 @@ async fn execute(
                 size: None,
                 max_connections: None,
                 decrypt: None,
+                hash: None,
             },
             engine.plugins.direct_clients().follow,
             None,
@@ -603,7 +604,56 @@ async fn execute(
         }
     }
 
-    // 5. Move into the package folder.
+    // 5. Checksum, if the hoster published one (JD HashInfo, "CRC OK"). A mismatch loads the
+    //    file once more from scratch; a second one fails.
+    let spec = resolved
+        .hash
+        .clone()
+        .filter(|h| h.usable())
+        .or_else(|| d.hash.as_deref().and_then(super::hash::HashSpec::from_db))
+        .filter(|h| h.usable());
+    if let Some(spec) = spec {
+        let (p, h) = (path.clone(), spec.clone());
+        let ok = cancellable(
+            cancel,
+            tokio::task::spawn_blocking(move || super::hash::verify(&p, &h)),
+        )
+        .await?
+        .map_err(|e| Failure::Retry(format!("{e}")))??;
+        tracing::info!(id, kind = %spec.kind, ok, "checksum");
+        sqlx::query("UPDATE downloads SET hash = ?, hash_ok = ? WHERE id = ?")
+            .bind(spec.to_db())
+            .bind(ok)
+            .bind(id)
+            .execute(&engine.db)
+            .await?;
+        if !ok {
+            if d.hash_ok == Some(false) {
+                return Err(Failure::Fail(crate::tr!(
+                    "Prüfsumme ({}) stimmt auch beim zweiten Mal nicht",
+                    "Checksum ({}) wrong again on the second try",
+                    spec.kind.to_uppercase()
+                )));
+            }
+            // Start over: the next attempt plans fresh segments into a new file.
+            let _ = tokio::fs::remove_file(&path).await;
+            sqlx::query("DELETE FROM segments WHERE download_id = ?")
+                .bind(id)
+                .execute(&engine.db)
+                .await?;
+            sqlx::query("UPDATE downloads SET bytes_done = 0 WHERE id = ?")
+                .bind(id)
+                .execute(&engine.db)
+                .await?;
+            return Err(Failure::Retry(crate::tr!(
+                "Prüfsumme ({}) falsch, lade die Datei neu",
+                "Checksum ({}) wrong, loading the file again",
+                spec.kind.to_uppercase()
+            )));
+        }
+    }
+
+    // 6. Move into the package folder.
     let dir = engine.package_dir(&pkg);
     tokio::fs::create_dir_all(&dir).await?;
     let dest = unique_path(&dir, &name).await;

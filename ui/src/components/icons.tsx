@@ -107,6 +107,19 @@ export const IconCheck = (p: P) => (
     <path d="M5 12l5 5 9-10" />
   </Svg>
 );
+export const IconShieldCheck = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z" />
+    <path d="M8.5 12l2.5 2.5 4.5-5" />
+  </Svg>
+);
+export const IconShieldAlert = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z" />
+    <path d="M12 8v5" />
+    <path d="M12 16.5v.01" />
+  </Svg>
+);
 export const IconTrash = (p: P) => (
   <Svg {...p}>
     <path d="M4 7h16" />

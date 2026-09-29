@@ -648,6 +648,43 @@ textarea {
   font-size: 13px;
   min-width: 0;
 }
+.name-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.name-with-badge .cell-name {
+  min-width: 0;
+}
+.hash-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.hash-badge.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+}
+.hash-badge.bad {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--err) 35%, transparent);
+}
+.hash-badge .hash-kind {
+  font-weight: 500;
+  opacity: 0.75;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
 .status .dot {
   width: 7px;
   height: 7px;

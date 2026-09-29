@@ -105,6 +105,15 @@ löst die XFS-Basis selbst. Bild-Captchas (XFS `/captchas/…`, JDs „Standard 
 direkt im Hinweis, ohne Userscript: das Bild lädt der Server mit den Cookies des Plugins, du tippst
 den Text ab (`ctx.captcha.solve({ kind: 'image', imageUrl, pageUrl })`).
 
+## Prüfsummen
+
+Wo der Hoster eine Prüfsumme veröffentlicht, rechnet Haul sie nach dem Download nach (wie
+JDownloaders „CRC OK“): Google Drive (Ordner: SHA-256/MD5), Gofile (MD5), Mediafire (SHA-256),
+Send (SHA-256 auf der Dateiseite) und MEGA (die MAC im Schlüssel). Passt sie, steht neben der
+Datei „✓ geprüft“; passt sie nicht, lädt Haul die Datei einmal komplett neu und meldet danach
+„Prüfsumme falsch“. Plugins geben sie als `hash: { type: 'md5' | 'sha1' | 'sha256' | 'mega', value }`
+bei `crawl`, `check` oder `resolve` mit. Archive prüft zusätzlich das Entpacken selbst.
+
 ## Passwortgeschützte Dateien
 
 Wie bei JDownloader: Ein Download-Passwort kann schon beim Hinzufügen im Linksammler stehen

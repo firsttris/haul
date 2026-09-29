@@ -21,7 +21,7 @@
  * - Not yet: Google Docs exports, video streams, Google accounts.
  */
 import { decodeHtml, definePlugin, HosterLimitError, OfflineError, parseForms, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
-import type { CrawledFile, Ctx, HttpResponse } from '@haul/plugin-sdk';
+import type { CrawledFile, Ctx, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const HOSTS = '(?:drive|docs|drive\\.usercontent)\\.google\\.com';
 /** JD getAnnotationUrls, without Google Docs documents (they need an export). */
@@ -155,6 +155,16 @@ interface DriveItem {
   fileSize?: string | number;
   resourceKey?: string;
   shortcutDetails?: { targetId?: string; targetMimeType?: string };
+  md5Checksum?: string;
+  sha256Checksum?: string;
+}
+
+/** JD parseFileInfoAPIAndWebsiteWebAPI: the file's hashes, SHA-256 before MD5. */
+export function driveHash(item: DriveItem): FileHash | undefined {
+  const sha = (item.sha256Checksum ?? '').toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(sha)) return { type: 'sha256', value: sha };
+  const md5 = (item.md5Checksum ?? '').toLowerCase();
+  return /^[a-f0-9]{32}$/.test(md5) ? { type: 'md5', value: md5 } : undefined;
 }
 
 /** JD getSingleFilesFieldsWebsite. */
@@ -242,7 +252,7 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
         fresh++;
         if ((item.kind ?? '').toLowerCase() === 'drive#file' && mime !== FOLDER_MIME) {
           const size = Number(item.fileSize);
-          files.push({ url: fileUrl(id, item.resourceKey), name: item.title, size: size > 0 ? size : undefined });
+          files.push({ url: fileUrl(id, item.resourceKey), name: item.title, size: size > 0 ? size : undefined, hash: driveHash(item) });
         } else {
           subfolders.push({ id, resourceKey: item.resourceKey });
         }
@@ -315,7 +325,7 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 3,
+  version: 4,
   matches: [LINK, FOLDER],
   accountRequired: false,
 

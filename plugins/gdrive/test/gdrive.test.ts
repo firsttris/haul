@@ -107,7 +107,7 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
         body: JSON.stringify({
           nextPageToken: 'p2',
           items: [
-            { kind: 'drive#file', id: 'f1', title: 'a.part1.rar', mimeType: 'application/x-rar', fileSize: '100' },
+            { kind: 'drive#file', id: 'f1', title: 'a.part1.rar', mimeType: 'application/x-rar', fileSize: '100', md5Checksum: 'aa'.repeat(16), sha256Checksum: 'BB'.repeat(32) },
             { kind: 'drive#file', id: 'sub1', title: 'Extras', mimeType: 'application/vnd.google-apps.folder', resourceKey: '0-rk' },
           ],
         }),
@@ -135,7 +135,8 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
     expect(await plugin.crawl!(`https://drive.google.com/drive/u/0/folders/${FID}?usp=sharing`, ctx)).toEqual({
       packageName: 'My Films',
       files: [
-        { url: 'https://drive.google.com/file/d/f1', name: 'a.part1.rar', size: 100 },
+        // SHA-256 before MD5 (JD parseFileInfoAPIAndWebsiteWebAPI).
+        { url: 'https://drive.google.com/file/d/f1', name: 'a.part1.rar', size: 100, hash: { type: 'sha256', value: 'bb'.repeat(32) } },
         { url: 'https://drive.google.com/file/d/f2', name: 'b.rar', size: undefined },
         { url: 'https://drive.google.com/file/d/f3', name: 'x.nfo', size: 3 },
       ],

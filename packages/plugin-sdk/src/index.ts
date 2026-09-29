@@ -187,10 +187,21 @@ export async function withPassword<T>(
   }
 }
 
+/**
+ * A checksum the hoster publishes (JD HashInfo). The core verifies the finished file with it:
+ * a mismatch loads the file once more, a second one fails. `mega`: the 32-byte MEGA file key
+ * as hex (its meta MAC). Unknown types or malformed values are ignored.
+ */
+export interface FileHash {
+  type: 'md5' | 'sha1' | 'sha256' | 'mega';
+  value: string;
+}
+
 export interface CheckResult {
   online: boolean;
   name?: string;
   size?: number;
+  hash?: FileHash;
 }
 
 export interface Resolved {
@@ -208,6 +219,8 @@ export interface Resolved {
    * Key and initial counter block as hex (16 bytes each).
    */
   decrypt?: { cipher: 'aes-128-ctr'; key: string; iv: string };
+  /** Checksum of the (decrypted) file; else the one from `crawl`/`check`, if any. */
+  hash?: FileHash;
 }
 
 /** One file found by `crawl`. `url` is what `check`/`resolve` get later. */
@@ -215,6 +228,7 @@ export interface CrawledFile {
   url: string;
   name?: string;
   size?: number;
+  hash?: FileHash;
 }
 
 export interface CrawlResult {

@@ -29,7 +29,7 @@ const FOLDER = {
   code: 'AbC123',
   canAccess: true,
   children: {
-    f1: { id: 'f1', type: 'file', name: 'a.part1.rar', size: 100, link: f1 },
+    f1: { id: 'f1', type: 'file', name: 'a.part1.rar', size: 100, link: f1, md5: 'D41D8CD98F00B204E9800998ECF8427E' },
     f2: { id: 'f2', type: 'file', name: 'a.part2.rar', size: 50, link: 'https://store1.gofile.io/download/web/f2/a.part2.rar' },
     sub: { id: 'sub', type: 'folder', name: 'Extras', code: 'Sub9' },
   },
@@ -58,8 +58,9 @@ describe('gofile', () => {
     const r = await plugin.crawl!('https://gofile.io/d/AbC123', ctx);
     expect(r.packageName).toBe('My Folder');
     expect(r.files).toEqual([
-      { url: crawled('f1', f1), name: 'a.part1.rar', size: 100 },
-      { url: crawled('f2', 'https://store1.gofile.io/download/web/f2/a.part2.rar'), name: 'a.part2.rar', size: 50 },
+      // JD GofileIo: the MD5 of the listing is checked after the download.
+      { url: crawled('f1', f1), name: 'a.part1.rar', size: 100, hash: { type: 'md5', value: 'd41d8cd98f00b204e9800998ecf8427e' } },
+      { url: crawled('f2', 'https://store1.gofile.io/download/web/f2/a.part2.rar'), name: 'a.part2.rar', size: 50, hash: undefined },
       // Flagged as malware: no direct link.
       { url: 'https://gofile.io/d/Sub9#file=f3', name: 'x.nfo', size: 3 },
     ]);
@@ -188,7 +189,7 @@ describe('gofile', () => {
       const ctx = fakeCtx(routes(seen));
       ctx.passwordAnswers = ['falsch', 'geheim'];
       const r = await plugin.crawl!('https://gofile.io/d/AbC123', ctx);
-      expect(r.files).toEqual([{ url: crawled('f1', f1), name: 'a.part1.rar', size: 100 }]);
+      expect(r.files).toEqual([{ url: crawled('f1', f1), name: 'a.part1.rar', size: 100, hash: { type: 'md5', value: 'd41d8cd98f00b204e9800998ecf8427e' } }]);
       expect(seen).toEqual(['', sha('falsch'), sha('geheim')]);
       expect(ctx.passwordAsks).toEqual([{ wrong: false }, { wrong: true }]);
       expect(ctx.savedPassword).toBe('geheim');

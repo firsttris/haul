@@ -20,6 +20,7 @@ import {
   Bilingual,
   CheckResult,
   Ctx,
+  FileHash,
   HttpOptions,
   HttpResponse,
   OfflineError,
@@ -55,6 +56,8 @@ export interface XfsConfig {
   offlinePatterns?: RegExp[];
   namePatterns?: RegExp[];
   sizePatterns?: RegExp[];
+  /** A SHA-256 shown on the file page (JD SendNow: "SHA-256 : </b> …"), checked after the download. */
+  sha256Pattern?: RegExp;
   directLinkPatterns?: RegExp[];
   /** Extra hosts that serve the final files (CDNs), besides `domains` and their subdomains. */
   downloadHosts?: string[];
@@ -239,6 +242,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   const offline = cfg.offlinePatterns ?? DEFAULT_OFFLINE;
   const names = cfg.namePatterns ?? DEFAULT_NAMES;
   const sizes = cfg.sizePatterns ?? DEFAULT_SIZES;
+  const sha256Of = (html: string): FileHash | undefined => {
+    const v = cfg.sha256Pattern ? match(html, cfg.sha256Pattern)?.toLowerCase() : undefined;
+    return v && /^[a-f0-9]{64}$/.test(v) ? { type: 'sha256', value: v } : undefined;
+  };
   const directs = cfg.directLinkPatterns ?? directPatterns([...cfg.domains, ...(cfg.downloadHosts ?? [])]);
   const userApi = !!(cfg.apiBase && cfg.userApiKeys);
 
@@ -668,14 +675,16 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const url = fileUrl(link);
     let fileName: string | undefined;
     let fileSize: number | undefined;
+    let fileHash: FileHash | undefined;
     const scan = (page: HttpResponse) => {
       const html = visible(page.body);
       fileName ??= match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((x) => !!x && x.trim().length > 0);
       fileSize ??= parseSize(match(html, ...sizes));
+      fileHash ??= sha256Of(html);
     };
     const direct = (target: string): Resolved => {
       ctx.log.info(`Direktlink (free): ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/… (${fileName ?? 'Name unbekannt'})`);
-      return { url: target, name: fileName, size: fileSize, headers: { Referer: url }, maxConnections: cfg.freeMaxConnections ?? 1 };
+      return { url: target, name: fileName, size: fileSize, hash: fileHash, headers: { Referer: url }, maxConnections: cfg.freeMaxConnections ?? 1 };
     };
     /** A file, a redirect to it or a link to it on the page; follows redirects within the site. */
     const hooks = cfg.freeHooks ?? {};
@@ -797,7 +806,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       if (res.status === 404 || offline.some((p) => p.test(html))) return { online: false };
       const name = match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);
       if (!name) ctx.log.warn(`${cfg.name}: kein Dateiname auf der Dateiseite gefunden (HTTP ${res.status}, ${match(res.body, /<title>\s*([^<]*)</i) ?? 'ohne Titel'})`);
-      return { online: true, name, size: parseSize(match(html, ...sizes)) };
+      return { online: true, name, size: parseSize(match(html, ...sizes)), hash: sha256Of(html) };
     },
 
     async resolve(link, ctx): Promise<Resolved> {
@@ -825,15 +834,17 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       // filecrypt carry only the file id, and the CDN may not send a name either.
       let fileName: string | undefined;
       let fileSize: number | undefined;
+      let fileHash: FileHash | undefined;
       const scan = (page: HttpResponse) => {
         const html = visible(page.body);
         fileName ??=
           match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);
         fileSize ??= parseSize(match(html, ...sizes));
+        fileHash ??= sha256Of(html);
       };
       const direct = (target: string): Resolved => {
         ctx.log.info(`Direktlink: ${target.replace(/^(https?:\/\/[^/]+).*$/, '$1')}/… (${fileName ?? 'Name unbekannt'})`);
-        return { url: target, name: fileName, size: fileSize, headers: { Referer: url }, maxConnections: cfg.maxConnections };
+        return { url: target, name: fileName, size: fileSize, hash: fileHash, headers: { Referer: url }, maxConnections: cfg.maxConnections };
       };
 
       // Like JD (validateCookies=false): trust the session and open the file right away.

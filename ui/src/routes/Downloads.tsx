@@ -12,6 +12,7 @@ import {
 import { post, api, type Download, type Package } from '../api';
 import { PageHeader, usePackages, useSettings, useStats } from '../components/Layout';
 import { IconArchive, IconChevron, IconFolder, IconPause, IconPlay, IconPlus, IconTrash, IconX } from '../components/icons';
+import { HashBadge } from '../components/HashBadge';
 import { describe, isActive, isWaiting, toneColor } from '../components/status';
 import { useLive, type LiveProgress } from '../live';
 import { bytes, duration, percent, speed } from '../format';
@@ -77,7 +78,10 @@ export function DownloadsPage() {
         id: 'name',
         header: t.common.name,
         cell: ({ row }) => row.original.kind === 'dl' && (
-          <div className="cell-name" title={row.original.d.url}>{row.original.d.name}</div>
+          <div className="name-with-badge">
+            <div className="cell-name" title={row.original.d.url}>{row.original.d.name}</div>
+            <HashBadge d={row.original.d} />
+          </div>
         ),
       }),
       col.display({

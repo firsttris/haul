@@ -17,6 +17,10 @@ export interface Download {
   retryAt: number | null;
   createdAt: number;
   finishedAt: number | null;
+  /** The hoster's checksum type, if it published one. */
+  hashType: 'md5' | 'sha1' | 'sha256' | 'mega' | null;
+  /** Checked after the download: matched, did not match, or not checked. */
+  hashOk: boolean | null;
 }
 
 export interface Package {

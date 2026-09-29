@@ -45,6 +45,13 @@ describe('mediafire links', () => {
 });
 
 describe('mediafire crawl and check', () => {
+  it('passes on the SHA-256 of the API (JD HashInfo.parse)', async () => {
+    const sha = 'E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855';
+    const ctx = fakeCtx({ [`GET ${API}/file/get_info.php`]: ok({ file_info: { ...INFO, hash: sha } }) });
+    expect(await plugin.check!(LINK, ctx)).toMatchObject({ hash: { type: 'sha256', value: sha.toLowerCase() } });
+    expect((await plugin.crawl!(LINK, ctx)).files[0].hash).toEqual({ type: 'sha256', value: sha.toLowerCase() });
+  });
+
   it('names a single file through the API', async () => {
     const ctx = fakeCtx({ [`GET ${API}/file/get_info.php?quick_key=q1w2e3r4t5y6u7i&response_format=json`]: ok({ file_info: INFO }) });
     expect(await plugin.crawl!(LINK, ctx)).toEqual({ files: [{ url: LINK, name: 'Film.part1.rar', size: 104857600 }] });

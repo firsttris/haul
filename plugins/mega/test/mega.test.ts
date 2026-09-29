@@ -66,6 +66,8 @@ describe('mega download', () => {
       size: 1234,
       maxConnections: 10,
       decrypt: { cipher: 'aes-128-ctr', key: K.toString('hex'), iv: FILE_KEY.subarray(16, 24).toString('hex') + '0000000000000000' },
+      // The core checks the meta MAC in the key after the download.
+      hash: { type: 'mega', value: FILE_KEY.toString('hex') },
     });
   });
 

@@ -16,6 +16,8 @@
  * - Limits: `tl` in the answer (pyLoad) and HTTP 509 with `X-MEGA-Time-Left` on the download
  *   URL (JD, at least 30 min) are the free transfer quota, which holds for the IP: all MEGA
  *   downloads wait. -17 over quota (JD: IP blocked, 60 min), -3/-4 congestion (5 min).
+ * - Integrity: the key carries a MAC of the file (pyLoad verifies it after decrypting); it goes
+ *   to the core as `hash: { type: 'mega' }` and is checked after the download.
  * - Missing or wrong key: JD asks the user ("Decryption key?"); here it is asked like a
  *   download password and kept with the download.
  * - Folders (`/folder/<id>#<key>`, pyLoad MegaCoNzFolder, JD crawler): `a:"f", c:1, r:1, ca:1`
@@ -289,6 +291,8 @@ async function resolveFile(ctx: Ctx, t: Target): Promise<Resolved> {
     size: info.s,
     maxConnections: 10,
     decrypt: { cipher: 'aes-128-ctr', key: hex(k), iv: hex(iv) },
+    // pyLoad MegaCrypto.Checksum: the core checks the meta MAC in the key after the download.
+    hash: { type: 'mega', value: hex(key) },
   };
 }
 
@@ -327,7 +331,7 @@ async function crawlFolder(ctx: Ctx, link: string) {
 export default definePlugin({
   id: 'mega',
   name: 'MEGA',
-  version: 1,
+  version: 2,
   matches: [FILE, FOLDER],
   accountRequired: false,
 

@@ -71,6 +71,18 @@ pub struct Download {
     /// Download password of a protected file (not sent to the UI).
     #[serde(skip)]
     pub password: Option<String>,
+    /// The hoster's checksum, `type:value` (engine/hash.rs); the UI gets only the type.
+    #[serde(rename = "hashType", serialize_with = "hash_type")]
+    pub hash: Option<String>,
+    /// Checked after the download: matched (true) or not (false).
+    pub hash_ok: Option<bool>,
+}
+
+fn hash_type<S: serde::Serializer>(hash: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+    match hash.as_deref().and_then(|h| h.split_once(':')) {
+        Some((kind, _)) => s.serialize_some(kind),
+        None => s.serialize_none(),
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]

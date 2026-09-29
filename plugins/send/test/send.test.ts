@@ -45,6 +45,17 @@ describe('send', () => {
     expect(plugin.accountRequired).toBe(false);
   });
 
+  it('passes on the SHA-256 of the file page (JD SendNow)', async () => {
+    const sha = 'ab'.repeat(32);
+    const page = PAGE1 + `<span><b>SHA-256 :</b> ${sha}</span>`;
+    const ctx = fakeCtx({
+      'GET https://send.now/abcdefghijkl': { body: page },
+      'POST https://send.now/abcdefghijkl': (req) => (req.form?.op === 'download1' ? { body: PAGE2() } : { status: 302, headers: { location: CDN } }),
+    });
+    expect((await plugin.check!(LINK, ctx)).hash).toEqual({ type: 'sha256', value: sha });
+    expect((await plugin.resolve(LINK, ctx)).hash).toEqual({ type: 'sha256', value: sha });
+  });
+
   it('checks name and size like JD’s scanInfo', async () => {
     const ctx = fakeCtx({ 'GET https://send.now/abcdefghijkl': { body: PAGE1 } });
     expect(await plugin.check!(LINK, ctx)).toEqual({ online: true, name: 'Film.part1.rar', size: Math.round(1.5 * 1024 ** 3) });

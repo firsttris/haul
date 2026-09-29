@@ -21,7 +21,7 @@
  *   the folder's password, so an expired link can be listed again without asking.
  */
 import { definePlugin, HosterLimitError, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
-import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
+import type { Ctx, CrawledFile, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://gofile.io';
 const API = 'https://api.gofile.io';
@@ -62,6 +62,8 @@ interface Item {
   link?: string;
   directLink?: string;
   viruses?: unknown[];
+  /** JD GofileIo: setMD5Hash. */
+  md5?: string;
   canAccess?: boolean;
   passwordStatus?: string;
   children?: Record<string, Item>;
@@ -251,6 +253,10 @@ function checked(r: ApiResponse, token: string): { data: Item; token: string } {
   return { data, token };
 }
 
+/** The file's MD5 from the listing, checked by the core after the download (JD). */
+const md5Of = (item?: Item): FileHash | undefined =>
+  item?.md5 && /^[a-f0-9]{32}$/i.test(item.md5) ? { type: 'md5', value: item.md5.toLowerCase() } : undefined;
+
 /** Files of a folder listing; a listing of a single file is that file. */
 function filesOf(data: Item): Item[] {
   if (data.type === 'file') return [data];
@@ -288,6 +294,7 @@ function download(url: string, token: string, item?: Item) {
     size: item?.size,
     headers: { 'User-Agent': UA, Referer: SITE + '/' },
     cookies: { [TOKEN_COOKIE]: token },
+    hash: md5Of(item),
     // JD: getMaxChunks() = -3, for free and premium.
     maxConnections: 3,
   };
@@ -296,7 +303,7 @@ function download(url: string, token: string, item?: Item) {
 export default definePlugin({
   id: 'gofile',
   name: 'Gofile',
-  version: 3,
+  version: 4,
   matches: [LINK],
   accountRequired: false,
   // JD: getMaxConcurrentProcessingInstances() = 1 "to prevent running into rate-limit".
@@ -316,7 +323,7 @@ export default definePlugin({
       // The folder's short code, so an expired link can be listed again.
       const parent = data.type === 'folder' ? (data.code ?? code) : code;
       for (const item of filesOf(data)) {
-        files.push({ url: fileLink(parent, item, token), name: item.name, size: item.size });
+        files.push({ url: fileLink(parent, item, token), name: item.name, size: item.size, hash: md5Of(item) });
       }
       if (only) return;
       for (const [, sub] of Object.entries(data.children ?? {})) {
@@ -335,7 +342,7 @@ export default definePlugin({
     if (!listed) return { online: true };
     const file = pick(listed.data, link);
     if (!file) return { online: !f.file };
-    return { online: true, name: file.name, size: file.size };
+    return { online: true, name: file.name, size: file.size, hash: md5Of(file) };
   },
 
   async resolve(link, ctx) {
