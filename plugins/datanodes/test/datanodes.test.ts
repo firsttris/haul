@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import { fakeCtx } from '@haul/plugin-sdk/testing';
+import type { HttpRequest } from '@haul/plugin-sdk';
+import plugin from '../src/index';
+
+const LINK = 'https://datanodes.to/abcdefghijkl/Film.part1.rar';
+const PAGE1 = `<a href="/premium">Premium</a>
+  <file-actions link="https://datanodes.to/abcdefghijkl/Film.part1.rar"></file-actions>
+  <form id="downloadForm" method="POST" action="">
+    <input type="hidden" name="op" value="download1">
+    <input type="hidden" name="id" value="abcdefghijkl">
+    <input type="hidden" name="fname" value="Film.part1.rar">
+    <input type="hidden" name="method_free" value="Free Download">
+  </form>`;
+// The download2 form comes via JavaScript: only its data is in the page (JD builds the form).
+const PAGE2_JS = `<a href="/premium">Premium</a>
+  <download-countdown countdown="7" rand="r4nd" dl-token="tok9"></download-countdown>`;
+const CDN = 'https://dn12.datanodes.to/d/hash/Film.part1.rar';
+
+describe('datanodes', () => {
+  it('reads the name from file-actions (JD scanInfo)', async () => {
+    const ctx = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 } });
+    expect((await plugin.check!(LINK, ctx)).name).toBe('Film.part1.rar');
+  });
+
+  it('builds download2 like JD when the page makes it with JavaScript, and reads the JSON link', async () => {
+    const posts: HttpRequest[] = [];
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': (req) => {
+        expect(req.headers?.Referer).toBe('https://datanodes.to/users');
+        return { body: PAGE1 };
+      },
+      'POST https://datanodes.to/abcdefghijkl': (req) => {
+        posts.push(req);
+        expect(req.headers?.Referer).toBe('https://datanodes.to/users');
+        if (req.form?.op === 'download1') return { body: PAGE2_JS };
+        return { body: JSON.stringify({ url: encodeURIComponent(CDN) + '\n' }) };
+      },
+    });
+    const r = await plugin.resolve(LINK, ctx);
+    expect(posts[0].form).toMatchObject({ op: 'download1', id: 'abcdefghijkl', method_free: 'Free Download' });
+    expect(posts[1].form).toEqual({
+      op: 'download2',
+      g_captch__a: '1',
+      id: 'abcdefghijkl',
+      rand: 'r4nd',
+      dl_token: 'tok9',
+      referer: 'https://datanodes.to/abcdefghijkl',
+      method_free: 'Free Download >>',
+      method_premium: '',
+    });
+    expect(ctx.waits[0]).toBeGreaterThan(6);
+    expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 16 });
+  });
+
+  it('adds g_captch__a to a normal download2 form', async () => {
+    const page2 = `<form name="F1" method="POST" action=""><input type="hidden" name="op" value="download2">
+      <input type="hidden" name="id" value="abcdefghijkl"><input type="hidden" name="rand" value="x"></form>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) =>
+        req.form?.op === 'download1' ? { body: page2 } : (expect(req.form?.g_captch__a).toBe('1'), { status: 302, headers: { location: CDN } }),
+    });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+  });
+
+  it('stops on a reCaptcha in captcha-html', async () => {
+    const page2 = `<download-countdown countdown="3" rand="r" captcha-html="&lt;div class=&quot;g-recaptcha&quot; data-sitekey=&quot;k&quot;&gt;&lt;/div&gt;"></download-countdown>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': { body: page2 },
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal', message: expect.stringContaining('reCaptcha') });
+  });
+
+  it('knows its own errors', async () => {
+    const domain = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: "<p> Not allowed from domain you're coming from</p>" } });
+    await expect(plugin.resolve(LINK, domain)).rejects.toMatchObject({ haulKind: 'fatal' });
+    const premium = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: '<a href="/premium">Buy premium to download</a>' } });
+    await expect(plugin.resolve(LINK, premium)).rejects.toThrow(/Premium/);
+  });
+});

@@ -29,6 +29,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/datanodes:
+    dependencies:
+      '@haul/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/ddownload:
     dependencies:
       '@haul/plugin-sdk':

@@ -20,7 +20,6 @@ import {
   Bilingual,
   CheckResult,
   Ctx,
-  HtmlForm,
   HttpOptions,
   HttpResponse,
   OfflineError,
@@ -69,6 +68,28 @@ export interface XfsConfig {
   freeMaxConnections?: number;
   /** Site-specific errors on the way (JD: a plugin's own checkErrors); throw to stop. */
   checkErrors?: (html: string, res: HttpResponse) => void;
+  /** Headers for every request to the site, e.g. a Referer against simple hotlink protection. */
+  headers?: Record<string, string>;
+  /** Where a site's free pages differ from the XFS default (JD: overridden find* methods). */
+  freeHooks?: FreeHooks;
+}
+
+/** A form to post in the free flow. `html` is searched for captchas. */
+export interface FreeStep {
+  fields: Record<string, string>;
+  action?: string;
+  html: string;
+}
+
+export interface FreeHooks {
+  /** JD findFormDownload1Free. */
+  download1?: (page: HttpResponse) => FreeStep | undefined;
+  /** JD findFormDownload2Free; gets the form the default found, if any. */
+  download2?: (page: HttpResponse, fileId: string, found: FreeStep | undefined) => FreeStep | undefined;
+  /** JD regexWaittime, in seconds. */
+  countdown?: (html: string) => number | undefined;
+  /** JD getDllink, e.g. a JSON answer. */
+  directLink?: (res: HttpResponse) => string | undefined;
 }
 
 /** JD's isOffline (XFileSharingProBasic, mirror 2026-09-28) plus a few older variants. */
@@ -544,7 +565,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   }
 
   /** JD's handleCaptcha: the plain-text captcha is solved; anything else needs a human. */
-  function solveCaptcha(form: HtmlForm, fields: Record<string, string>, page: string) {
+  function solveCaptcha(form: { html: string }, fields: Record<string, string>, page: string) {
     if (form.html.includes(';background:#ccc;text-align')) {
       // JD looks in the whole page too: the digits may sit outside the form.
       const code = plainTextCaptcha(form.html) ?? plainTextCaptcha(page);
@@ -583,27 +604,34 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       return { url: target, name: fileName, size: fileSize, headers: { Referer: url }, maxConnections: cfg.freeMaxConnections ?? 1 };
     };
     /** A file, a redirect to it or a link to it on the page; follows redirects within the site. */
+    const hooks = cfg.freeHooks ?? {};
+    const get = (u: string) => ctx.http.get(u, { followRedirects: false, headers: cfg.headers });
+    const post = (u: string, fields: Record<string, string>) =>
+      ctx.http.post(u, fields, { followRedirects: false, headers: cfg.headers });
+    const countdownOf = (html: string) => hooks.countdown?.(html) ?? countdown(html);
     const found = async (res: HttpResponse): Promise<{ link?: string; page: HttpResponse }> => {
       for (let hop = 0; hop < 5; hop++) {
         if (res.file) return { link: res.url, page: res };
         const target = redirectOf(res);
         if (!target) break;
         if (!isSitePage(target) || directs.some((p) => p.test(`"${target}"`))) return { link: target, page: res };
-        res = await ctx.http.get(target, { followRedirects: false });
+        res = await get(target);
       }
       scan(res);
-      return { link: match(res.body, ...directs), page: res };
+      return { link: hooks.directLink?.(res) ?? match(res.body, ...directs), page: res };
     };
 
-    let { link: dl, page: res } = await found(await ctx.http.get(url, { followRedirects: false }));
+    let { link: dl, page: res } = await found(await get(url));
     if (dl) return direct(dl);
     assertOnline(res);
     freeErrors(res);
     const steps: string[] = [];
 
     // download1: the "Free Download" button (JD: findFormDownload1Free).
-    const forms1 = parseForms(visible(res.body));
-    const download1 = forms1.find((f) => f.fields.op === 'download1');
+    const form1 = parseForms(visible(res.body)).find((f) => f.fields.op === 'download1');
+    const download1: FreeStep | undefined = hooks.download1
+      ? hooks.download1(res)
+      : form1 && { fields: { ...form1.fields }, action: form1.action ?? undefined, html: form1.html };
     if (download1) {
       const fields = { ...download1.fields };
       delete fields.method_premium;
@@ -611,12 +639,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       if (!fields.method_free) {
         fields.method_free = /["']method_free["'][^>]*value=["']([^<>"']+)["']/i.exec(download1.html)?.[1] ?? 'Free Download';
       }
-      const wait = countdown(res.body);
+      const wait = countdownOf(res.body);
       if (wait) await ctx.wait(wait);
       steps.push('download1');
-      ({ link: dl, page: res } = await found(
-        await ctx.http.post(download1.action ? resolveUrl(url, download1.action) : url, fields, { followRedirects: false }),
-      ));
+      ({ link: dl, page: res } = await found(await post(download1.action ? resolveUrl(url, download1.action) : url, fields)));
       if (dl) return direct(dl);
       assertOnline(res);
       freeErrors(res);
@@ -625,10 +651,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     // download2: countdown, captcha, then the form; some sites need more than one round.
     for (let round = 0; round < 3; round++) {
       const forms = parseForms(visible(res.body));
-      const download2 =
+      const form2 =
         forms.find((f) => /method_/.test(f.html) && (f.fields.op ?? '').includes('download')) ??
         forms.find((f) => /name=["']F1["']/i.test(f.html)) ??
         forms.find((f) => f.fields.op === 'download2');
+      const found2: FreeStep | undefined = form2 && { fields: { ...form2.fields }, action: form2.action ?? undefined, html: form2.html };
+      const download2 = hooks.download2 ? hooks.download2(res, fileId(link), found2) : found2;
       if (!download2) break;
       const started = Date.now();
       const fields: Record<string, string> = { ...download2.fields };
@@ -640,13 +668,11 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         });
       }
       solveCaptcha(download2, fields, res.body);
-      const wait = countdown(res.body);
+      const wait = countdownOf(res.body);
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
       if (left > 0) await ctx.wait(left);
       steps.push(fields.op ?? 'download2');
-      ({ link: dl, page: res } = await found(
-        await ctx.http.post(download2.action ? resolveUrl(url, download2.action) : url, fields, { followRedirects: false }),
-      ));
+      ({ link: dl, page: res } = await found(await post(download2.action ? resolveUrl(url, download2.action) : url, fields)));
       if (dl) return direct(dl);
       assertOnline(res);
       freeErrors(res);
@@ -691,7 +717,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       }
       // The core calls this without an account (like JD's link check): the public file page shows
       // name and size. Never follow redirects here; a redirect may be the file itself.
-      const res = await web(ctx, m?.kind === 'cookie' ? m : null).get(fileUrl(link), { followRedirects: false });
+      const res = await web(ctx, m?.kind === 'cookie' ? m : null).get(fileUrl(link), { followRedirects: false, headers: cfg.headers });
       const html = visible(res.body);
       if (res.status === 404 || offline.some((p) => p.test(html))) return { online: false };
       const name = match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);

@@ -18,6 +18,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Google Drive: öffentliche Dateien ohne Account wie bei JDownloader (schneller Link-Check,
   Bestätigung bei großen Dateien, Kontingent- und Rate-Limit mit Wartezeit); Ordner und
   Google-Dokumente noch nicht
+- Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); verlangt die Seite ein reCaptcha,
+  bricht der Download mit Hinweis ab
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
@@ -141,6 +143,7 @@ plugins/mediafire   Mediafire-Plugin (mit Ordner-Crawler)
 plugins/send        Send-Plugin (XFS, free und premium)
 plugins/1fichier    1fichier-Plugin (mit Ordner-Crawler)
 plugins/gdrive      Google-Drive-Plugin (Dateien)
+plugins/datanodes   Datanodes-Plugin (XFS, free)
 ui                  Web-UI
 ```
 
@@ -184,7 +187,8 @@ erhalten), `cookies.get/set`, `hash.sha256`, `wait(sec)`, `log` und `account.get
 und Größe (siehe `plugins/gofile`). Fehler signalisiert ein Plugin mit
 `OfflineError` (kein Retry), `TemporaryError` (später erneut) oder `AccountError`.
 Für XFileSharing-Hoster gibt es `createXfsPlugin` in `@haul/plugin-sdk/xfs`; ddownload ist damit
-fünf Zeilen Konfiguration. Mit `free: true` lädt die Basis ohne Account wie JDs `doFree`.
+fünf Zeilen Konfiguration. Mit `free: true` lädt die Basis ohne Account wie JDs `doFree`; weicht eine Seite ab, passen
+`freeHooks` (Formulare, Countdown, Direktlink) und `headers` sie an (siehe `plugins/datanodes`).
 Verlangt ein Hoster eine Wartezeit (Free-Limit), meldet das Plugin sie mit
 `new TemporaryError(meldung, sekunden)`; der Core versucht es genau dann erneut, ohne dass es als
 Fehlversuch zählt.
