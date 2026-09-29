@@ -62,7 +62,7 @@ export interface Account {
   secret: string;
 }
 
-export type CryptoOp = 'pbkdf2Sha512' | 'aesEncrypt' | 'modPow' | 'megaPrepareKey' | 'megaHashcash';
+export type CryptoOp = 'pbkdf2Sha512' | 'aesEncrypt' | 'modPow' | 'megaPrepareKey' | 'megaUserHashV1' | 'megaHashcash';
 
 export interface Ctx {
   pluginId: string;
@@ -86,7 +86,8 @@ export interface Ctx {
     /**
      * Heavier operations in the core, hex in and out (the MEGA login, JD/pyLoad):
      * `pbkdf2Sha512 {password, salt, iterations, length}`, `aesEncrypt {mode, key, iv?, data}`,
-     * `modPow {base, exp, mod}` (RSA), `megaPrepareKey {password}` (v1 accounts),
+     * `modPow {base, exp, mod}` (RSA; mod as hex or factors), `megaPrepareKey {password}` and
+     * `megaUserHashV1 {email, key}` (v1 accounts),
      * `megaHashcash {challenge, easiness}` (returns the base64url nonce).
      */
     run(op: CryptoOp, args: Record<string, unknown>): Promise<string>;
