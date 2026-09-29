@@ -106,6 +106,7 @@ async fn submit(
         source: Some("cnl".into()),
         source_page: source,
         passwords: form.get("passwords").cloned(),
+        download_password: None,
     };
     match engine.add_links(req).await {
         Ok(id) => {

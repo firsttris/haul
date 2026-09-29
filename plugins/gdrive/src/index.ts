@@ -128,7 +128,7 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 1,
+  version: 2,
   matches: [LINK],
   accountRequired: false,
 

@@ -1,4 +1,4 @@
-import type { Download } from '../api';
+import type { Captcha, Download } from '../api';
 import { duration } from '../format';
 import { localize, type Messages } from '../i18n';
 
@@ -11,10 +11,11 @@ export const toneColor: Record<Tone, { color: string; bar: string }> = {
   err: { color: 'var(--err)', bar: 'var(--err)' },
 };
 
-/** `captchaLinks`: links whose plugin call waits for a captcha (see useCaptchas). */
-export function describe(d: Download, t: Messages, captchaLinks?: Set<string>, now = Date.now()): { label: string; tone: Tone } {
+/** `waiting`: links whose plugin call waits for the user, and for what (see useCaptchas). */
+export function describe(d: Download, t: Messages, waiting?: Map<string, Captcha['kind']>, now = Date.now()): { label: string; tone: Tone } {
   const s = t.status;
-  if (d.status === 'resolving' && captchaLinks?.has(d.url)) return { label: s.captcha, tone: 'run' };
+  const asks = (d.status === 'resolving' || d.status === 'crawling') && waiting?.get(d.url);
+  if (asks) return { label: asks === 'password' ? s.password : s.captcha, tone: 'run' };
   const error = localize(d.error);
   switch (d.status) {
     case 'finished':

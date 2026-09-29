@@ -83,6 +83,23 @@ export interface Ctx {
   captcha: {
     solve(req: CaptchaRequest): Promise<string>;
   };
+  /**
+   * The download password of a protected file or folder (JD: `getDownloadPassword`, else
+   * `getUserInput("Password?")`). Available in `resolve` and `crawl`. The core keeps the
+   * password with the download; files from a crawl get the folder's. See `withPassword`.
+   */
+  password: {
+    /**
+     * The saved password, else the user is asked in the UI (up to 10 minutes). `wrong: true`:
+     * the hoster rejected the last one; it is forgotten and the user asked again (JD's
+     * `setDownloadPassword(null)`). Throws when the user cancels or does not answer.
+     */
+    get(opts?: { wrong?: boolean }): Promise<string>;
+    /** Forgets a rejected password without asking for another one. */
+    forget(): Promise<void>;
+    /** The saved password, or null; never asks (e.g. to send it with the first request). */
+    saved(): Promise<string | null>;
+  };
   /** The account's cookie jar, shared by all requests and kept across restarts. */
   cookies: {
     /** `Cookie` header value the jar would send to `url`. */
@@ -122,6 +139,32 @@ export const CAPTCHA_FIELD: Record<CaptchaRequest['kind'], string> = {
   hcaptcha: 'h-captcha-response',
   turnstile: 'cf-turnstile-response',
 };
+
+/** What a `withPassword` attempt returns when the hoster rejected the password. */
+export const WRONG_PASSWORD: unique symbol = Symbol('wrong password');
+
+/**
+ * JD's PasswordSolver: the saved password, else the user's; after a rejection the user is asked
+ * again, three tries in all, then the download fails with "wrong password" (the password is
+ * forgotten, so a restart asks again). `attempt` sends the password and returns the result, or
+ * `WRONG_PASSWORD`.
+ */
+export async function withPassword<T>(
+  ctx: Ctx,
+  hoster: string,
+  attempt: (password: string) => Promise<T | typeof WRONG_PASSWORD>,
+): Promise<T> {
+  let password = await ctx.password.get();
+  for (let tries = 1; ; tries++) {
+    const result = await attempt(password);
+    if (result !== WRONG_PASSWORD) return result;
+    if (tries >= 3) {
+      await ctx.password.forget();
+      throw new PluginError('fatal', { de: `${hoster}: Passwort falsch`, en: `${hoster}: wrong password` });
+    }
+    password = await ctx.password.get({ wrong: true });
+  }
+}
 
 export interface CheckResult {
   online: boolean;

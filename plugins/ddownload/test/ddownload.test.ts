@@ -374,6 +374,26 @@ describe('ddownload', () => {
     expect(ops).toEqual(['download1', 'download2']);
   });
 
+  it('sends the download password with the premium form', async () => {
+    const page = FILE_PAGE.replace('<input type="hidden" name="method_free" value="">', '<input type="hidden" name="method_free" value=""><input type="password" name="password">');
+    const sent: string[] = [];
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': { body: ACCOUNT_PAGE },
+        'GET https://ddownload.com/abcdefghijkl': { body: page },
+        'POST https://ddownload.com/abcdefghijkl': (req) => {
+          sent.push(req.form!.password);
+          return req.form!.password === 'pw2' ? FILE_POST(req) : { body: `<b class="err">Wrong password</b>${page}` };
+        },
+      },
+      { id: 1, user: 'bob', secret: 'pw' },
+    );
+    ctx.passwordAnswers = ['pw1', 'pw2'];
+    expect((await plugin.resolve(LINK, ctx)).url).toBe('https://srv12.ddownload.com/d/HASH/Some.File.part1.rar');
+    expect(sent).toEqual(['pw1', 'pw2']);
+    expect(ctx.passwordAsks).toEqual([{ wrong: false }, { wrong: true }]);
+  });
+
   it('names the steps when no link shows up', async () => {
     const ctx = fakeCtx(
       {

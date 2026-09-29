@@ -212,6 +212,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
             ctx.globals().set("__host_sha256", Func::from(|| ()))?;
             ctx.globals().set("__host_captcha", Func::from(|| ()))?;
+            ctx.globals().set("__host_password", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
             ctx.eval::<(), _>(code.as_str())?;
             let meta: Function = ctx.globals().get("__haul_meta")?;
@@ -332,13 +333,12 @@ async fn invoke_inner(
                     }
                 })),
             )?;
-            let asker = asker.clone();
-            let deadline = deadline.clone();
+            let (a, d) = (asker.clone(), deadline.clone());
             g.set(
                 "__host_captcha",
                 Func::from(Async(move |req: String| {
-                    let asker = asker.clone();
-                    let deadline = deadline.clone();
+                    let asker = a.clone();
+                    let deadline = d.clone();
                     async move {
                         let Some(asker) = asker else {
                             return serde_json::json!({ "error": "captchas are not available here" }).to_string();
@@ -353,6 +353,47 @@ async fn invoke_inner(
                         }
                         match asker.captchas.request(&asker, req).await {
                             Ok(token) => serde_json::json!({ "token": token }).to_string(),
+                            Err(e) => serde_json::json!({ "error": e }).to_string(),
+                        }
+                    }
+                })),
+            )?;
+            let (a, d) = (asker.clone(), deadline.clone());
+            g.set(
+                "__host_password",
+                // mode: `get` (saved or ask), `wrong` (forget, ask again), `forget`, `saved`.
+                Func::from(Async(move |mode: String| {
+                    let asker = a.clone();
+                    let deadline = d.clone();
+                    async move {
+                        let Some((asker, password)) = asker.and_then(|a| a.password.clone().map(|p| (a, p))) else {
+                            return if mode == "saved" {
+                                "{}".to_string()
+                            } else {
+                                serde_json::json!({ "error": "unavailable" }).to_string()
+                            };
+                        };
+                        if mode == "saved" {
+                            return serde_json::json!({ "password": password.get() }).to_string();
+                        }
+                        let wrong = mode != "get";
+                        if wrong {
+                            password.set(None);
+                        } else if let Some(saved) = password.get() {
+                            return serde_json::json!({ "password": saved }).to_string();
+                        }
+                        if mode == "forget" {
+                            return "{}".to_string();
+                        }
+                        {
+                            let mut d = deadline.lock().unwrap();
+                            *d += crate::captcha::TIMEOUT;
+                        }
+                        match asker.captchas.ask_password(&asker, wrong).await {
+                            Ok(p) => {
+                                password.set(Some(p.clone()));
+                                serde_json::json!({ "password": p }).to_string()
+                            }
                             Err(e) => serde_json::json!({ "error": e }).to_string(),
                         }
                     }
@@ -564,6 +605,7 @@ mod bundled {
         let code = format!(
             r#"{code}
             __plugin.default.resolve = async (html) => {{
+                if (html.startsWith("rows:")) return {{ url: JSON.stringify(__plugin.folderRows(html.slice(5))) }};
                 const res = {{ status: 200, url: "https://1fichier.com/?x", body: html, file: false, headers: {{}} }};
                 try {{ __plugin.checkErrors(res); }} catch (e) {{ return {{ url: e.haulKind + ":" + (e.haulWait || 0) }}; }}
                 return {{ url: "link:" + __plugin.downloadLink(html) }};
@@ -604,6 +646,16 @@ mod bundled {
                     .unwrap()
             ),
             "link:https://a-1.1fichier.com/c1"
+        );
+        // Files of a password-protected folder, read from its HTML (JD's regex).
+        let rows = url(
+            run(r#"rows:<a href="https://1fichier.com/?abcde12345">a &amp; b.rar</a></td> <td>1.5 GB</td>"#)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            rows,
+            r#"[{"url":"https://1fichier.com/?abcde12345","name":"a & b.rar","size":1610612736}]"#
         );
     }
 

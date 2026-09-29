@@ -1,5 +1,5 @@
 // Runs before every plugin. Builds the `ctx` object handed to plugin functions on top of
-// the three native functions `__host_http`, `__host_sleep` and `__host_log`.
+// the native `__host_*` functions.
 (function () {
   function toHeaderMap(h) {
     var out = {};
@@ -98,6 +98,30 @@
           e.haulKind = r.error === 'cancelled' ? 'fatal' : 'temporary';
           if (r.error === 'timeout') e.haulWait = 30 * 60;
           throw e;
+        },
+      },
+      password: {
+        // The saved download password, else the user is asked in the UI. `wrong`: the hoster
+        // rejected the last one; it is forgotten and the user asked again.
+        get: async function (opts) {
+          var r = JSON.parse(await __host_password(opts && opts.wrong ? 'wrong' : 'get'));
+          if (typeof r.password === 'string') return r.password;
+          var e = new Error(r.error === 'cancelled'
+            ? '\u0002Passwort-Eingabe abgebrochen\u001fPassword entry cancelled\u0003'
+            : r.error === 'timeout'
+              ? '\u0002Passwort nicht rechtzeitig eingegeben\u001fPassword not entered in time\u0003'
+              : '\u0002Datei ist passwortgeschützt\u001fThe file is password protected\u0003');
+          // JD: a cancelled password dialog is fatal. Not answered in time: ask again later.
+          e.haulKind = r.error === 'timeout' ? 'temporary' : 'fatal';
+          if (r.error === 'timeout') e.haulWait = 30 * 60;
+          throw e;
+        },
+        // Drops a rejected password without asking for another one.
+        forget: async function () { await __host_password('forget'); },
+        // The saved password or null; never asks.
+        saved: async function () {
+          var r = JSON.parse(await __host_password('saved'));
+          return typeof r.password === 'string' ? r.password : null;
         },
       },
       cookies: {

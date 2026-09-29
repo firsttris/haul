@@ -69,6 +69,42 @@ describe('send', () => {
     expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 1, headers: { Referer: LINK } });
   });
 
+  it('sends the download password and asks again when it was wrong (JD handlePassword)', async () => {
+    // XFS markup JD's isPasswordProtectedHTML looks for.
+    const PW = '<br><b>Password:</b> <input type="password" name="password" class="myForm">';
+    const sent: string[] = [];
+    const ctx = fakeCtx({
+      'GET https://send.now/abcdefghijkl': { body: PAGE1 },
+      'POST https://send.now/abcdefghijkl': (req) => {
+        if (req.form?.op === 'download1') return { body: PAGE2(PW + CAPTCHA) };
+        sent.push(req.form!.password);
+        expect(req.form).toMatchObject({ op: 'download2', code: '7391' });
+        if (req.form!.password !== 'geheim') return { body: `<div class="err">Wrong password</div>${PAGE2(PW + CAPTCHA)}` };
+        return { status: 302, headers: { location: CDN } };
+      },
+    });
+    ctx.savedPassword = 'alt';
+    ctx.passwordAnswers = ['geheim'];
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(sent).toEqual(['alt', 'geheim']);
+    expect(ctx.passwordAsks).toEqual([{ wrong: true }]);
+    expect(ctx.savedPassword).toBe('geheim');
+  });
+
+  it('does not ask for a password the page does not want', async () => {
+    const ctx = fakeCtx({
+      'GET https://send.now/abcdefghijkl': { body: PAGE1 },
+      'POST https://send.now/abcdefghijkl': (req) => {
+        if (req.form?.op === 'download1') return { body: PAGE2() };
+        expect(req.form).not.toHaveProperty('password');
+        return { body: '<div class="err">Wrong password</div>' };
+      },
+    });
+    // JD: the site says "wrong password" without having asked for one → temporary.
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+    expect(ctx.passwordAsks).toEqual([]);
+  });
+
   it('waits exactly as long as the site says after a download', async () => {
     const ctx = fakeCtx({
       'GET https://send.now/abcdefghijkl': { body: '<div class="err">You have to wait 1 hour 5 minutes till next download</div>' },

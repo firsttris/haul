@@ -18,14 +18,16 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Google Drive: öffentliche Dateien ohne Account wie bei JDownloader (schneller Link-Check,
   Bestätigung bei großen Dateien, Kontingent- und Rate-Limit mit Wartezeit); Ordner und
   Google-Dokumente noch nicht
-- Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); verlangt die Seite ein reCaptcha,
-  bricht der Download mit Hinweis ab
+- Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); ein reCaptcha löst du im Browser
+  (siehe [Captchas](#captchas))
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über
   die Mediafire-API schon beim Hinzufügen; Mediafires Checkbox-„Captcha“ wird automatisch bestätigt,
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
-- Linksammler mit Online-Check, Paketname, Zielordner und Archiv-Passwörtern
+- Linksammler mit Online-Check, Paketname, Zielordner, Download-Passwort und Archiv-Passwörtern
+- passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
+  ddownload, Datanodes): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
 - automatisches Entpacken fertiger Pakete mit `7z`/`unrar`, mit Fortschritt in Prozent
 - Ansicht **Fertig**: der Fertig-Ordner wie auf der Platte, mit Paketzustand (entpackt, Archive übrig,
@@ -35,8 +37,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Weboberfläche auf Deutsch und Englisch (Browsersprache, umschaltbar unten in der Seitenleiste
   und unter *Einstellungen*), auch die Meldungen von Server und Hoster-Plugins
 
-**Bewusst nicht in v1:** DLC-Container, Multi-User, passwortgeschützte
-Gofile-Ordner.
+**Bewusst nicht in v1:** DLC-Container, Multi-User.
 
 ## Schnellstart
 
@@ -95,6 +96,15 @@ Das Userscript wird nur aktiv, wenn Haul die Seite mit einer Aufgabe im `#…`-T
 auch Web-Logins mit Captcha (ddownload: Turnstile) ohne den Umweg über das xfss-Cookie.
 Plugins fragen mit `await ctx.captcha.solve({ kind, siteKey, pageUrl })`; einfache Text-Captchas
 löst die XFS-Basis selbst, Bild-Captchas noch nicht.
+
+## Passwortgeschützte Dateien
+
+Wie bei JDownloader: Ein Download-Passwort kann schon beim Hinzufügen im Linksammler stehen
+(*Download-Passwort*, gilt für alle Links des Pakets; Ordner geben es an ihre Dateien weiter).
+Fehlt es oder ist es falsch, fragt Haul oben im selben Hinweis wie bei Captchas nach; das
+eingegebene Passwort bleibt beim Download gespeichert und wird nicht mehr an die UI geschickt.
+Nach drei falschen Passwörtern schlägt der Download fehl, *Abbrechen* beendet ihn sofort; unbeantwortet
+fragt Haul nach 30 Minuten erneut. Archiv-Passwörter zum Entpacken sind davon getrennt.
 
 ## Click'n'Load
 
@@ -200,7 +210,10 @@ Texte für das Account-Formular (`account.userLabel`, `secretLabel`, `help`) sin
 `{ de, en }`; die UI zeigt die gewählte Sprache.
 
 `ctx` bietet `http.get/post/request` (Cookie-Jar pro Account, der Login bleibt zwischen Aufrufen
-erhalten), `cookies.get/set`, `hash.sha256`, `wait(sec)`, `log` und `account.get()`. Optional
+erhalten), `cookies.get/set`, `hash.sha256`, `wait(sec)`, `log` und `account.get()`.
+Download-Passwörter liefert `ctx.password.get()` (das gespeicherte, sonst fragt Haul den Nutzer;
+`{ wrong: true }` nach einer Ablehnung); `withPassword(ctx, name, versuch)` aus dem SDK kapselt JDs
+Ablauf mit drei Versuchen (siehe `plugins/1fichier`, `plugins/mediafire`). Optional
 `crawl(link)`: macht beim Hinzufügen aus einem Ordner-Link die einzelnen Datei-Links, mit Name
 und Größe (siehe `plugins/gofile`). Fehler signalisiert ein Plugin mit
 `OfflineError` (kein Retry), `TemporaryError` (später erneut) oder `AccountError`.

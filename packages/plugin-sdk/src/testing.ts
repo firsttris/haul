@@ -26,6 +26,12 @@ export interface FakeCtx extends Ctx {
   /** Every `ctx.captcha.solve` request; answered with `captchaToken` (default "CAPTCHA-TOKEN"). */
   captchas: CaptchaRequest[];
   captchaToken: string | null;
+  /** The download's saved password (`ctx.password`); updated like the core does. */
+  savedPassword: string | null;
+  /** What the user types when asked, in order; none left plays a user who cancels. */
+  passwordAnswers: string[];
+  /** Every time the user was asked: after a wrong password or not. */
+  passwordAsks: Array<{ wrong: boolean }>;
 }
 
 function response(req: HttpRequest, r: FakeRoute): HttpResponse {
@@ -75,6 +81,7 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
   const log = Object.assign(() => {}, { info() {}, warn() {}, error() {}, debug() {} });
   const waits: number[] = [];
   const captchas: CaptchaRequest[] = [];
+  const passwordAsks: Array<{ wrong: boolean }> = [];
   const ctx: FakeCtx = {
     pluginId: 'test',
     requests,
@@ -103,6 +110,30 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
           throw Object.assign(new Error('Captcha not solved in time'), { haulKind: 'temporary', haulWait: 1800 });
         }
         return ctx.captchaToken;
+      },
+    },
+    savedPassword: null,
+    passwordAnswers: [],
+    passwordAsks,
+    // Like prelude.js and the host: the saved password, else ask; `wrong` forgets it first.
+    password: {
+      async get(opts) {
+        const wrong = !!opts?.wrong;
+        if (wrong) ctx.savedPassword = null;
+        else if (ctx.savedPassword !== null) return ctx.savedPassword;
+        passwordAsks.push({ wrong });
+        const answer = ctx.passwordAnswers.shift();
+        if (answer === undefined) {
+          throw Object.assign(new Error('Password entry cancelled'), { haulKind: 'fatal' });
+        }
+        ctx.savedPassword = answer;
+        return answer;
+      },
+      async forget() {
+        ctx.savedPassword = null;
+      },
+      async saved() {
+        return ctx.savedPassword;
       },
     },
     log,

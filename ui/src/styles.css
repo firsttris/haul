@@ -1051,6 +1051,12 @@ pre.code {
   gap: 8px;
   font-size: 13px;
 }
+.input.small {
+  height: 36px;
+  width: 220px;
+  max-width: 100%;
+  font-size: 13px;
+}
 .steps {
   margin: 0;
   padding-left: 20px;

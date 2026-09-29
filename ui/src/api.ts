@@ -120,18 +120,21 @@ export interface SettingsView extends Settings {
   extractors: string[];
 }
 
-/** A captcha waiting for the user (see captcha.rs). */
+/** A captcha or download password waiting for the user (see captcha.rs). */
 export interface Captcha {
   id: string;
   secret: string;
   pluginId: string;
   pluginName: string;
-  kind: 'recaptcha' | 'hcaptcha' | 'turnstile';
+  kind: 'recaptcha' | 'hcaptcha' | 'turnstile' | 'password';
   siteKey: string;
   pageUrl: string;
   host: string;
   enterprise: boolean;
   link: string | null;
+  /** Password questions: the download's name, and whether the last password was wrong. */
+  name: string | null;
+  wrong: boolean;
   createdAt: number;
   expiresAt: number;
 }

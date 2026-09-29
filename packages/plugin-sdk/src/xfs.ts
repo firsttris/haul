@@ -576,6 +576,49 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     }
   }
 
+  // ---- download passwords (JD: handlePassword, checkErrors "Wrong password") -------------
+
+  /** JD isPasswordProtectedHTML on the page, or a password field in the form itself. */
+  function needsPassword(page: string, formHtml: string): boolean {
+    return (
+      /<br>\s*<b>\s*Passwor(?:d|t)\s*:?\s*<\/b>\s*(?:<input|<\/div)/i.test(page) ||
+      /<input[^>]+name=["']password["']/i.test(formHtml)
+    );
+  }
+
+  interface PasswordState {
+    sent: boolean;
+    wrong: boolean;
+    tries: number;
+  }
+
+  /** JD handlePassword: the saved password or the user's goes into the form as `password`. */
+  async function fillPassword(ctx: Ctx, st: PasswordState, fields: Record<string, string>) {
+    fields.password = await ctx.password.get(st.wrong ? { wrong: true } : undefined);
+    st.sent = true;
+    st.wrong = false;
+  }
+
+  /**
+   * True when the site rejected the password and the form is to be sent again with another
+   * (JD: setDownloadPassword(null), ERROR_RETRY); three tries, like `withPassword`.
+   */
+  async function passwordRejected(ctx: Ctx, st: PasswordState, html: string): Promise<boolean> {
+    if (!/>\s*Wrong password/i.test(html)) return false;
+    const n = cfg.name;
+    if (!st.sent) {
+      // JD: "Got error 'wrong password' but website never prompted for one".
+      throw new TemporaryError({ de: `${n}: meldet falsches Passwort, ohne eins verlangt zu haben`, en: `${n}: says wrong password but never asked for one` });
+    }
+    if (++st.tries >= 3) {
+      await ctx.password.forget();
+      throw new PluginError('fatal', { de: `${n}: Passwort falsch`, en: `${n}: wrong password` });
+    }
+    st.sent = false;
+    st.wrong = true;
+    return true;
+  }
+
   /** JD's handleCaptcha: the plain-text captcha is solved; anything else needs a human. */
   /**
    * JD's handleCaptcha: the plain-text captcha is read from the page; reCaptcha, hCaptcha and
@@ -668,7 +711,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       freeErrors(res);
     }
 
-    // download2: countdown, captcha, then the form; some sites need more than one round.
+    // download2: password, captcha, countdown, then the form; some sites need more than one round.
+    const pw: PasswordState = { sent: false, wrong: false, tries: 0 };
     for (let round = 0; round < 3; round++) {
       const forms = parseForms(visible(res.body));
       const form2 =
@@ -681,12 +725,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const started = Date.now();
       const fields: Record<string, string> = { ...download2.fields };
       if ('adblock_detected' in fields && !fields.adblock_detected) fields.adblock_detected = '0';
-      if (/<input[^>]+type=["']password["'][^>]+name=["']password["']/i.test(download2.html)) {
-        throw new PluginError('fatal', {
-          de: `${cfg.name}: passwortgeschützte Datei (noch nicht unterstützt)`,
-          en: `${cfg.name}: password-protected file (not supported yet)`,
-        });
-      }
+      if (needsPassword(visible(res.body), download2.html)) await fillPassword(ctx, pw, fields);
       await solveCaptcha(ctx, download2, fields, res);
       const wait = countdownOf(res.body);
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
@@ -695,6 +734,11 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       ({ link: dl, page: res } = await found(await post(download2.action ? resolveUrl(url, download2.action) : url, fields)));
       if (dl) return direct(dl);
       assertOnline(res);
+      // The page shows the form again: another round with the next password (at most 3).
+      if (await passwordRejected(ctx, pw, visible(res.body))) {
+        round--;
+        continue;
+      }
       freeErrors(res);
     }
     lastResort(res, steps, []);
@@ -786,7 +830,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       let sessionChecked = false;
       const steps: string[] = [];
       const redirects: string[] = [];
-      for (let round = 0; round < 10; round++) {
+      const pw: PasswordState = { sent: false, wrong: false, tries: 0 };
+      for (let round = 0; round < 10 + pw.tries; round++) {
         // The server answered with the file itself (JD: looksLikeDownloadableContent).
         if (res.file) return direct(res.url);
         if (!redirectOf(res)) scan(res);
@@ -825,6 +870,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         const inline = match(res.body, ...directs);
         if (inline) return direct(inline);
         assertOnline(res);
+        await passwordRejected(ctx, pw, visible(res.body));
         if (!sessionChecked && steps.length === 0 && !loggedIn(res)) {
           // Logged out (first use or expired session): log in / verify the cookie once.
           await session(ctx, m);
@@ -836,10 +882,11 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         const forms = parseForms(visible(res.body));
         const form =
           forms.find((f) => /name=["']F1["']/i.test(f.html)) ?? forms.find((f) => /^download/.test(f.fields.op ?? ''));
-        if (!form || steps.length >= 5) break;
+        if (!form || steps.length >= 5 + pw.tries) break;
         const fields: Record<string, string> = { ...form.fields, referer: form.fields.referer || url };
         delete fields.method_free;
         fields.method_premium = 'Premium Download';
+        if (needsPassword(visible(res.body), form.html)) await fillPassword(ctx, pw, fields);
         steps.push(fields.op ?? '?');
         res = await http.post(form.action ? resolveUrl(url, form.action) : url, fields, { followRedirects: false });
       }

@@ -13,7 +13,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'send',
     name: 'Send',
-    version: 1,
+    version: 2,
     // JD: getPluginDomains; usersfiles.com is dead (getDeadDomains), kept for old links.
     domains: ['send.now', 'send.cm', 'sendit.cloud', 'usersfiles.com', 'tusfiles.com', 'tusfiles.net', 'userscloud.com', 'usercdn.com'],
     fileIdLength: 12,

@@ -70,7 +70,11 @@ pub struct AddLinks {
     pub start: bool,
     pub source: Option<String>,
     pub source_page: Option<String>,
+    /// Archive passwords, one per line.
     pub passwords: Option<String>,
+    /// Password of protected files or folders (JD's Linkgrabber "Download password"); plugins
+    /// get it through `ctx.password`.
+    pub download_password: Option<String>,
 }
 
 impl Engine {
@@ -430,6 +434,16 @@ impl Engine {
     }
 
     /// Persists an account's cookies after a plugin call.
+    /// Keeps the download password a plugin call got from the user, or forgets a wrong one.
+    pub async fn save_password(&self, id: i64, password: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE downloads SET password = ? WHERE id = ?")
+            .bind(password)
+            .bind(id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
     pub async fn save_session(&self, plugin_id: &str, account: i64) {
         let Some(json) = self.plugins.session_json(plugin_id, account) else {
             return;
@@ -492,6 +506,7 @@ impl Engine {
         .fetch_one(&mut *tx)
         .await?;
         let mut crawls = false;
+        let password = req.download_password.as_deref().filter(|p| !p.is_empty());
         for (link, fname) in links.iter().zip(names) {
             let plugin = self.plugins.find_for(link);
             let crawl = plugin.as_ref().is_some_and(|p| p.has_crawl);
@@ -504,13 +519,15 @@ impl Engine {
                 status::COLLECTED
             };
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, password, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(pkg_id)
             .bind(link)
             .bind(plugin.map(|p| p.id.clone()))
             .bind(status)
             .bind(fname)
+            .bind(password)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -555,8 +572,13 @@ impl Engine {
             .collect();
         let mut folder_name = None;
         for d in links {
+            let password = crate::captcha::Password::new(d.password.clone());
+            let job = crate::plugins::Job {
+                name: None,
+                password: &password,
+            };
             let result = match self.plugins.find_for(&d.url).filter(|p| p.has_crawl) {
-                Some(plugin) => self.plugins.crawl(&plugin, &d.url).await,
+                Some(plugin) => self.plugins.crawl(&plugin, &d.url, &job).await,
                 // The plugin is gone (reloaded without it): keep the link as it is.
                 None => Ok(crate::plugins::CrawlResult {
                     package_name: None,
@@ -596,11 +618,14 @@ impl Engine {
                             url: f.url,
                             size: f.size,
                             error: None,
+                            // JD: the crawler gives its files the folder's password.
+                            password: password.get(),
                         })
                         .collect()
                 }
                 Ok(_) => vec![NewLink {
                     error: Some(crate::tr!("Ordner ist leer", "Folder is empty")),
+                    password: password.get(),
                     ..NewLink::keep(&d)
                 }],
                 Err(e) => {
@@ -612,6 +637,7 @@ impl Engine {
                             "unknown"
                         },
                         error: Some(e.message),
+                        password: password.get(),
                         ..NewLink::keep(&d)
                     }]
                 }
@@ -643,8 +669,8 @@ impl Engine {
         let now = now_ms();
         for l in links {
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, password, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(d.package_id)
             .bind(&l.url)
@@ -654,6 +680,7 @@ impl Engine {
             .bind(l.size)
             .bind(l.online)
             .bind(&l.error)
+            .bind(&l.password)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -899,6 +926,7 @@ struct NewLink {
     /// `online` when name and size came from the hoster: the link counts as checked.
     online: &'static str,
     error: Option<String>,
+    password: Option<String>,
 }
 
 impl NewLink {
@@ -909,6 +937,7 @@ impl NewLink {
             size: d.size,
             online: "unknown",
             error: None,
+            password: d.password.clone(),
         }
     }
 }
@@ -1602,5 +1631,84 @@ mod engine_tests {
             "not all downloads of the hoster wait: {:?}",
             db::package_downloads(&e.db, pkg).await.unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn download_password_asked_once_and_kept() {
+        // The "hoster" accepts the password "secret" only.
+        let app = axum::Router::new()
+            .route(
+                "/check",
+                get(
+                    |q: axum::extract::Query<HashMap<String, String>>| async move {
+                        if q.get("pw").map(String::as_str) == Some("secret") {
+                            "ok"
+                        } else {
+                            "wrong"
+                        }
+                    },
+                ),
+            )
+            .route("/file.bin", get(|| async { "DATA" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let hoster = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = format!(
+            r#"var __plugin = {{ default: {{ id: "pw", version: 1, matches: [/https?:\/\/pw\.test\//],
+                async resolve(link, ctx) {{
+                    let pw = await ctx.password.get();
+                    for (let i = 0; i < 3; i++) {{
+                        const r = await ctx.http.get("{hoster}/check?pw=" + encodeURIComponent(pw));
+                        if (r.body === "ok") return {{ url: "{hoster}/file.bin" }};
+                        pw = await ctx.password.get({{ wrong: true }});
+                    }}
+                    throw new Error("wrong password");
+                }},
+            }}}};"#
+        );
+        std::fs::write(plugin_dir.join("pw.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let captchas = Arc::new(crate::captcha::Captchas::new(Events::new()));
+        plugins.set_captchas(captchas.clone());
+        let e = engine_with(dir.path(), plugins).await;
+        // Added with a wrong password: the plugin tries it, then the user is asked.
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://pw.test/f/1".into(),
+                start: true,
+                download_password: Some("guess".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        let ask = loop {
+            if let Some(a) = captchas.list().pop() {
+                break a;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!((ask.kind.as_str(), ask.wrong), ("password", true));
+        assert_eq!(ask.link.as_deref(), Some("https://pw.test/f/1"));
+        assert!(captchas.solve(&ask.id, &ask.secret, "secret"));
+        let d = wait_for(&e, id, status::FINISHED).await;
+        assert_eq!(d.password.as_deref(), Some("secret"));
+
+        // Downloading it again uses the saved password without asking.
+        sqlx::query("UPDATE downloads SET status = ?, bytes_done = 0 WHERE id = ?")
+            .bind(status::QUEUED)
+            .bind(id)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        e.wake();
+        wait_for(&e, id, status::FINISHED).await;
+        assert!(captchas.list().is_empty());
+        e.shutdown().await;
     }
 }

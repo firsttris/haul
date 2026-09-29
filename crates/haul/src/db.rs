@@ -68,6 +68,9 @@ pub struct Download {
     pub retry_at: Option<i64>,
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// Download password of a protected file (not sent to the UI).
+    #[serde(skip)]
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]

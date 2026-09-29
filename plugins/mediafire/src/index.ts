@@ -13,6 +13,10 @@
  *   rarely a reCaptcha. The IP limit (`limitReachedTTL`) sits on IP + User-Agent; JD retries
  *   with another User-Agent.
  * - A direct link (`downloadNNN.mediafire.com/…`) is tried first, like JD's stored direct URL.
+ * - Password-protected files (JD handlePW / PasswordSolver, pyLoad PASSWORD_PATTERN): the page
+ *   shows a password prompt; the password goes as `downloadp` in its form, sent without
+ *   following redirects ("pw protected files can directly redirect to download"). If the prompt
+ *   comes back, the password was wrong: three tries.
  */
 import {
   base64Decode,
@@ -26,6 +30,8 @@ import {
   PluginError,
   resolveUrl,
   TemporaryError,
+  withPassword,
+  WRONG_PASSWORD,
 } from '@haul/plugin-sdk';
 import type { Bilingual, Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
 
@@ -242,6 +248,22 @@ function pageErrors(res: HttpResponse) {
 
 const limitTtl = (html: string) => /var limitReachedTTL = (\d+);/.exec(html)?.[1];
 
+/** JD handlePW: the page asks for the file's password. */
+const PASSWORD_PROMPT = /aria-labelledby\s*=\s*"passwordmsg"|class\s*=\s*"passwordPrompt"|<form name="form_password"/i;
+
+/**
+ * JD getPasswordForm: the form with the prompt, else the form "download" with a `downloadp`
+ * field; pyLoad's form "form_password" and any form with `downloadp` also count.
+ */
+export function passwordForm(html: string) {
+  const forms = parseForms(html);
+  return (
+    forms.find((f) => PASSWORD_PROMPT.test(f.html)) ??
+    forms.find((f) => /name=["'](?:download|form_password)["']/i.test(f.html) && 'downloadp' in f.fields) ??
+    forms.find((f) => 'downloadp' in f.fields)
+  );
+}
+
 /** The download link on a file page, in the order the current and older layouts use. */
 export function findDownloadLink(html: string): string | undefined {
   const button = /<a\b[^>]*\bid="downloadButton"[^>]*>/i.exec(html)?.[0] ?? /<a\b[^>]*aria-label="Download file"[^>]*>/i.exec(html)?.[0];
@@ -281,7 +303,7 @@ function download(url: string, ua: string, referer: string) {
 export default definePlugin({
   id: 'mediafire',
   name: 'Mediafire',
-  version: 1,
+  version: 2,
   matches: [new RegExp(`^https?://${HOSTS}/.+`, 'i'), /^https?:\/\/download\d+\.mediafire(?:cdn)?\.com\//i],
   accountRequired: false,
 
@@ -378,11 +400,33 @@ export default definePlugin({
       });
       if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info) };
     }
-    if (/aria-labelledby\s*=\s*"passwordmsg"|class\s*=\s*"passwordPrompt"/i.test(res.body)) {
-      throw new PluginError('fatal', {
-        de: 'Mediafire: passwortgeschützte Datei (noch nicht unterstützt)',
-        en: 'Mediafire: password-protected file (not supported yet)',
+    if (PASSWORD_PROMPT.test(res.body)) {
+      let page = res;
+      const unlocked = await withPassword(ctx, 'Mediafire', async (password): Promise<{ direct: string } | { page: HttpResponse } | typeof WRONG_PASSWORD> => {
+        const form = passwordForm(page.body);
+        // pyLoad: without a form, `downloadp` goes to the file page.
+        const answer = await ctx.http.post(
+          resolveUrl(page.url, form?.action || page.url),
+          { ...(form?.fields ?? {}), downloadp: password },
+          { headers: { 'User-Agent': ua, Referer: page.url }, followRedirects: false },
+        );
+        let next = answer;
+        const location = answer.status >= 300 && answer.status < 400 ? answer.header('location') : null;
+        if (location) {
+          const target = resolveUrl(page.url, location);
+          if (DIRECT.test(target)) return { direct: target };
+          // A redirect to a page (usually the file page, now unlocked): load it.
+          next = await ctx.http.get(target, { headers: { 'User-Agent': ua, Referer: page.url } });
+        }
+        if (next.file) return { direct: next.url };
+        if (PASSWORD_PROMPT.test(next.body)) {
+          page = next;
+          return WRONG_PASSWORD;
+        }
+        return { page: next };
       });
+      if ('direct' in unlocked) return { ...download(unlocked.direct, ua, pageUrl), name: info.filename, size: sizeOf(info) };
+      res = unlocked.page;
     }
     if (/class="MalwareAdvisory"/i.test(res.body)) {
       throw new PluginError('fatal', {

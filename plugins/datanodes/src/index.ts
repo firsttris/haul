@@ -23,7 +23,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'datanodes',
     name: 'Datanodes',
-    version: 1,
+    version: 2,
     domains: ['datanodes.to'],
     fileIdLength: 12,
     accountRequired: false,

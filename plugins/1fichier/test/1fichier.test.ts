@@ -134,10 +134,73 @@ describe('1fichier download', () => {
     expect(downloadLink('nothing')).toBeUndefined();
   });
 
-  it('refuses password-protected files for now', async () => {
-    const ctx = fakeCtx({
-      'GET https://1fichier.com/?abc123def456&lg=en': { body: '<form method="post" action=""><input type="password" name="pass"></form>' },
+  describe('password-protected files (JD handleDownloadWebsite)', () => {
+    const PW_PAGE = `<form method="post" action="https://1fichier.com/?abc123def456">
+      <input type="hidden" name="adz" value="1.2">
+      <input type="password" name="pass">
+      <input type="submit" name="save" value="Download">
+    </form>`;
+    const sent: string[] = [];
+    const routes = () => ({
+      'GET https://1fichier.com/?abc123def456&lg=en': { body: PW_PAGE },
+      'POST https://1fichier.com/?abc123def456': (req: HttpRequest) => {
+        sent.push(req.form!.pass);
+        expect(req.form).toMatchObject({ adz: '1.2', did: '1' });
+        expect(req.form).not.toHaveProperty('save');
+        return { body: req.form!.pass === 'right' ? AFTER : PW_PAGE };
+      },
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
+
+    it('asks, and asks again after a wrong password', async () => {
+      sent.length = 0;
+      const ctx = fakeCtx(routes());
+      ctx.passwordAnswers = ['nope', 'right'];
+      expect((await plugin.resolve(LINK, ctx)).url).toBe('https://a-12.1fichier.com/c987654321');
+      expect(sent).toEqual(['nope', 'right']);
+      expect(ctx.passwordAsks).toEqual([{ wrong: false }, { wrong: true }]);
+      expect(ctx.savedPassword).toBe('right');
+    });
+
+    it('uses the saved password without asking', async () => {
+      const ctx = fakeCtx(routes());
+      ctx.savedPassword = 'right';
+      expect((await plugin.resolve(LINK, ctx)).url).toContain('a-12.1fichier.com');
+      expect(ctx.passwordAsks).toEqual([]);
+    });
+
+    it('gives up after three wrong passwords and forgets the last', async () => {
+      const ctx = fakeCtx(routes());
+      ctx.savedPassword = 'old';
+      ctx.passwordAnswers = ['a', 'b'];
+      await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
+      expect(ctx.passwordAsks).toEqual([{ wrong: true }, { wrong: true }]);
+      expect(ctx.savedPassword).toBeNull();
+    });
+
+    it('stops when the user cancels', async () => {
+      const ctx = fakeCtx(routes());
+      await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
+    });
+  });
+
+  it('crawls a password-protected folder like JD', async () => {
+    const ROWS = `<table><tr><td><a href="https://1fichier.com/?aaaaa11111" target="_blank">a.part1.rar</a></td>
+      <td class="normal">1.5 GB</td></tr>
+      <tr><td><a href="https://1fichier.com/?bbbbb22222">b &amp; c.rar</a></td> <td>100 KB</td></tr></table>`;
+    const FORM = '<div class="bloc2">Shared folder Secret</div><form method="post" action="https://1fichier.com/dir/AbCd123"><input type="password" name="pass"></form>';
+    const ctx = fakeCtx({
+      'GET https://1fichier.com/dir/AbCd123?json=1': { body: '<html>password</html>' },
+      'GET https://1fichier.com/dir/AbCd123?lg=en': { body: FORM },
+      'POST https://1fichier.com/dir/AbCd123?lg=en?json=1': (req) => ({ body: req.form!.pass === 'pw' ? ROWS : FORM }),
+    });
+    ctx.passwordAnswers = ['x', 'pw'];
+    expect(await plugin.crawl!('https://1fichier.com/dir/AbCd123', ctx)).toEqual({
+      packageName: 'Secret',
+      files: [
+        { url: 'https://1fichier.com/?aaaaa11111', name: 'a.part1.rar', size: 1610612736 },
+        { url: 'https://1fichier.com/?bbbbb22222', name: 'b & c.rar', size: 102400 },
+      ],
+    });
+    expect(ctx.savedPassword).toBe('pw');
   });
 });

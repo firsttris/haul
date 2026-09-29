@@ -437,6 +437,7 @@ impl PluginManager {
         method: &str,
         args: serde_json::Value,
         account: Option<&AccountCreds>,
+        job: Option<&Job<'_>>,
     ) -> std::result::Result<T, PluginError> {
         let env = serde_json::json!({ "pluginId": plugin.id, "account": account });
         let (clients, busy) = self.session_parts(&plugin.id, account.map(|a| a.id));
@@ -450,6 +451,8 @@ impl PluginManager {
             plugin_id: plugin.id.clone(),
             plugin_name: plugin.name.clone(),
             link: args.get(0).and_then(|v| v.as_str()).map(str::to_string),
+            name: job.and_then(|j| j.name.map(str::to_string)),
+            password: job.map(|j| j.password.clone()),
         });
         let value =
             host::invoke_with(&plugin.id, &plugin.code, method, args, env, clients, asker).await?;
@@ -467,7 +470,7 @@ impl PluginManager {
         link: &str,
         account: Option<&AccountCreds>,
     ) -> std::result::Result<CheckResult, PluginError> {
-        self.call(plugin, "check", serde_json::json!([link]), account)
+        self.call(plugin, "check", serde_json::json!([link]), account, None)
             .await
     }
 
@@ -476,8 +479,9 @@ impl PluginManager {
         &self,
         plugin: &Plugin,
         link: &str,
+        job: &Job<'_>,
     ) -> std::result::Result<CrawlResult, PluginError> {
-        self.call(plugin, "crawl", serde_json::json!([link]), None)
+        self.call(plugin, "crawl", serde_json::json!([link]), None, Some(job))
             .await
     }
 
@@ -486,9 +490,16 @@ impl PluginManager {
         plugin: &Plugin,
         link: &str,
         account: Option<&AccountCreds>,
+        job: &Job<'_>,
     ) -> std::result::Result<Resolved, PluginError> {
-        self.call(plugin, "resolve", serde_json::json!([link]), account)
-            .await
+        self.call(
+            plugin,
+            "resolve",
+            serde_json::json!([link]),
+            account,
+            Some(job),
+        )
+        .await
     }
 
     pub async fn check_account(
@@ -496,9 +507,22 @@ impl PluginManager {
         plugin: &Plugin,
         account: &AccountCreds,
     ) -> std::result::Result<AccountInfo, PluginError> {
-        self.call(plugin, "checkAccount", serde_json::json!([]), Some(account))
-            .await
+        self.call(
+            plugin,
+            "checkAccount",
+            serde_json::json!([]),
+            Some(account),
+            None,
+        )
+        .await
     }
+}
+
+/// The download a `resolve` or `crawl` call works for: its name (shown when asking for a
+/// password) and its password (`ctx.password`), which the caller saves if the call changed it.
+pub struct Job<'a> {
+    pub name: Option<&'a str>,
+    pub password: &'a crate::captcha::Password,
 }
 
 async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {

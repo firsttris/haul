@@ -15,14 +15,16 @@ function AddLinksForm() {
   const [packageName, setPackageName] = useState('');
   const [targetDir, setTargetDir] = useState('');
   const [passwords, setPasswords] = useState('');
+  const [downloadPassword, setDownloadPassword] = useState('');
   const [start, setStart] = useState(false);
   const add = useMutation({
-    mutationFn: () => post<{ packageId: number }>('/links', { links, packageName, targetDir, passwords, start }),
+    mutationFn: () => post<{ packageId: number }>('/links', { links, packageName, targetDir, passwords, downloadPassword, start }),
     onSuccess: () => {
       setLinks('');
       setPackageName('');
       setTargetDir('');
       setPasswords('');
+      setDownloadPassword('');
       if (start) navigate({ to: '/' });
     },
   });
@@ -56,6 +58,17 @@ function AddLinksForm() {
           <label htmlFor="dir">{t.collector.targetDir}</label>
           <input id="dir" className="input" placeholder={t.collector.targetDirPlaceholder} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
         </div>
+      </div>
+      <div className="field">
+        <label htmlFor="dlpw">{t.collector.downloadPassword}</label>
+        <input
+          id="dlpw"
+          className="input"
+          autoComplete="off"
+          placeholder={t.collector.downloadPasswordPlaceholder}
+          value={downloadPassword}
+          onChange={(e) => setDownloadPassword(e.target.value)}
+        />
       </div>
       <div className="field">
         <label htmlFor="pw">{t.collector.passwords}</label>

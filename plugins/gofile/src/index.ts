@@ -15,6 +15,10 @@
  *   its token, so `resolve` normally needs no API call; JD's checkDirectLink tests it first and
  *   only an expired link lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
+ * - Password-protected folders (JD GoFileIoCrawler): `passwordStatus` is `passwordRequired` or
+ *   `passwordWrong` until the listing is requested with `password=sha256(<password>)`; a known
+ *   password goes along with the first request, the user is asked up to 3 times. The files get
+ *   the folder's password, so an expired link can be listed again without asking.
  */
 import { definePlugin, HosterLimitError, memo, OfflineError, PluginError, spaceRequests, TemporaryError } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
@@ -177,11 +181,39 @@ async function guestToken(ctx: Ctx): Promise<string> {
   return token;
 }
 
+/** JD: a folder whose listing needs the (right) password. */
+const locked = (r: ApiResponse) =>
+  r.data?.passwordStatus === 'passwordRequired' || r.data?.passwordStatus === 'passwordWrong';
+
+/** The folder listing, with the password if it has one; the user is asked for it if needed. */
 async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: string }> {
+  return (await listing(ctx, code, true))!;
+}
+
+/** Like `contents`; without `ask`, null for a protected folder whose password is not known. */
+async function listing(ctx: Ctx, code: string, ask: boolean): Promise<{ data: Item; token: string } | null> {
   const token = await guestToken(ctx);
+  let password = (await ctx.password.saved()) ?? undefined;
+  let r = await list(ctx, code, token, password);
+  // JD: a pre-given password that fails, or none: ask the user; 3 times.
+  for (let tries = 0; locked(r); tries++) {
+    if (!ask) return null;
+    if (tries >= 3) {
+      await ctx.password.forget();
+      throw new PluginError('fatal', { de: 'Gofile: Passwort falsch', en: 'Gofile: wrong password' });
+    }
+    password = await ctx.password.get(password !== undefined ? { wrong: true } : undefined);
+    r = await list(ctx, code, token, password);
+  }
+  return checked(r, token);
+}
+
+/** `GET /contents/<code>` with the website-token variants. */
+async function list(ctx: Ctx, code: string, token: string, password?: string): Promise<ApiResponse> {
   let r: ApiResponse | undefined;
   for (const v of variantOrder(ctx)) {
-    const url = `${API}/contents/${encodeURIComponent(code)}?${v.query(code)}`;
+    const pw = password !== undefined ? `&password=${ctx.hash.sha256(password)}` : '';
+    const url = `${API}/contents/${encodeURIComponent(code)}?${v.query(code)}${pw}`;
     r = await api(ctx, () =>
       ctx.http.get(url, { headers: { ...headers(token, v.lang), 'X-Website-Token': websiteToken(ctx, token, v) } }),
     );
@@ -192,6 +224,10 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
     }
   }
   if (!r) throw new TemporaryError({ de: 'Gofile: keine Antwort', en: 'Gofile: no answer' });
+  return r;
+}
+
+function checked(r: ApiResponse, token: string): { data: Item; token: string } {
   if (r.status === 'error-notFound') {
     throw new OfflineError({
       de: 'Gofile: Ordner oder Datei gelöscht',
@@ -206,12 +242,6 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
   }
   if (r.status !== 'ok') throw new TemporaryError(`Gofile: ${r.status}`);
   const data = r.data;
-  if (data.passwordStatus === 'passwordRequired' || data.passwordStatus === 'passwordWrong') {
-    throw new PluginError('fatal', {
-      de: 'Gofile: Ordner ist passwortgeschützt (noch nicht unterstützt)',
-      en: 'Gofile: the folder is password protected (not supported yet)',
-    });
-  }
   if (data.canAccess === false) {
     throw new PluginError('fatal', {
       de: 'Gofile: privater Ordner',
@@ -266,7 +296,7 @@ function download(url: string, token: string, item?: Item) {
 export default definePlugin({
   id: 'gofile',
   name: 'Gofile',
-  version: 2,
+  version: 3,
   matches: [LINK],
   accountRequired: false,
   // JD: getMaxConcurrentProcessingInstances() = 1 "to prevent running into rate-limit".
@@ -300,7 +330,10 @@ export default definePlugin({
   async check(link, ctx) {
     const f = fragment(link);
     if (f.dl && f.t && (await directLinkWorks(ctx, f.dl, f.t))) return { online: true };
-    const file = pick((await contents(ctx, folderCode(link))).data, link);
+    const listed = await listing(ctx, folderCode(link), false);
+    // Protected and no password known yet: online; name and size come with the download.
+    if (!listed) return { online: true };
+    const file = pick(listed.data, link);
     if (!file) return { online: !f.file };
     return { online: true, name: file.name, size: file.size };
   },

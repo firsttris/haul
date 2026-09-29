@@ -11,6 +11,10 @@
  * - Download (JD handleDownloadWebsite): the file page may be the file itself (hotlink); else its
  *   first form is posted with `did=1` (without `save`), and the answer carries the link
  *   "Click here to download" / "Start your download".
+ * - Password-protected files: the form has a `pass` field; after a wrong password the page shows
+ *   that form again (JD isPasswordProtectedFileWebsite / errorWrongPassword). Protected folders:
+ *   no JSON list, the password is posted to the folder page, whose HTML then lists the files
+ *   (JD OneFichierComFolder.handlePasswordWebsite); the files get the folder's password.
  * - Limits: one free download at a time; between downloads a wait ("You must wait N minutes"),
  *   no free slots ("temporarily limited due to high demand", JD waits 15 min), daily limit
  *   ("The free offer is intended to …", 1 h). pyLoad also waits out "Free download in ⏳ N".
@@ -22,10 +26,13 @@ import {
   HosterLimitError,
   OfflineError,
   parseForms,
+  parseSize,
   PluginError,
   resolveUrl,
   spaceRequests,
   TemporaryError,
+  withPassword,
+  WRONG_PASSWORD,
 } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpOptions, HttpResponse } from '@haul/plugin-sdk';
 
@@ -128,9 +135,16 @@ export function checkErrors(res: HttpResponse): void {
     throw new HosterLimitError({ de: '1fichier: IP aus Sicherheitsgründen gesperrt', en: '1fichier: IP blocked for security reasons' }, 60 * 60);
   }
   if (/>\s*(?:Access to this file is protected|This file is protected)/i.test(html)) {
+    // JD: access control by the owner (IP, registered or premium users only, owner only).
+    if (/>\s*The owner of this file has reserved access to the subscribers of our services/i.test(html)) {
+      throw new PluginError('fatal', {
+        de: '1fichier: der Besitzer erlaubt den Download nur Abonnenten',
+        en: '1fichier: the owner reserved access to subscribers',
+      });
+    }
     throw new PluginError('fatal', {
-      de: '1fichier: Zugriff beschränkt (Passwort, Premium, Land oder Besitzer)',
-      en: '1fichier: access restricted (password, premium, country or owner)',
+      de: '1fichier: Zugriff vom Besitzer beschränkt (IP, Registrierte, Premium oder nur Besitzer)',
+      en: '1fichier: access restricted by the owner (IP, registered, premium or owner only)',
     });
   }
   if (/>\s*Your requests are too fast/i.test(html)) {
@@ -189,6 +203,22 @@ export function checkErrors(res: HttpResponse): void {
 /** pyLoad DL_LIMIT_PATTERN: "Free download in ⏳ 60". */
 const freeCountdown = (html: string) => Number(/Free download in\s*⏳\s*(\d+)/i.exec(html)?.[1] ?? 0);
 
+/** JD isPasswordProtectedFileWebsite: a form with a `pass` field that posts to 1fichier. */
+function passwordForm(html: string, base: string) {
+  return parseForms(html).find((f) => 'pass' in f.fields && (!f.action || !!fileUrl(resolveUrl(base, f.action)) || FOLDER.test(resolveUrl(base, f.action))));
+}
+
+/** JD OneFichierComFolder: the file rows of a folder page. */
+export function folderRows(html: string): CrawledFile[] {
+  const re = new RegExp(
+    `<a href=("|')(https?://(?:www\\.)?(?:${HOSTS})/\\?[a-z0-9]{5,20}[^"']*)\\1[^>]*>([^\\r\\n\\t]+)</a>\\s*</td>\\s*<td[^>]*>([^\\r\\n\\t]+)</td>`,
+    'gi',
+  );
+  const out: CrawledFile[] = [];
+  for (const m of html.matchAll(re)) out.push({ url: decodeHtml(m[2]), name: decodeHtml(m[3]).trim(), size: parseSize(m[4]) });
+  return out;
+}
+
 /** JD: the link on the page after the form. */
 export function downloadLink(html: string): string | undefined {
   const a = /<a href="([^"]+)"[^>]*>\s*(?:Click here to|Start your) download/i.exec(html)?.[1];
@@ -200,7 +230,7 @@ export function downloadLink(html: string): string | undefined {
 export default definePlugin({
   id: '1fichier',
   name: '1fichier',
-  version: 1,
+  version: 2,
   matches: [FILE, OLD_FILE, FOLDER],
   accountRequired: false,
   // Free: one download at a time and requests spaced (JD); calls run one after another.
@@ -219,17 +249,26 @@ export default definePlugin({
       } catch {
         list = [];
       }
-      if (!Array.isArray(list) || !json.body.trim().startsWith('[')) {
-        // JD: no JSON list → password-protected folder.
-        throw new PluginError('fatal', {
-          de: '1fichier: Ordner ist passwortgeschützt (noch nicht unterstützt)',
-          en: '1fichier: the folder is password protected (not supported yet)',
-        });
-      }
       const page = await request(ctx, 'GET', `${base}?lg=en`);
       const title = />(?:Shared folder|Dossier partagé)\s*(.*?)</i.exec(page.body)?.[1];
-      const files: CrawledFile[] = list.map((f) => ({ url: f.link, name: f.filename, size: f.size }));
-      return { packageName: title ? decodeHtml(title).trim() : undefined, files };
+      const packageName = title ? decodeHtml(title).trim() : undefined;
+      if (Array.isArray(list) && json.body.trim().startsWith('[')) {
+        return { packageName, files: list.map((f) => ({ url: f.link, name: f.filename, size: f.size })) };
+      }
+      // JD: no JSON list → password-protected folder. JD posts to `<folder>?lg=en?json=1`
+      // (sic) and reads the file rows from the HTML answer.
+      if (!passwordForm(page.body, base)) {
+        checkErrors(page);
+        throw new TemporaryError({ de: '1fichier: Ordnerinhalt nicht lesbar', en: '1fichier: folder content not readable' });
+      }
+      const files = await withPassword(ctx, '1fichier', async (password) => {
+        const res = await request(ctx, 'POST', `${base}?lg=en?json=1`, { form: { pass: password }, headers: { Referer: `${base}?lg=en` } });
+        if (passwordForm(res.body, base)) return WRONG_PASSWORD;
+        checkErrors(res);
+        return folderRows(res.body);
+      });
+      if (!files.length) throw new TemporaryError({ de: '1fichier: keine Dateien im Ordner gefunden', en: '1fichier: no files found in the folder' });
+      return { packageName, files };
     }
     const url = mustFileUrl(link);
     const info = (await checkLinks(ctx, [url])).get(url)!;
@@ -265,16 +304,26 @@ export default definePlugin({
     if (!form) {
       throw new TemporaryError({ de: '1fichier: kein Download-Formular auf der Seite', en: '1fichier: no download form on the page' });
     }
-    if ('pass' in form.fields) {
-      throw new PluginError('fatal', {
-        de: '1fichier: passwortgeschützte Datei (noch nicht unterstützt)',
-        en: '1fichier: password-protected file (not supported yet)',
-      });
-    }
-    const fields: Record<string, string> = { ...form.fields, did: '1' };
-    delete fields.save;
+    // JD: the form without `save`, with `did=1`, and the password if the file has one.
+    const submit = (f: typeof form, password?: string) => {
+      const fields: Record<string, string> = { ...f.fields, did: '1' };
+      delete fields.save;
+      if (password !== undefined) fields.pass = password;
+      return request(ctx, 'POST', f.action ? resolveUrl(page, f.action) : page, { form: fields, headers: { Referer: page } });
+    };
     const action = form.action ? resolveUrl(page, form.action) : page;
-    res = await request(ctx, 'POST', action, { form: fields, headers: { Referer: page } });
+    if (passwordForm(res.body, page)) {
+      let current = form;
+      res = await withPassword(ctx, '1fichier', async (password) => {
+        const answer = await submit(current, password);
+        // Wrong: the page asks again; its first form is the next one to send (JD: getForm(0)).
+        if (answer.file || !passwordForm(answer.body, page)) return answer;
+        current = parseForms(answer.body)[0] ?? current;
+        return WRONG_PASSWORD;
+      });
+    } else {
+      res = await submit(form);
+    }
     if (res.file && res.url !== action) return { url: res.url, headers: { 'User-Agent': UA, Referer: url }, maxConnections: 1 };
     const dl = downloadLink(res.body);
     if (dl) return { url: dl, headers: { 'User-Agent': UA, Referer: url }, maxConnections: 1 };

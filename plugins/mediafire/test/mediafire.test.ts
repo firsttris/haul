@@ -186,11 +186,55 @@ describe('mediafire resolve', () => {
     await expect(plugin.resolve(LINK, page({ body: '<html>nothing</html>' }))).rejects.toThrow(/Download-Link nicht gefunden/);
   });
 
-  it('refuses private, password and malware files', async () => {
+  describe('password-protected files (JD handlePW)', () => {
+    const PROMPT = `<div class="passwordPrompt"><form name="form_password" method="post" action="">
+      <input type="password" name="downloadp"><input type="submit" value="Unlock"></form></div>`;
+    const FILE_PAGE = 'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i';
+
+    it('asks, and takes the redirect to the download after the right password', async () => {
+      const sent: HttpRequest[] = [];
+      const ctx = fakeCtx({
+        ...info,
+        [FILE_PAGE]: { body: PROMPT },
+        'POST https://www.mediafire.com/file/q1w2e3r4t5y6u7i': (req) => {
+          sent.push(req);
+          return req.form!.downloadp === 'right' ? { status: 302, headers: { location: DL } } : { body: PROMPT };
+        },
+      });
+      ctx.passwordAnswers = ['bad', 'right'];
+      expect(await plugin.resolve(LINK, ctx)).toMatchObject({ url: DL, name: 'Film.part1.rar' });
+      expect(sent.map((r) => r.form!.downloadp)).toEqual(['bad', 'right']);
+      expect(sent[0].followRedirects).toBe(false);
+      expect(ctx.passwordAsks).toEqual([{ wrong: false }, { wrong: true }]);
+      expect(ctx.savedPassword).toBe('right');
+    });
+
+    it('follows a redirect back to the unlocked file page', async () => {
+      let unlocked = false;
+      const ctx = fakeCtx({
+        ...info,
+        [FILE_PAGE]: () => ({ body: unlocked ? PAGE : PROMPT }),
+        'POST https://www.mediafire.com/file/q1w2e3r4t5y6u7i': () => {
+          unlocked = true;
+          return { status: 302, headers: { location: '/file/q1w2e3r4t5y6u7i/Film.part1.rar/file' } };
+        },
+      });
+      ctx.savedPassword = 'right';
+      expect((await plugin.resolve(LINK, ctx)).url).toBe(DL);
+      expect(ctx.passwordAsks).toEqual([]);
+    });
+
+    it('fails after three wrong passwords', async () => {
+      const ctx = fakeCtx({ ...info, [FILE_PAGE]: { body: PROMPT }, 'POST https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: PROMPT } });
+      ctx.passwordAnswers = ['a', 'b', 'c'];
+      await expect(plugin.resolve(LINK, ctx)).rejects.toThrow(/Passwort falsch/);
+      expect(ctx.savedPassword).toBeNull();
+    });
+  });
+
+  it('refuses private and malware files', async () => {
     const priv = fakeCtx({ [`GET ${API}/file/get_info.php`]: ok({ file_info: { ...INFO, privacy: 'private' } }) });
     await expect(plugin.resolve(LINK, priv)).rejects.toThrow(/private Datei/);
-    const pw = fakeCtx({ ...info, 'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: '<div class="passwordPrompt">' } });
-    await expect(plugin.resolve(LINK, pw)).rejects.toThrow(/passwortgeschützt/);
     const mal = fakeCtx({ ...info, 'GET https://www.mediafire.com/file/q1w2e3r4t5y6u7i': { body: '<div class="MalwareAdvisory">' } });
     await expect(plugin.resolve(LINK, mal)).rejects.toThrow(/Schadsoftware/);
   });

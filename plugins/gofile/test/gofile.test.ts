@@ -169,8 +169,52 @@ describe('gofile', () => {
     expect(seen[2]).toContain('?contentId=AbC123');
   });
 
-  it('explains password-protected folders', async () => {
-    const ctx = fakeCtx({ ...TOKEN_ROUTE, ...contents('Pw1', { type: 'folder', passwordStatus: 'passwordRequired' }) });
-    await expect(plugin.crawl!('https://gofile.io/d/Pw1', ctx)).rejects.toThrow(/passwortgeschützt/);
+  describe('password-protected folders (JD GoFileIoCrawler)', () => {
+    const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+    const PROTECTED = { ...FOLDER, children: { f1: FOLDER.children.f1 } };
+    // Answers like gofile: without the right sha256(password) only `passwordStatus`.
+    const routes = (seen: string[]) => ({
+      ...TOKEN_ROUTE,
+      'GET https://api.gofile.io/contents/AbC123?': (req: HttpRequest): FakeRoute => {
+        const pw = /[?&]password=([^&]*)/.exec(req.url)?.[1];
+        seen.push(pw ?? '');
+        if (pw === sha('geheim')) return { body: JSON.stringify({ status: 'ok', data: { ...PROTECTED, passwordStatus: 'passwordOk' } }) };
+        return { body: JSON.stringify({ status: 'ok', data: { type: 'folder', passwordStatus: pw ? 'passwordWrong' : 'passwordRequired' } }) };
+      },
+    });
+
+    it('asks and sends the sha256 of the password', async () => {
+      const seen: string[] = [];
+      const ctx = fakeCtx(routes(seen));
+      ctx.passwordAnswers = ['falsch', 'geheim'];
+      const r = await plugin.crawl!('https://gofile.io/d/AbC123', ctx);
+      expect(r.files).toEqual([{ url: crawled('f1', f1), name: 'a.part1.rar', size: 100 }]);
+      expect(seen).toEqual(['', sha('falsch'), sha('geheim')]);
+      expect(ctx.passwordAsks).toEqual([{ wrong: false }, { wrong: true }]);
+      expect(ctx.savedPassword).toBe('geheim');
+    });
+
+    it('sends a known password with the first request', async () => {
+      const seen: string[] = [];
+      const ctx = fakeCtx(routes(seen));
+      ctx.savedPassword = 'geheim';
+      await plugin.resolve('https://gofile.io/d/AbC123#file=f1', ctx);
+      expect(seen).toEqual([sha('geheim')]);
+      expect(ctx.passwordAsks).toEqual([]);
+    });
+
+    it('gives up after three wrong answers', async () => {
+      const ctx = fakeCtx(routes([]));
+      ctx.passwordAnswers = ['a', 'b', 'c'];
+      await expect(plugin.crawl!('https://gofile.io/d/AbC123', ctx)).rejects.toThrow(/Passwort falsch/);
+      expect(ctx.passwordAsks).toHaveLength(3);
+      expect(ctx.savedPassword).toBeNull();
+    });
+
+    it('does not ask during a link check', async () => {
+      const ctx = fakeCtx(routes([]));
+      expect(await plugin.check!('https://gofile.io/d/AbC123#file=f1', ctx)).toEqual({ online: true });
+      expect(ctx.passwordAsks).toEqual([]);
+    });
   });
 });

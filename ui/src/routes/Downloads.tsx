@@ -43,7 +43,7 @@ export function DownloadsPage() {
   const t = useT();
   const { data: packages = [], isPending } = usePackages('queue');
   const captchas = useCaptchas().data;
-  const captchaLinks = useMemo(() => new Set((captchas ?? []).map((c) => c.link ?? '')), [captchas]);
+  const captchaLinks = useMemo(() => new Map((captchas ?? []).map((c) => [c.link ?? '', c.kind])), [captchas]);
   const stats = useStats().data;
   const settings = useSettings().data;
   const live = useLive();

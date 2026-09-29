@@ -318,13 +318,22 @@ async fn execute(
                     plugin.name
                 )));
             }
+            let password = crate::captcha::Password::new(d.password.clone());
+            let job = crate::plugins::Job {
+                name: Some(&d.name),
+                password: &password,
+            };
             let r = cancellable(
                 cancel,
-                engine.plugins.resolve(&plugin, &d.url, acc.as_ref()),
+                engine.plugins.resolve(&plugin, &d.url, acc.as_ref(), &job),
             )
             .await?;
             if let Some(a) = &acc {
                 engine.save_session(&plugin.id, a.id).await;
+            }
+            // Entered or rejected, whatever the call's outcome (JD: setDownloadPassword).
+            if let Some(p) = password.changed() {
+                engine.save_password(id, p.as_deref()).await?;
             }
             let r = r?;
             let clients = engine
