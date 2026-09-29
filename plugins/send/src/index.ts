@@ -5,17 +5,73 @@
  * Reference: JD's SendNow.java (r52974, mirror 2026-09-28) on XFileSharingProBasic:
  * domains, name/size patterns (scanInfo), its checkErrors and isOffline additions, and the
  * connection limits (free: 1 chunk, premium: 10). JD's captcha info for the site: none.
+ *
+ * Folders (JD SendNowFolder, r52974): `/s/<…>` (or `/e/<…>`, loaded as `/s/`); every
+ * `/<12-char id>` on the page is a file, names (`tx-dark`) and sizes (`label-success`) are taken
+ * when there is one per link; further pages via the `page-link` to `?op=user_public…&page=N`.
+ * The package is named after the rest of the folder URL, like JD.
  */
-import { definePlugin, HosterLimitError, PluginError } from '@haul/plugin-sdk';
+import { decodeHtml, definePlugin, HosterLimitError, OfflineError, parseSize, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
+import type { CrawledFile, Ctx } from '@haul/plugin-sdk';
 import { createXfsPlugin } from '@haul/plugin-sdk/xfs';
 
-export default definePlugin(
+/** JD SendNow.getPluginDomains. */
+const DOMAINS = ['send.now', 'send.cm', 'sendit.cloud', 'usersfiles.com', 'tusfiles.com', 'tusfiles.net', 'userscloud.com', 'usercdn.com'];
+/** JD SendNowFolder: `https?://(?:www\.)?<domains>/(e|s)/(.+)`. */
+const FOLDER = new RegExp(`^https?://(?:www\\.)?(?:${DOMAINS.map((d) => d.replace(/\./g, '\\.')).join('|')})/(?:e|s)/(.+)`, 'i');
+
+/** JD SendNowFolder.decryptIt. */
+async function crawlFolder(link: string, ctx: Ctx) {
+  const rest = FOLDER.exec(link)![1];
+  let res = await ctx.http.get(link.replace('/e/', '/s/'));
+  if (res.status === 404 || />\s*Files not found/i.test(res.body)) {
+    throw new OfflineError({ de: 'Send: Ordner nicht gefunden', en: 'Send: folder not found' });
+  }
+  const files: CrawledFile[] = [];
+  const seen = new Set<string>();
+  for (let page = 2; ; page++) {
+    const links = [...res.body.matchAll(/(\/[a-z0-9]{12})/g)].map((m) => m[1]);
+    if (!links.length) {
+      throw new TemporaryError({ de: 'Send: keine Dateien im Ordner gefunden', en: 'Send: no files found in the folder' });
+    }
+    const names = [...res.body.matchAll(/class="tx-dark"[^>]*>([^<]+)<\/a>/g)].map((m) => m[1]);
+    const sizes = [...res.body.matchAll(/class="label label-success\s*"[^>]*>([^<]+)<\/span>/g)].map((m) => m[1]);
+    let fresh = 0;
+    links.forEach((path, i) => {
+      if (seen.has(path)) return;
+      seen.add(path);
+      fresh++;
+      files.push({
+        url: resolveUrl(res.url, path),
+        // Only when every link has one, as JD does.
+        name: names.length === links.length ? decodeHtml(names[i]).trim() : undefined,
+        size: sizes.length === links.length ? parseSize(sizes[i]) : undefined,
+      });
+    });
+    if (!fresh) break;
+    const next = new RegExp(
+      `<a class\\s*=\\s*("|')page-link\\1[^>]*href\\s*=\\s*('|")(/\\?[^"']*op=user_public[^"']*page=${page})`,
+      'i',
+    ).exec(res.body)?.[3];
+    if (!next) break;
+    res = await ctx.http.get(resolveUrl(res.url, decodeHtml(next)));
+  }
+  let name = rest;
+  try {
+    name = decodeURIComponent(rest);
+  } catch {
+    /* keep it as it is */
+  }
+  return { packageName: decodeHtml(name).trim(), files };
+}
+
+const xfs = definePlugin(
   createXfsPlugin({
     id: 'send',
     name: 'Send',
-    version: 2,
+    version: 3,
     // JD: getPluginDomains; usersfiles.com is dead (getDeadDomains), kept for old links.
-    domains: ['send.now', 'send.cm', 'sendit.cloud', 'usersfiles.com', 'tusfiles.com', 'tusfiles.net', 'userscloud.com', 'usercdn.com'],
+    domains: DOMAINS,
     fileIdLength: 12,
     accountRequired: false,
     free: true,
@@ -61,3 +117,24 @@ export default definePlugin(
     },
   }),
 );
+
+const notAFile = () =>
+  new PluginError('fatal', { de: 'Send: Ordner-Link, bitte neu hinzufügen', en: 'Send: folder link, please add it again' });
+
+export default definePlugin({
+  ...xfs,
+  matches: [...xfs.matches, FOLDER],
+  // Folder links become their files; a file link stays as it is (checked later like before).
+  async crawl(link, ctx) {
+    if (FOLDER.test(link)) return crawlFolder(link, ctx);
+    return { files: [{ url: link }] };
+  },
+  async check(link, ctx) {
+    if (FOLDER.test(link)) throw notAFile();
+    return xfs.check!(link, ctx);
+  },
+  async resolve(link, ctx) {
+    if (FOLDER.test(link)) throw notAFile();
+    return xfs.resolve(link, ctx);
+  },
+});

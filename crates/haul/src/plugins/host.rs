@@ -691,6 +691,32 @@ mod bundled {
             v["url"],
             "https://drive.usercontent.google.com/download?id=abc&confirm=t"
         );
+        // Folder page: key pair (back reference), hex-escaped _DRIVE_ivd and the title.
+        let code = format!(
+            r#"{code}
+            __plugin.default.resolve = async (html) => ({{ url: JSON.stringify([__plugin.webApiInfo(html), __plugin.folderTitle(html)]) }});"#
+        );
+        let page = r#"<title>Fotos \u00e4 &amp; mehr – Google Drive</title><script>x = ["AIzaSyKEY123rest","AIzaSyOTHER",null];
+            window['_DRIVE_ivd'] = '\x5bnull,null,1234567890123,5,\x220ATeam12345\x22,null,null\x5d';</script>"#;
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let v = invoke(
+            "gdrive",
+            &code,
+            "resolve",
+            serde_json::json!([page]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v["url"],
+            r#"[{"key":"AIzaSyKEY123rest","teamDriveId":"0ATeam12345"},"Fotos ä & mehr"]"#
+        );
     }
 
     /// The gofile bundle declares `crawl`; `ctx.hash.sha256` works in QuickJS.

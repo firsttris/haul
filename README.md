@@ -11,13 +11,14 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)
 - Send (send.now, früher send.cm, tusfiles, userscloud) ohne Account über den XFS-Free-Weg wie bei
-  JDownloader (Countdown, Text-Captcha), mit Account über den Premium-Weg
+  JDownloader (Countdown, Text-Captcha), mit Account über den Premium-Weg; Ordner-Links (`/s/…`)
+  werden in ihre Dateien aufgelöst, über alle Seiten
 - 1fichier (und Alias-Domains) ohne Account wie bei JDownloader: Name/Größe über `check_links.pl`,
   Ordner über `?json=1`, Wartezeiten zwischen Downloads und bei fehlenden freien Slots werden
   abgewartet, ohne als Fehlversuch zu zählen
-- Google Drive: öffentliche Dateien ohne Account wie bei JDownloader (schneller Link-Check,
-  Bestätigung bei großen Dateien, Kontingent- und Rate-Limit mit Wartezeit); Ordner und
-  Google-Dokumente noch nicht
+- Google Drive: öffentliche Dateien und Ordner (mit Unterordnern und Verknüpfungen) ohne Account
+  wie bei JDownloader (schneller Link-Check, Bestätigung bei großen Dateien, Kontingent- und
+  Rate-Limit mit Wartezeit); Google-Dokumente noch nicht
 - Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); ein reCaptcha löst du im Browser
   (siehe [Captchas](#captchas))
 - Mediafire ohne Account: Datei-, Ordner- (mit Unterordnern) und Direktlinks; Name und Größe über

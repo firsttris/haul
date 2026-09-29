@@ -170,4 +170,41 @@ describe('send', () => {
     );
     expect(await plugin.resolve(LINK, ctx)).toMatchObject({ url: CDN, maxConnections: 10 });
   });
+
+  describe('folders (JD SendNowFolder)', () => {
+    const row = (id: string, name: string, size: string) =>
+      `<tr><td><a href="https://send.now/${id}" class="tx-dark">${name}</a></td><td><span class="label label-success ">${size}</span></td></tr>`;
+    const PAGE_1 = `<table>${row('aaaaaaaaaaa1', 'Film.part1.rar', '1.5 GB')}${row('aaaaaaaaaaa2', 'Film &amp; Co.part2.rar', '500 MB')}</table>
+      <ul class="pagination"><li><a class='page-link' href='/?op=user_public&amp;usr_login=bob&amp;fld_id=7&amp;page=2'>2</a></li></ul>`;
+    const PAGE_2 = `<table>${row('aaaaaaaaaaa3', 'Film.part3.rar', '10 KB')}</table>
+      <ul class="pagination"><li><a class='page-link' href='/?op=user_public&amp;usr_login=bob&amp;fld_id=7&amp;page=1'>1</a></li></ul>`;
+
+    it('lists the files of every page and names the package', async () => {
+      const ctx = fakeCtx({
+        'GET https://send.now/s/bob/7/My%20Film': { body: PAGE_1 },
+        'GET https://send.now/?op=user_public&usr_login=bob&fld_id=7&page=2': { body: PAGE_2 },
+      });
+      // /e/ is loaded as /s/.
+      expect(await plugin.crawl!('https://send.now/e/bob/7/My%20Film', ctx)).toEqual({
+        packageName: 'bob/7/My Film',
+        files: [
+          { url: 'https://send.now/aaaaaaaaaaa1', name: 'Film.part1.rar', size: Math.round(1.5 * 1024 ** 3) },
+          { url: 'https://send.now/aaaaaaaaaaa2', name: 'Film & Co.part2.rar', size: 500 * 1024 ** 2 },
+          { url: 'https://send.now/aaaaaaaaaaa3', name: 'Film.part3.rar', size: 10 * 1024 },
+        ],
+      });
+    });
+
+    it('reports a missing folder as offline', async () => {
+      const ctx = fakeCtx({ 'GET https://send.now/s/x': { body: '<h3> Files not found</h3>' } });
+      await expect(plugin.crawl!('https://send.now/s/x', ctx)).rejects.toMatchObject({ haulKind: 'offline' });
+    });
+
+    it('keeps file links as they are, without a request', async () => {
+      const ctx = fakeCtx({});
+      expect(await plugin.crawl!(LINK, ctx)).toEqual({ files: [{ url: LINK }] });
+      expect(plugin.matches.some((re) => re.test('https://send.now/s/bob'))).toBe(true);
+      await expect(plugin.resolve('https://send.now/s/bob', ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
+    });
+  });
 });
