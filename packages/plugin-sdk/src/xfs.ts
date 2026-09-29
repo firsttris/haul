@@ -158,10 +158,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
   const fileId = (link: string): string => {
     const m = linkRe.exec(link);
-    if (!m) throw new OfflineError({
-      de: 'Link hat kein gültiges Dateikennzeichen',
-      en: 'The link has no valid file id',
-    });
+    if (!m) {
+      throw new OfflineError({
+        de: 'Link hat kein gültiges Dateikennzeichen',
+        en: 'The link has no valid file id',
+      });
+    }
     return m[1].toLowerCase();
   };
   const fileUrl = (link: string) => `${base}/${fileId(link)}`;
@@ -347,10 +349,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         en: `${cfg.name}: session cookie invalid or expired (${lastAccountDetail.en}). ${cookieHelp.en}`,
       });
     }
-    if (m.kind !== 'password') throw new AccountError({
-      de: `${cfg.name}: keine Web-Anmeldung möglich`,
-      en: `${cfg.name}: web login not possible`,
-    });
+    if (m.kind !== 'password') {
+      throw new AccountError({
+        de: `${cfg.name}: keine Web-Anmeldung möglich`,
+        en: `${cfg.name}: web login not possible`,
+      });
+    }
 
     const loginUrl = `${base}${cfg.loginPath ?? '/login.html'}`;
     const page = await ctx.http.get(loginUrl);
@@ -370,10 +374,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         en: `${cfg.name}: wrong user name or password`,
       });
     }
-    if (/account (?:was|has been) banned/i.test(res.body)) throw new AccountError({
-      de: `${cfg.name}: Account gesperrt`,
-      en: `${cfg.name}: account banned`,
-    });
+    if (/account (?:was|has been) banned/i.test(res.body)) {
+      throw new AccountError({
+        de: `${cfg.name}: Account gesperrt`,
+        en: `${cfg.name}: account banned`,
+      });
+    }
     if (CAPTCHA_WORDS.test(form?.html ?? page.body)) {
       throw new AccountError({
         de: `${cfg.name} verlangt beim Login ein Captcha, das Haul nicht lösen kann. ${cookieHelp.de}`,
@@ -406,10 +412,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
 
   function currentMode(ctx: Ctx): Mode {
     const acc = ctx.account.get();
-    if (!acc) throw new AccountError({
-      de: `${cfg.name}: kein Premium-Account hinterlegt`,
-      en: `${cfg.name}: no premium account set up`,
-    });
+    if (!acc) {
+      throw new AccountError({
+        de: `${cfg.name}: kein Premium-Account hinterlegt`,
+        en: `${cfg.name}: no premium account set up`,
+      });
+    }
     return mode(acc.user, acc.secret);
   }
 
@@ -467,10 +475,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
           key: m.key,
           file_code: id,
         });
-        if (!r || !r.url) throw new TemporaryError({
-          de: `${cfg.name}-API lieferte keinen Direktlink`,
-          en: `${cfg.name} API returned no direct link`,
-        });
+        if (!r || !r.url) {
+          throw new TemporaryError({
+            de: `${cfg.name}-API lieferte keinen Direktlink`,
+            en: `${cfg.name} API returned no direct link`,
+          });
+        }
         return { url: r.url, name: r.name, size: r.size !== undefined ? Number(r.size) : undefined, maxConnections: cfg.maxConnections };
       }
 

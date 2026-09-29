@@ -9,7 +9,8 @@
  *   the token is reused, and a folder is listed once, when the link is added.
  * - `GET api.gofile.io/contents/<code>` lists a folder, with the token as Bearer and an
  *   `X-Website-Token` = sha256(`UA::lang::token::4h-block::salt`). User-Agent and `X-BL`
- *   must match the hashed values.
+ *   must match the hashed values. Two sources disagree on the current salt, so both variants
+ *   are kept exactly as their source sends them, and the one that worked last goes first.
  * - Like pyLoad (and JD's stored direct URL), the crawled file link carries the direct URL and
  *   its token, so `resolve` normally needs no API call; JD's checkDirectLink tests it first and
  *   only an expired link lists the folder again.
@@ -24,8 +25,23 @@ const API = 'https://api.gofile.io';
  * Salts from gofile's wt.obf.js, current first. gofile rotates it; a wrong one answers
  * `error-notPremium`, then the next is tried. (12af…: gofile-dl 2026-08; 9844…: JD r53159.)
  */
-const WT_SALTS = ['12af056dacea0b', '9844d94d963d30'];
-const LANG = 'en-US';
+interface WtVariant {
+  salt: string;
+  /** Hashed into the token, and sent as `X-BL` unless empty. */
+  lang: string;
+  /** Query of `/contents/<code>`, as the source sends it. */
+  query: (code: string) => string;
+}
+const WT_VARIANTS: WtVariant[] = [
+  // gofile-dl (salt update 2026-08-15) and gofile-downloader: the web client's query and X-BL.
+  {
+    salt: '12af056dacea0b',
+    lang: 'en-US',
+    query: () => 'contentFilter=&page=1&pageSize=1000&sortField=createTime&sortDirection=-1',
+  },
+  // JD's GoFileIoCrawler (r53159, mirror 2026-09-28): no language, no X-BL, only contentId.
+  { salt: '9844d94d963d30', lang: '', query: (code) => `contentId=${encodeURIComponent(code)}` },
+];
 /** Sent with every request to gofile, because the website token is hashed from it. */
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const TOKEN_COOKIE = 'accountToken';
@@ -122,11 +138,11 @@ async function api(ctx: Ctx, send: () => Promise<HttpResponse>): Promise<ApiResp
   });
 }
 
-function headers(token: string): Record<string, string> {
+function headers(token: string, lang = ''): Record<string, string> {
   const h: Record<string, string> = {
     'User-Agent': UA,
-    'X-BL': LANG,
     Accept: '*/*',
+    ...(lang ? { 'X-BL': lang } : {}),
     Origin: SITE,
     Referer: SITE + '/',
   };
@@ -135,9 +151,16 @@ function headers(token: string): Record<string, string> {
 }
 
 /** `X-Website-Token` as computed by the site's wt.obf.js. */
-function websiteToken(ctx: Ctx, token: string, salt: string): string {
+function websiteToken(ctx: Ctx, token: string, v: WtVariant): string {
   const block = Math.floor(Date.now() / 1000 / 14400);
-  return ctx.hash.sha256(`${UA}::${LANG}::${token}::${block}::${salt}`);
+  return ctx.hash.sha256(`${UA}::${v.lang}::${token}::${block}::${v.salt}`);
+}
+
+/** The variant that worked last, kept in the jar like the pace (not sent to gofile). */
+function variantOrder(ctx: Ctx): WtVariant[] {
+  const last = Number(/haul_wt=(\d+)/.exec(ctx.cookies.get(PACE_URL))?.[1] ?? 0);
+  const first = WT_VARIANTS[last] ?? WT_VARIANTS[0];
+  return [first, ...WT_VARIANTS.filter((v) => v !== first)];
 }
 
 /**
@@ -149,32 +172,37 @@ async function guestToken(ctx: Ctx): Promise<string> {
   if (saved) return saved;
   const r = await api(ctx, () => ctx.http.post(`${API}/accounts`, null, { json: {}, headers: headers('') }));
   const token = r.data?.token;
-  if (r.status !== 'ok' || !token) throw new TemporaryError({
-    de: `Gofile: kein Gast-Token (${r.status})`,
-    en: `Gofile: no guest token (${r.status})`,
-  });
+  if (r.status !== 'ok' || !token) {
+    throw new TemporaryError({
+      de: `Gofile: kein Gast-Token (${r.status})`,
+      en: `Gofile: no guest token (${r.status})`,
+    });
+  }
   ctx.cookies.set(SITE + '/', `${TOKEN_COOKIE}=${token}; Domain=gofile.io; Path=/; Max-Age=86400`);
   return token;
 }
 
 async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: string }> {
   const token = await guestToken(ctx);
-  // The query the web client sends.
-  const url =
-    `${API}/contents/${encodeURIComponent(code)}?contentFilter=&page=1&pageSize=1000` +
-    `&sortField=createTime&sortDirection=-1`;
   let r: ApiResponse | undefined;
-  for (const salt of WT_SALTS) {
+  for (const v of variantOrder(ctx)) {
+    const url = `${API}/contents/${encodeURIComponent(code)}?${v.query(code)}`;
     r = await api(ctx, () =>
-      ctx.http.get(url, { headers: { ...headers(token), 'X-Website-Token': websiteToken(ctx, token, salt) } }),
+      ctx.http.get(url, { headers: { ...headers(token, v.lang), 'X-Website-Token': websiteToken(ctx, token, v) } }),
     );
-    if (r.status !== 'error-notPremium') break;
+    // A wrong token is answered with error-notPremium (gofile-dl); try the other variant.
+    if (r.status !== 'error-notPremium') {
+      ctx.cookies.set(PACE_URL, `haul_wt=${WT_VARIANTS.indexOf(v)}; Path=/__haul_pace; Max-Age=86400`);
+      break;
+    }
   }
   if (!r) throw new TemporaryError({ de: 'Gofile: keine Antwort', en: 'Gofile: no answer' });
-  if (r.status === 'error-notFound') throw new OfflineError({
-    de: 'Gofile: Ordner oder Datei gelöscht',
-    en: 'Gofile: folder or file deleted',
-  });
+  if (r.status === 'error-notFound') {
+    throw new OfflineError({
+      de: 'Gofile: Ordner oder Datei gelöscht',
+      en: 'Gofile: folder or file deleted',
+    });
+  }
   if (r.status === 'error-notPremium') {
     throw new PluginError('fatal', {
       de: 'Gofile: Website-Token abgelehnt (Salt geändert?) oder nur mit Premium',
@@ -189,10 +217,12 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
       en: 'Gofile: the folder is password protected (not supported yet)',
     });
   }
-  if (data.canAccess === false) throw new PluginError('fatal', {
-    de: 'Gofile: privater Ordner',
-    en: 'Gofile: private folder',
-  });
+  if (data.canAccess === false) {
+    throw new PluginError('fatal', {
+      de: 'Gofile: privater Ordner',
+      en: 'Gofile: private folder',
+    });
+  }
   return { data, token };
 }
 
@@ -287,10 +317,12 @@ export default definePlugin({
     const { data, token } = await contents(ctx, folderCode(link));
     const file = pick(data, link);
     if (!file) {
-      if (f.file) throw new OfflineError({
-        de: 'Gofile: Datei nicht mehr im Ordner',
-        en: 'Gofile: the file is no longer in the folder',
-      });
+      if (f.file) {
+        throw new OfflineError({
+          de: 'Gofile: Datei nicht mehr im Ordner',
+          en: 'Gofile: the file is no longer in the folder',
+        });
+      }
       throw new PluginError('fatal', {
         de: 'Gofile: Ordner mit mehreren Dateien, bitte den Link neu hinzufügen',
         en: 'Gofile: folder with several files, please add the link again',

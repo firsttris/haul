@@ -140,16 +140,33 @@ describe('gofile', () => {
     await expect(plugin.crawl!('https://gofile.io/d/AbC123', ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
   });
 
-  it('falls back to the older salt when gofile rejects the token', async () => {
+  it('falls back to JD’s variant exactly and remembers the one that worked', async () => {
+    const jdToken = (req: HttpRequest) => {
+      const block = Math.floor(Date.now() / 1000 / 14400);
+      return createHash('sha256')
+        .update(`${req.headers?.['User-Agent']}::::tok123::${block}::9844d94d963d30`)
+        .digest('hex');
+    };
+    const seen: string[] = [];
     const ctx = fakeCtx({
       ...TOKEN_ROUTE,
-      'GET https://api.gofile.io/contents/AbC123': (req) =>
-        req.headers?.['X-Website-Token'] === wt(req, '9844d94d963d30')
-          ? { body: JSON.stringify({ status: 'ok', data: FOLDER }) }
-          : { body: JSON.stringify({ status: 'error-notPremium', data: {} }) },
+      'GET https://api.gofile.io/contents/AbC123': (req) => {
+        seen.push(req.url);
+        // JD's request: only contentId, no X-BL, token hashed without a language.
+        const jd =
+          req.url.endsWith('?contentId=AbC123') &&
+          req.headers?.['X-BL'] === undefined &&
+          req.headers?.['X-Website-Token'] === jdToken(req);
+        return { body: JSON.stringify(jd ? { status: 'ok', data: FOLDER } : { status: 'error-notPremium', data: {} }) };
+      },
     });
     const r = await plugin.crawl!('https://gofile.io/d/AbC123#file=f1', ctx);
     expect(r.files[0].name).toBe('a.part1.rar');
+    expect(seen).toHaveLength(2);
+    // The next call starts with the variant that worked.
+    await plugin.check!('https://gofile.io/d/AbC123#file=f2', ctx);
+    expect(seen).toHaveLength(3);
+    expect(seen[2]).toContain('?contentId=AbC123');
   });
 
   it('explains password-protected folders', async () => {
