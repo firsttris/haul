@@ -1471,8 +1471,8 @@ mod engine_tests {
         let id = e.package_ids(pkg).await.unwrap()[0];
         for _ in 0..100 {
             let d = db::get_download(&e.db, id).await.unwrap().unwrap();
-            if d.retry_at.is_some() {
-                let left = d.retry_at.unwrap() - now_ms();
+            if let Some(retry_at) = d.retry_at {
+                let left = retry_at - now_ms();
                 assert!((890_000..=900_000).contains(&left), "{left}");
                 assert_eq!((d.status.as_str(), d.attempts), (status::QUEUED, 0));
                 assert_eq!(d.error.as_deref(), Some("wait please"));
