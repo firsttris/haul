@@ -77,8 +77,8 @@ export interface Ctx {
   /**
    * Captchas the user solves in the browser, on the hoster's page (like JD's browser solver).
    * Waits until solved (up to 10 minutes) and returns the token for the form field
-   * (`g-recaptcha-response`, `h-captcha-response`, `cf-turnstile-response`). Throws when the
-   * user cancels or does not solve it in time.
+   * (`g-recaptcha-response`, `h-captcha-response`, `cf-turnstile-response`); for an image
+   * captcha, the text the user typed. Throws when the user cancels or does not solve it in time.
    */
   captcha: {
     solve(req: CaptchaRequest): Promise<string>;
@@ -109,18 +109,31 @@ export interface Ctx {
   };
 }
 
-export interface CaptchaRequest {
-  kind: 'recaptcha' | 'hcaptcha' | 'turnstile';
-  /** `data-sitekey` of the widget. */
-  siteKey: string;
-  /** The page that shows the captcha; the token is bound to its domain. */
-  pageUrl: string;
-  /** reCaptcha Enterprise. */
-  enterprise?: boolean;
-}
+/** Captchas solved with a widget on the hoster's page; the answer is a token. */
+export type TokenCaptchaKind = 'recaptcha' | 'hcaptcha' | 'turnstile';
+
+export type CaptchaRequest =
+  | {
+      kind: TokenCaptchaKind;
+      /** `data-sitekey` of the widget. */
+      siteKey: string;
+      /** The page that shows the captcha; the token is bound to its domain. */
+      pageUrl: string;
+      /** reCaptcha Enterprise. */
+      enterprise?: boolean;
+    }
+  | {
+      /** A picture with text: the core loads it with the plugin's cookies, the user types it in the UI. */
+      kind: 'image';
+      imageUrl: string;
+      /** The page with the picture (sent as Referer). */
+      pageUrl: string;
+      /** For loading the picture, e.g. the plugin's User-Agent. */
+      headers?: Record<string, string>;
+    };
 
 /** The token-captcha widget on a page, if any: kind and site key (JD's detection order). */
-export function findCaptcha(html: string): { kind: CaptchaRequest['kind']; siteKey: string } | undefined {
+export function findCaptcha(html: string): { kind: TokenCaptchaKind; siteKey: string } | undefined {
   const key = (cls: string) =>
     new RegExp(`class=["'][^"']*\\b${cls}\\b[^"']*["'][^>]*data-sitekey=["']([^"']+)["']`, 'i').exec(html)?.[1] ??
     new RegExp(`data-sitekey=["']([^"']+)["'][^>]*class=["'][^"']*\\b${cls}\\b`, 'i').exec(html)?.[1];
@@ -134,7 +147,7 @@ export function findCaptcha(html: string): { kind: CaptchaRequest['kind']; siteK
 }
 
 /** The form field a solved token goes into. */
-export const CAPTCHA_FIELD: Record<CaptchaRequest['kind'], string> = {
+export const CAPTCHA_FIELD: Record<TokenCaptchaKind, string> = {
   recaptcha: 'g-recaptcha-response',
   hcaptcha: 'h-captcha-response',
   turnstile: 'cf-turnstile-response',

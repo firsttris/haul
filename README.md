@@ -96,7 +96,9 @@ Das Userscript wird nur aktiv, wenn Haul die Seite mit einer Aufgabe im `#…`-T
 (der geht nie an den Hoster), und meldet sich mit einem Einmal-Geheimnis der Aufgabe. So lösen
 auch Web-Logins mit Captcha (ddownload: Turnstile) ohne den Umweg über das xfss-Cookie.
 Plugins fragen mit `await ctx.captcha.solve({ kind, siteKey, pageUrl })`; einfache Text-Captchas
-löst die XFS-Basis selbst, Bild-Captchas noch nicht.
+löst die XFS-Basis selbst. Bild-Captchas (XFS `/captchas/…`, JDs „Standard captcha“) zeigt Haul
+direkt im Hinweis, ohne Userscript: das Bild lädt der Server mit den Cookies des Plugins, du tippst
+den Text ab (`ctx.captcha.solve({ kind: 'image', imageUrl, pageUrl })`).
 
 ## Passwortgeschützte Dateien
 

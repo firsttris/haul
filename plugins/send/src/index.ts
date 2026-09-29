@@ -69,7 +69,7 @@ const xfs = definePlugin(
   createXfsPlugin({
     id: 'send',
     name: 'Send',
-    version: 3,
+    version: 4,
     // JD: getPluginDomains; usersfiles.com is dead (getDeadDomains), kept for old links.
     domains: DOMAINS,
     fileIdLength: 12,

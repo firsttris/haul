@@ -80,6 +80,59 @@ fn looks_like_file(headers: &reqwest::header::HeaderMap) -> bool {
             .any(|t| ct.contains(t))
 }
 
+/// Largest captcha picture taken; real ones are a few KB.
+const MAX_CAPTCHA_IMAGE: usize = 1024 * 1024;
+
+/// Loads an image captcha through the plugin's client (its cookie jar) as a `data:` URL.
+async fn fetch_image(
+    clients: &HttpClients,
+    req: &crate::captcha::CaptchaRequest,
+) -> Result<String> {
+    use base64::Engine;
+    let url = req
+        .image_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("no imageUrl"))?;
+    let mut rb = clients
+        .follow
+        .get(url)
+        .timeout(Duration::from_secs(30))
+        .header(reqwest::header::REFERER, &req.page_url);
+    for (k, v) in &req.headers {
+        rb = rb.header(k, v);
+    }
+    let resp = rb.send().await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("HTTP {}", resp.status()));
+    }
+    let declared = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.split(';').next().unwrap_or("").trim().to_lowercase());
+    let bytes = resp.bytes().await?;
+    if bytes.len() > MAX_CAPTCHA_IMAGE {
+        return Err(anyhow!("too big ({} bytes)", bytes.len()));
+    }
+    // By the bytes when the server sends no image type (XFS sends .jpg).
+    let sniffed = match bytes.as_ref() {
+        [0xFF, 0xD8, ..] => Some("image/jpeg"),
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [b'G', b'I', b'F', ..] => Some("image/gif"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    };
+    let mime = match (sniffed, declared.as_deref()) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(d)) if d.starts_with("image/") && d != "image/svg+xml" => d.to_string(),
+        _ => return Err(anyhow!("not an image")),
+    };
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    ))
+}
+
 async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
     let req: HttpReq = serde_json::from_str(raw)?;
     let client = if req.follow_redirects {
@@ -333,20 +386,28 @@ async fn invoke_inner(
                     }
                 })),
             )?;
-            let (a, d) = (asker.clone(), deadline.clone());
+            let (a, d, c) = (asker.clone(), deadline.clone(), clients.clone());
             g.set(
                 "__host_captcha",
                 Func::from(Async(move |req: String| {
                     let asker = a.clone();
                     let deadline = d.clone();
+                    let clients = c.clone();
                     async move {
                         let Some(asker) = asker else {
                             return serde_json::json!({ "error": "captchas are not available here" }).to_string();
                         };
-                        let req: crate::captcha::CaptchaRequest = match serde_json::from_str(&req) {
+                        let mut req: crate::captcha::CaptchaRequest = match serde_json::from_str(&req) {
                             Ok(r) => r,
                             Err(e) => return serde_json::json!({ "error": format!("bad captcha request: {e}") }).to_string(),
                         };
+                        if req.kind.eq_ignore_ascii_case("image") {
+                            // The picture belongs to the plugin's session: load it with its cookies.
+                            match fetch_image(&clients, &req).await {
+                                Ok(data) => req.image = Some(data),
+                                Err(e) => return serde_json::json!({ "error": format!("captcha image: {e:#}") }).to_string(),
+                            }
+                        }
                         {
                             let mut d = deadline.lock().unwrap();
                             *d += crate::captcha::TIMEOUT;
@@ -825,5 +886,98 @@ mod cookie_and_file_tests {
         .unwrap();
         // 20 MB would exceed the page limit: the file is recognised without reading it.
         assert_eq!(v["url"], "xfss=PASTED|xfss=RENEWED|xfss=RENEWED|true|0");
+    }
+
+    /// An image captcha is loaded with the plugin's cookies and shown as a data: URL; the typed
+    /// text is the answer.
+    #[tokio::test]
+    async fn image_captcha_uses_the_session() {
+        // The picture only for the session that loaded the page (like XFS).
+        let app = axum::Router::new()
+            .route(
+                "/page",
+                get(|| async { ([(header::SET_COOKIE, "sess=S1; Path=/")], "page") }),
+            )
+            .route(
+                "/captchas/abc.jpg",
+                get(|h: HeaderMap| async move {
+                    let ok = h
+                        .get(header::COOKIE)
+                        .is_some_and(|v| v.to_str().unwrap().contains("sess=S1"))
+                        && h.get(header::REFERER).is_some()
+                        && h.get(header::USER_AGENT).is_some_and(|v| v == "PluginUA");
+                    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+                    if ok {
+                        (axum::http::StatusCode::OK, jpeg)
+                    } else {
+                        (axum::http::StatusCode::FORBIDDEN, Vec::new())
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let jar: Arc<CookieStoreMutex> = Arc::default();
+        let build = || {
+            Client::builder()
+                .cookie_provider(jar.clone())
+                .build()
+                .unwrap()
+        };
+        let clients = HttpClients {
+            follow: build(),
+            no_follow: build(),
+            jar: Some(jar.clone()),
+        };
+        let captchas = Arc::new(crate::captcha::Captchas::new(crate::events::Events::new()));
+        let asker = crate::captcha::Asker {
+            captchas: captchas.clone(),
+            plugin_id: "c".into(),
+            plugin_name: "C".into(),
+            link: Some(format!("{base}/file")),
+            name: None,
+            password: None,
+        };
+        let code = r#"
+            var __plugin = { default: { id: "c", version: 1, matches: [],
+                async resolve(base, ctx) {
+                    await ctx.http.get(base + "/page");
+                    const code = await ctx.captcha.solve({ kind: "image", imageUrl: base + "/captchas/abc.jpg",
+                        pageUrl: base + "/page", headers: { "User-Agent": "PluginUA" } });
+                    return { url: code };
+                },
+            }};
+        "#;
+        let solver = tokio::spawn({
+            let captchas = captchas.clone();
+            async move {
+                loop {
+                    if let Some(v) = captchas.list().pop() {
+                        assert_eq!(v.kind, "image");
+                        assert_eq!(
+                            v.image.as_deref(),
+                            Some("data:image/jpeg;base64,/9j/4AECAw==")
+                        );
+                        assert!(captchas.solve(&v.id, &v.secret, " x7k2 "));
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        });
+        let v = invoke_with(
+            "c",
+            code,
+            "resolve",
+            serde_json::json!([base]),
+            serde_json::json!({}),
+            clients,
+            Some(asker),
+        )
+        .await
+        .unwrap();
+        solver.await.unwrap();
+        assert_eq!(v["url"], "x7k2");
     }
 }

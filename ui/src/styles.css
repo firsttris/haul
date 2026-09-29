@@ -1051,6 +1051,13 @@ pre.code {
   gap: 8px;
   font-size: 13px;
 }
+.captcha-image {
+  height: 48px;
+  max-width: 220px;
+  border-radius: 6px;
+  background: #fff;
+  image-rendering: auto;
+}
 .input.small {
   height: 36px;
   width: 220px;

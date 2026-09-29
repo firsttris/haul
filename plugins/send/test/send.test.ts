@@ -136,12 +136,32 @@ describe('send', () => {
     expect(ctx.captchas).toEqual([{ kind: 'recaptcha', siteKey: '6Lx', pageUrl: LINK }]);
   });
 
-  it('stops on image captchas', async () => {
+  it('has the user type an image captcha (JD "Standard captcha")', async () => {
+    const posts: HttpRequest[] = [];
     const ctx = fakeCtx({
       'GET https://send.now/abcdefghijkl': { body: PAGE1 },
-      'POST https://send.now/abcdefghijkl': { body: PAGE2('<img src="/captchas/abc.jpg">') },
+      'POST https://send.now/abcdefghijkl': (req) => {
+        posts.push(req);
+        if (req.form?.op === 'download1') return { body: PAGE2('<img src="/captchas/abc123.jpg">') };
+        return { status: 302, headers: { location: CDN } };
+      },
     });
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal', message: expect.stringContaining('Bild-Captcha') });
+    ctx.captchaToken = 'x7k2';
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas).toEqual([{ kind: 'image', imageUrl: 'https://send.now/captchas/abc123.jpg', pageUrl: LINK, headers: undefined }]);
+    expect(posts[1].form).toMatchObject({ op: 'download2', code: 'x7k2' });
+  });
+
+  it('takes an absolute captcha picture link first', async () => {
+    const ctx = fakeCtx({
+      'GET https://send.now/abcdefghijkl': { body: PAGE1 },
+      'POST https://send.now/abcdefghijkl': (req) =>
+        req.form?.op === 'download1'
+          ? { body: PAGE2('<img src="https://img.send.now/captchas/q9.png?x=1&amp;y=2">') }
+          : { status: 302, headers: { location: CDN } },
+    });
+    await plugin.resolve(LINK, ctx);
+    expect(ctx.captchas[0]).toMatchObject({ kind: 'image', imageUrl: 'https://img.send.now/captchas/q9.png?x=1&y=2' });
   });
 
   it('knows its offline and premium-only pages', async () => {

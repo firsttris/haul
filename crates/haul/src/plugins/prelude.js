@@ -84,9 +84,11 @@
         solve: async function (req) {
           var r = JSON.parse(await __host_captcha(JSON.stringify({
             kind: String(req.kind),
-            siteKey: String(req.siteKey),
+            siteKey: req.siteKey ? String(req.siteKey) : '',
             pageUrl: String(req.pageUrl),
             enterprise: !!req.enterprise,
+            imageUrl: req.imageUrl ? String(req.imageUrl) : undefined,
+            headers: toHeaderMap(req.headers),
           })));
           if (r.token) return r.token;
           var e = new Error(r.error === 'cancelled'

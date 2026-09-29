@@ -26,9 +26,19 @@ pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptchaRequest {
-    /// `recaptcha`, `hcaptcha` or `turnstile`.
+    /// `recaptcha`, `hcaptcha`, `turnstile` or `image`.
     pub kind: String,
+    #[serde(default)]
     pub site_key: String,
+    /// Image captchas: where the picture is; the host loads it with the plugin's session.
+    #[serde(default)]
+    pub image_url: Option<String>,
+    /// Headers for loading the picture (the plugin's User-Agent).
+    #[serde(default)]
+    pub headers: std::collections::HashMap<String, String>,
+    /// The loaded picture as a `data:` URL, set by the host.
+    #[serde(skip)]
+    pub image: Option<String>,
     /// The page with the captcha: its domain is what the token is bound to.
     pub page_url: String,
     /// reCaptcha Enterprise (another script).
@@ -50,6 +60,8 @@ pub struct CaptchaView {
     pub page_url: String,
     pub host: String,
     pub enterprise: bool,
+    /// Image captchas: the picture as a `data:` URL; the user types what it shows.
+    pub image: Option<String>,
     /// The link the plugin works on.
     pub link: Option<String>,
     /// The download's name, for a password question.
@@ -142,12 +154,23 @@ impl Captchas {
     /// Waits until the user solved the captcha, cancelled it or `TIMEOUT` passed.
     pub async fn request(&self, asker: &Asker, req: CaptchaRequest) -> Result<String, String> {
         let kind = req.kind.to_lowercase();
-        if !["recaptcha", "hcaptcha", "turnstile"].contains(&kind.as_str()) {
+        if !["recaptcha", "hcaptcha", "turnstile", "image"].contains(&kind.as_str()) {
             return Err(format!("unknown captcha kind {kind}"));
         }
         let url = url::Url::parse(&req.page_url).map_err(|e| format!("page url: {e}"))?;
-        if !matches!(url.scheme(), "http" | "https") || req.site_key.trim().is_empty() {
-            return Err("captcha needs an http(s) page and a site key".into());
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err("captcha needs an http(s) page".into());
+        }
+        if kind == "image" {
+            if !req
+                .image
+                .as_deref()
+                .is_some_and(|i| i.starts_with("data:image/"))
+            {
+                return Err("image captcha without a picture".into());
+            }
+        } else if req.site_key.trim().is_empty() {
+            return Err("captcha needs a site key".into());
         }
         let now = now_ms();
         let view = CaptchaView {
@@ -160,6 +183,7 @@ impl Captchas {
             page_url: req.page_url.clone(),
             host: url.host_str().unwrap_or_default().to_string(),
             enterprise: req.enterprise,
+            image: req.image,
             link: asker.link.clone(),
             name: None,
             wrong: false,
@@ -188,6 +212,7 @@ impl Captchas {
             page_url: link,
             host,
             enterprise: false,
+            image: None,
             link: asker.link.clone(),
             name: asker.name.clone(),
             wrong,
@@ -285,6 +310,9 @@ mod tests {
             site_key: "6Lkey".into(),
             page_url: "https://filekeeper.net/abc".into(),
             enterprise: false,
+            image_url: None,
+            headers: Default::default(),
+            image: None,
         }
     }
 

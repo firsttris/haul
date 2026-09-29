@@ -76,6 +76,9 @@ const de = {
     passwordLabel: (name: string) => `Passwort für ${name}`,
     passwordOk: 'OK',
     notifyPassword: (name: string) => `Passwort für ${name} gesucht`,
+    imageHint: 'Den Text aus dem Bild eintippen.',
+    imageAlt: 'Captcha-Bild',
+    imageLabel: 'Text aus dem Captcha-Bild',
     title: 'Captchas',
     intro:
       'reCaptcha, hCaptcha und Turnstile gelten nur auf der Seite des Hosters. Haul öffnet sie deshalb in deinem Browser, ' +
@@ -372,6 +375,9 @@ const en: Messages = {
     passwordLabel: (name) => `Password for ${name}`,
     passwordOk: 'OK',
     notifyPassword: (name) => `Password needed for ${name}`,
+    imageHint: 'Type the text shown in the picture.',
+    imageAlt: 'Captcha picture',
+    imageLabel: 'Text from the captcha picture',
     title: 'Captchas',
     intro:
       'reCaptcha, hCaptcha and Turnstile are only valid on the hoster’s own page. So Haul opens them in your browser, ' +

@@ -126,11 +126,13 @@ export interface Captcha {
   secret: string;
   pluginId: string;
   pluginName: string;
-  kind: 'recaptcha' | 'hcaptcha' | 'turnstile' | 'password';
+  kind: 'recaptcha' | 'hcaptcha' | 'turnstile' | 'image' | 'password';
   siteKey: string;
   pageUrl: string;
   host: string;
   enterprise: boolean;
+  /** Image captchas: the picture as a data: URL. */
+  image: string | null;
   link: string | null;
   /** Password questions: the download's name, and whether the last password was wrong. */
   name: string | null;

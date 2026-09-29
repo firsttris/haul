@@ -140,6 +140,17 @@ export function countdown(html: string): number | undefined {
 }
 
 /**
+ * JD's "Standard captcha" (XFS): the first http link containing `/captchas/`, else the relative
+ * `/captchas/<id>.jpg` resolved against the page.
+ */
+export function captchaImage(html: string, pageUrl?: string): string | undefined {
+  const abs = /https?:\/\/[^\s"'<>]+\/captchas\/[^\s"'<>]+/i.exec(html)?.[0];
+  if (abs) return decodeHtml(abs);
+  const rel = /(\/captchas\/[a-z0-9]+\.jpe?g)/i.exec(html)?.[1];
+  return rel && pageUrl ? resolveUrl(pageUrl, rel) : undefined;
+}
+
+/**
  * JD's "plaintext captcha" (ManiacMansion): digits as HTML entities in absolutely positioned
  * spans; ordered by `padding-left` they are the code.
  */
@@ -619,10 +630,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     return true;
   }
 
-  /** JD's handleCaptcha: the plain-text captcha is solved; anything else needs a human. */
   /**
-   * JD's handleCaptcha: the plain-text captcha is read from the page; reCaptcha, hCaptcha and
-   * Turnstile go to the user, who solves them in the browser on the hoster's page.
+   * JD's handleCaptcha: the plain-text captcha is read from the page; the "standard" image
+   * captcha (`/captchas/…`) is shown to the user in Haul; reCaptcha, hCaptcha and Turnstile go
+   * to the user, who solves them in the browser on the hoster's page.
    */
   async function solveCaptcha(ctx: Ctx, form: { html: string }, fields: Record<string, string>, page: HttpResponse) {
     if (form.html.includes(';background:#ccc;text-align')) {
@@ -632,13 +643,13 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       fields.code = code;
       return;
     }
-    await tokenCaptcha(ctx, form.html, fields, page);
-    if (/\/captchas\//i.test(form.html)) {
-      throw new PluginError('fatal', {
-        de: `${cfg.name}: Bild-Captcha (noch nicht unterstützt)`,
-        en: `${cfg.name}: image captcha (not supported yet)`,
-      });
+    const image = /\/captchas\//i.test(form.html) || /\/captchas\//i.test(visible(page.body)) ? captchaImage(form.html) ?? captchaImage(visible(page.body), page.url) : undefined;
+    if (image) {
+      ctx.log.info(`${cfg.name}: Bild-Captcha – wartet auf Eingabe`);
+      fields.code = await ctx.captcha.solve({ kind: 'image', imageUrl: image, pageUrl: page.url, headers: cfg.headers });
+      return;
     }
+    await tokenCaptcha(ctx, form.html, fields, page);
   }
 
   /** A reCaptcha, hCaptcha or Turnstile widget in `html` (or the page): solved by the user. */

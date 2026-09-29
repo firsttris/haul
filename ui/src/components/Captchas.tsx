@@ -25,11 +25,13 @@ export function captchaUrl(c: Captcha, lang: string): string {
   return `${c.pageUrl.split('#')[0]}#${hash}`;
 }
 
-/** A download password question: typed here and sent like a captcha answer. */
-function PasswordRow({ c, now }: { c: Captcha; now: number }) {
+/** Answered right here: a download password, or the text of an image captcha. */
+function AnswerRow({ c, now }: { c: Captcha; now: number }) {
   const t = useT();
   const [value, setValue] = useState('');
   const name = c.name ?? c.link ?? c.host;
+  const minutes = Math.max(0, Math.ceil((c.expiresAt - now) / 60_000));
+  const isImage = c.kind === 'image';
   const answer = useMutation({ mutationFn: () => post('/captcha/solve', { id: c.id, secret: c.secret, token: value }) });
   const cancel = useMutation({ mutationFn: () => post(`/captchas/${c.id}/cancel`) });
 
@@ -40,16 +42,23 @@ function PasswordRow({ c, now }: { c: Captcha; now: number }) {
 
   return (
     <form className="captcha-row" onSubmit={submit}>
-      <span className="mono">
-        {t.captcha.passwordFor(name, c.pluginName, Math.max(0, Math.ceil((c.expiresAt - now) / 60_000)))}
-        {c.wrong && <strong> {t.captcha.passwordWrong}</strong>}
-        {c.link && c.link !== name && <span className="subtitle"> {c.link}</span>}
-      </span>
+      {isImage ? (
+        <>
+          <span className="mono">{t.captcha.item(c.host, c.pluginName, minutes)}</span>
+          {c.image && <img className="captcha-image" src={c.image} alt={t.captcha.imageAlt} />}
+        </>
+      ) : (
+        <span className="mono">
+          {t.captcha.passwordFor(name, c.pluginName, minutes)}
+          {c.wrong && <strong> {t.captcha.passwordWrong}</strong>}
+          {c.link && c.link !== name && <span className="subtitle"> {c.link}</span>}
+        </span>
+      )}
       <div className="spacer" />
       <input
-        type="password"
+        type={isImage ? 'text' : 'password'}
         className="input small"
-        aria-label={t.captcha.passwordLabel(name)}
+        aria-label={isImage ? t.captcha.imageLabel : t.captcha.passwordLabel(name)}
         autoComplete="off"
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -99,8 +108,10 @@ export function CaptchaBanner() {
   }, [data, t]);
 
   if (!data.length) return null;
-  const captchas = data.filter((c) => c.kind !== 'password');
   const passwords = data.filter((c) => c.kind === 'password');
+  const images = data.filter((c) => c.kind === 'image');
+  // reCaptcha, hCaptcha, Turnstile: solved on the hoster's page with the userscript.
+  const captchas = data.filter((c) => c.kind !== 'password' && c.kind !== 'image');
   return (
     <div className="captcha-banner" role="alert">
       {passwords.length > 0 && (
@@ -109,7 +120,16 @@ export function CaptchaBanner() {
         </div>
       )}
       {passwords.map((c) => (
-        <PasswordRow key={c.id} c={c} now={now} />
+        <AnswerRow key={c.id} c={c} now={now} />
+      ))}
+      {images.length > 0 && (
+        <div className="captcha-head">
+          <strong>{t.captcha.waiting(images.length)}</strong>
+          <span className="subtitle">{t.captcha.imageHint}</span>
+        </div>
+      )}
+      {images.map((c) => (
+        <AnswerRow key={c.id} c={c} now={now} />
       ))}
       {captchas.length > 0 && (
         <div className="captcha-head">
