@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { base64Decode, bilingual, cookiesFrom, OfflineError, pickLang, decodeHtml, match, parseForms, parseSize, resolveUrl } from './index';
+import { base64Decode, bilingual, cookiesFrom, findCaptcha, OfflineError, pickLang, decodeHtml, match, parseForms, parseSize, recaptchaKeyInCode, resolveUrl } from './index';
 import { fakeCtx } from './testing';
 
 describe('parseSize', () => {
@@ -71,5 +71,23 @@ describe('bilingual messages', () => {
     expect(pickLang(e.message, 'en')).toBe('Folder deleted');
     expect(pickLang(new OfflineError().message, 'de')).toBe('Datei offline');
     expect(new OfflineError('HTTP 410').message).toBe('HTTP 410');
+  });
+});
+
+describe('captcha site keys (JD AbstractRecaptchaV2.findNextSiteKey)', () => {
+  const KEY = '6LcAbCdEfGhIjKlMnOpQrStU';
+  it('finds the widget, the render call and the fallback iframe', () => {
+    expect(findCaptcha(`<div class="g-recaptcha" data-sitekey="${KEY}"></div>`)).toEqual({ kind: 'recaptcha', siteKey: KEY });
+    expect(recaptchaKeyInCode(`<script>grecaptcha.render('box', { 'sitekey' : '${KEY}', theme: 'dark' });</script>`)).toBe(KEY);
+    expect(recaptchaKeyInCode(`grecaptcha.enterprise.render(el, {sitekey: "${KEY}"})`)).toBe(KEY);
+    expect(recaptchaKeyInCode(`<iframe src="https://www.google.com/recaptcha/api/fallback?k=${KEY}"></iframe>`)).toBe(KEY);
+    expect(findCaptcha(`<noscript><iframe src="https://www.google.com/recaptcha/api/fallback?k=${KEY}"></iframe></noscript>`)?.siteKey).toBe(KEY);
+  });
+
+  it('leaves out v3 and keys that are no reCaptcha keys', () => {
+    // v3: nothing to solve by hand (JD: render=… in the script URL, grecaptcha.execute).
+    expect(recaptchaKeyInCode(`<script src="https://www.google.com/recaptcha/api.js?render=${KEY}"></script>`)).toBeUndefined();
+    expect(recaptchaKeyInCode(`grecaptcha.execute('${KEY}', { action: 'dl' })`)).toBeUndefined();
+    expect(recaptchaKeyInCode(`grecaptcha.render('box', { sitekey: 'not-a-key' })`)).toBeUndefined();
   });
 });

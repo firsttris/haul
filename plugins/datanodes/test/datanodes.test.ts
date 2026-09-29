@@ -77,6 +77,48 @@ describe('datanodes', () => {
     expect(ctx.captchas[0]).toMatchObject({ kind: 'recaptcha', siteKey: 'k' });
   });
 
+  it('finds a reCaptcha set up by a script (JD: g-recaptcha-response in the page)', async () => {
+    const key = '6LdDataNodesKey12345678';
+    const page2 = `<download-countdown countdown="2" rand="r"></download-countdown>
+      <textarea name="g-recaptcha-response" style="display:none"></textarea>
+      <script>grecaptcha.render('rc', { 'sitekey': '${key}' });</script>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) =>
+        req.form?.op === 'download1'
+          ? { body: page2 }
+          : (expect(req.form?.['g-recaptcha-response']).toBe('CAPTCHA-TOKEN'), { status: 302, headers: { location: CDN } }),
+    });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas[0]).toMatchObject({ kind: 'recaptcha', siteKey: key });
+  });
+
+  it('does not ask for a captcha because of an unrelated script', async () => {
+    const page2 = `<download-countdown countdown="2" rand="r"></download-countdown>
+      <script>grecaptcha.render('newsletter', { 'sitekey': '6LdNewsletterKey1234567' });</script>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) =>
+        req.form?.op === 'download1' ? { body: page2 } : { status: 302, headers: { location: CDN } },
+    });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas).toEqual([]);
+  });
+
+  it('sends method_free when it is a submit button (JD findFormDownload1Free)', async () => {
+    const page1 = `<form id="downloadForm" method="POST" action="">
+      <input type="hidden" name="op" value="download1"><input type="hidden" name="id" value="abcdefghijkl">
+      <input type="submit" name="method_free" value="Free Download &gt;&gt;"></form>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: page1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) =>
+        req.form?.op === 'download1'
+          ? (expect(req.form?.method_free).toBeTruthy(), { body: PAGE2_JS })
+          : { body: JSON.stringify({ url: CDN }) },
+    });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+  });
+
   it('knows its own errors', async () => {
     const domain = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: "<p> Not allowed from domain you're coming from</p>" } });
     await expect(plugin.resolve(LINK, domain)).rejects.toMatchObject({ haulKind: 'fatal' });

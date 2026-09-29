@@ -10,8 +10,14 @@
  * - a simple referer protection: every request says it comes from https://datanodes.to/users;
  * - "Not allowed from domain you're coming from", and "/premium" without any download form
  *   means premium only;
- * - no connection limit (JD getMaxChunks 0). reCaptcha only sometimes (JD handles it);
- *   Haul stops then with a message.
+ * - no connection limit (JD getMaxChunks 0);
+ * - captchas (JD handleCaptcha): `g-recaptcha-response` in the page means reCaptcha v2, which the
+ *   user solves in the browser; its key may also come from a script (`grecaptcha.render`), which
+ *   the XFS base searches then. Anything else goes the XFS default way.
+ * - download1 without a `method_free` value gets "Free Download" (JD findFormDownload1Free);
+ *   the XFS base does that for every site.
+ * Not taken over: JD gives Datanodes a random User-Agent (`UserAgents.generate()`, no reason in
+ * the source; the only JD plugin that does so).
  */
 import { decodeHtml, definePlugin, parseForms, PluginError } from '@haul/plugin-sdk';
 import { createXfsPlugin } from '@haul/plugin-sdk/xfs';
@@ -23,7 +29,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'datanodes',
     name: 'Datanodes',
-    version: 6,
+    version: 7,
     domains: ['datanodes.to'],
     fileIdLength: 12,
     accountRequired: false,

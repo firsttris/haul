@@ -20,7 +20,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'filekeeper',
     name: 'Filekeeper',
-    version: 1,
+    version: 2,
     domains: ['filekeeper.net'],
     fileIdLength: 12,
     accountRequired: false,

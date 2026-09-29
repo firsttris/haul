@@ -159,9 +159,27 @@ export function findCaptcha(html: string): { kind: TokenCaptchaKind; siteKey: st
   if (turnstile) return { kind: 'turnstile', siteKey: turnstile };
   const h = key('h-captcha');
   if (h) return { kind: 'hcaptcha', siteKey: h };
-  const g = key('g-recaptcha') ?? (/g-recaptcha|recaptcha\/api\.js/i.test(html) ? /data-sitekey=["']([^"']+)["']/i.exec(html)?.[1] : undefined);
+  const g =
+    key('g-recaptcha') ??
+    (/g-recaptcha|recaptcha\/api\.js/i.test(html) ? /data-sitekey=["']([^"']+)["']/i.exec(html)?.[1] : undefined) ??
+    recaptchaKeyInCode(html);
   if (g) return { kind: 'recaptcha', siteKey: g };
   return undefined;
+}
+
+/** JD AbstractRecaptchaV2.apiKeyRegex. */
+const RECAPTCHA_KEY = '6L[\\w-]{14,}';
+
+/**
+ * A reCaptcha v2 site key that is not in a `data-sitekey` attribute (JD AbstractRecaptchaV2
+ * findNextSiteKey): `grecaptcha.render(container, { sitekey: … })` in a script, or the
+ * no-JavaScript fallback iframe `…/recaptcha/api/fallback?k=…`. JD's v3 variants (`render=` in
+ * the script URL, `grecaptcha.execute(key)`) are left out: v3 has no widget to solve.
+ */
+export function recaptchaKeyInCode(html: string): string | undefined {
+  const render = /recaptcha(?:\.enterprise)?\.render\s*\([^{;]*?,\s*\{([\s\S]*?)\}\s*\)/i.exec(html)?.[1];
+  const inRender = render && new RegExp(`(["']?)sitekey\\1\\s*:\\s*(["']?)\\s*(${RECAPTCHA_KEY})\\s*\\2`, 'i').exec(render)?.[3];
+  return inRender || new RegExp(`google\\.com/recaptcha/(?:api|enterprise)/fallback\\?k=(${RECAPTCHA_KEY})`, 'i').exec(html)?.[1];
 }
 
 /** The form field a solved token goes into. */

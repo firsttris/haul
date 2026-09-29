@@ -35,6 +35,7 @@ import {
   CAPTCHA_FIELD,
   decodeHtml,
   findCaptcha,
+  recaptchaKeyInCode,
   HosterLimitError,
   PluginError,
 } from './index';
@@ -687,9 +688,20 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     await tokenCaptcha(ctx, form.html, fields, page);
   }
 
+  /**
+   * A reCaptcha set up by a script (`grecaptcha.render`), which `visible` strips: searched only
+   * when the page has the response field (JD DatanodesTo.handleCaptcha: `g-recaptcha-response`
+   * in the page means reCaptcha v2), so a script elsewhere on the page never asks for nothing.
+   */
+  function scriptRecaptcha(body: string): { kind: 'recaptcha'; siteKey: string } | undefined {
+    if (!/g-recaptcha-response/i.test(body)) return undefined;
+    const siteKey = recaptchaKeyInCode(body.replace(/<!--[\s\S]*?-->/g, ''));
+    return siteKey ? { kind: 'recaptcha', siteKey } : undefined;
+  }
+
   /** A reCaptcha, hCaptcha or Turnstile widget in `html` (or the page): solved by the user. */
   async function tokenCaptcha(ctx: Ctx, html: string, fields: Record<string, string>, page: HttpResponse): Promise<boolean> {
-    const found = findCaptcha(html) ?? findCaptcha(visible(page.body));
+    const found = findCaptcha(html) ?? findCaptcha(visible(page.body)) ?? scriptRecaptcha(page.body);
     if (!found) return false;
     ctx.log.info(`${cfg.name}: ${found.kind} – wartet auf Lösung im Browser`);
     const token = await ctx.captcha.solve({ kind: found.kind, siteKey: found.siteKey, pageUrl: page.url });

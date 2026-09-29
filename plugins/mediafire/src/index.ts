@@ -417,7 +417,7 @@ function download(url: string, ua: string, referer: string) {
 export default definePlugin({
   id: 'mediafire',
   name: 'Mediafire',
-  version: 4,
+  version: 5,
   matches: [new RegExp(`^https?://${HOSTS}/.+`, 'i'), /^https?:\/\/download\d+\.mediafire(?:cdn)?\.com\//i],
   accountRequired: false,
   account: {
