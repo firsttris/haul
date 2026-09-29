@@ -15,7 +15,7 @@ import { IconArchive, IconChevron, IconFolder, IconPause, IconPlay, IconPlus, Ic
 import { describe, isActive, isWaiting, toneColor } from '../components/status';
 import { useLive, type LiveProgress } from '../live';
 import { bytes, duration, percent, speed } from '../format';
-import { useT } from '../i18n';
+import { localize, useT } from '../i18n';
 
 type Filter = 'all' | 'active' | 'waiting' | 'finished' | 'failed';
 
@@ -135,7 +135,7 @@ export function DownloadsPage() {
           if (row.original.kind !== 'dl') return null;
           const s = describe(row.original.d, t);
           return (
-            <div className="status" style={{ color: toneColor[s.tone].color }} title={row.original.d.error ?? s.label}>
+            <div className="status" style={{ color: toneColor[s.tone].color }} title={localize(row.original.d.error) ?? s.label}>
               <span className="dot" style={{ background: toneColor[s.tone].color }} />
               <span>{s.label}</span>
             </div>
@@ -392,7 +392,7 @@ function PackageRow({
       <div className="meta">
         {t.common.files(n)} · {bytes(total)} · {percent(done, total)} %
         {extract && (
-          <span style={{ color: pkg.extract === 'failed' ? 'var(--err)' : undefined }} title={pkg.extractError ?? undefined}>
+          <span style={{ color: pkg.extract === 'failed' ? 'var(--err)' : undefined }} title={localize(pkg.extractError) ?? undefined}>
             {' '}
             · {extract}
           </span>
@@ -438,7 +438,7 @@ function PackageRow({
     </div>
     {pkg.extract === 'failed' && (
       <div className="pkg-error" role="row">
-        <span role="alert">{pkg.extractError ?? t.pkg.extractFailed}</span>
+        <span role="alert">{localize(pkg.extractError) ?? t.pkg.extractFailed}</span>
         <button type="button" className="btn small" onClick={() => onAction(`/packages/${pkg.id}/extract`)}>
           <IconArchive size={16} />
           {t.pkg.extractAgain}

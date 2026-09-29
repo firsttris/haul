@@ -156,6 +156,22 @@ export function definePlugin<T extends PluginDefinition>(plugin: T): T {
   return plugin;
 }
 
+/**
+ * A message in German and English for errors: the UI shows the viewer's language. Framed with
+ * control characters (`\u0002` de `\u001f` en `\u0003`), so it can sit inside other text.
+ */
+export function t(de: string, en: string): string {
+  const clean = (s: string) => s.replace(/[\u0002\u0003\u001f]/g, '');
+  return `\u0002${clean(de)}\u001f${clean(en)}\u0003`;
+}
+
+/** The text of `message` in one language, e.g. for tests and logs. */
+export function pickLang(message: string, lang: 'de' | 'en'): string {
+  return message.replace(/\u0002([^\u0003]*?)(?:\u001f([^\u0003]*))?(?:\u0003|$)/g, (_, de: string, en?: string) =>
+    lang === 'en' ? (en ?? de) : de,
+  );
+}
+
 type Kind = 'offline' | 'temporary' | 'account' | 'fatal';
 
 export class PluginError extends Error {
@@ -168,7 +184,7 @@ export class PluginError extends Error {
 
 /** The file is gone. The download fails without retry. */
 export class OfflineError extends PluginError {
-  constructor(message = 'Datei offline') {
+  constructor(message = t('Datei offline', 'File offline')) {
     super('offline', message);
   }
 }

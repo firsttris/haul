@@ -23,7 +23,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Satz, in denselben Ordner), Verschieben in andere Ordner, neuer Ordner, Archive löschen, Löschen
 
 - Weboberfläche auf Deutsch und Englisch (Browsersprache, umschaltbar unten in der Seitenleiste
-  und unter *Einstellungen*); Meldungen von Server und Hostern sind bisher deutsch
+  und unter *Einstellungen*), auch die Meldungen von Server und Hoster-Plugins
 
 **Bewusst nicht in v1:** Free-Downloads mit Captcha, DLC-Container, Multi-User, passwortgeschützte
 Gofile-Ordner.
@@ -160,6 +160,8 @@ export default definePlugin({
 });
 ```
 
+Meldungen schreibt ein Plugin zweisprachig mit `t('Datei offline', 'File offline')` aus
+`@haul/plugin-sdk`; die UI zeigt die gewählte Sprache (im Rust-Core entsprechend `tr!`).
 Texte für das Account-Formular (`account.userLabel`, `secretLabel`, `help`) sind ein String oder
 `{ de, en }`; die UI zeigt die gewählte Sprache.
 

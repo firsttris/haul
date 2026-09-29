@@ -1,6 +1,6 @@
 import type { Download } from '../api';
 import { duration } from '../format';
-import type { Messages } from '../i18n';
+import { localize, type Messages } from '../i18n';
 
 export type Tone = 'ok' | 'run' | 'wait' | 'err';
 
@@ -13,6 +13,7 @@ export const toneColor: Record<Tone, { color: string; bar: string }> = {
 
 export function describe(d: Download, t: Messages, now = Date.now()): { label: string; tone: Tone } {
   const s = t.status;
+  const error = localize(d.error);
   switch (d.status) {
     case 'finished':
       return { label: s.finished, tone: 'ok' };
@@ -27,11 +28,11 @@ export function describe(d: Download, t: Messages, now = Date.now()): { label: s
         ? { label: s.offline, tone: 'err' }
         : { label: d.online === 'online' ? s.online : s.unchecked, tone: d.online === 'online' ? 'ok' : 'wait' };
     case 'failed':
-      return { label: d.error || s.error, tone: 'err' };
+      return { label: error || s.error, tone: 'err' };
     case 'queued':
       if (d.retryAt && d.retryAt > now) {
         const next = s.retryIn(duration((d.retryAt - now) / 1000));
-        return { label: d.error ? `${next} · ${d.error}` : next, tone: 'err' };
+        return { label: error ? `${next} · ${error}` : next, tone: 'err' };
       }
       return { label: s.waiting, tone: 'wait' };
   }

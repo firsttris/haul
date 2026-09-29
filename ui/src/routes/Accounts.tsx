@@ -4,7 +4,7 @@ import { api, post, type Account, type PluginList } from '../api';
 import { PageHeader } from '../components/Layout';
 import { IconRefresh, IconTrash } from '../components/icons';
 import { bytes, date, dateTime } from '../format';
-import { pluginText, useLang, useT } from '../i18n';
+import { localize, pluginText, useLang, useT } from '../i18n';
 
 const statusColor: Record<Account['status'], string> = {
   unchecked: 'var(--muted-2)',
@@ -143,7 +143,7 @@ export function AccountsPage() {
                       {a.trafficLeft !== null ? t.accounts.trafficLeft(bytes(a.trafficLeft)) : ''}
                       {a.checkedAt ? t.accounts.checked(dateTime(a.checkedAt)) : ''}
                     </span>
-                    {a.error && <span className="sub" style={{ color: 'var(--err)' }}>{a.error}</span>}
+                    {a.error && <span className="sub" style={{ color: 'var(--err)' }}>{localize(a.error)}</span>}
                   </div>
                   <div className="status" style={{ color: s.color }}>
                     <span className="dot" style={{ background: s.color }} />
@@ -209,7 +209,7 @@ export function AccountsPage() {
           </div>
           {plugins.data?.errors.map((e) => (
             <div className="notice" key={e.file}>
-              <span className="mono">{e.file}</span>: {e.error}
+              <span className="mono">{e.file}</span>: {localize(e.error)}
             </div>
           ))}
         </section>

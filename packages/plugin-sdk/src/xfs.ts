@@ -26,6 +26,7 @@ import {
   parseForms,
   parseSize,
   resolveUrl,
+  t,
 } from './index';
 
 export interface XfsConfig {
@@ -145,14 +146,18 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   const directs = cfg.directLinkPatterns ?? directPatterns([...cfg.domains, ...(cfg.downloadHosts ?? [])]);
   const userApi = !!(cfg.apiBase && cfg.userApiKeys);
 
-  const cookieHelp =
+  const cookieHelp = t(
     `Im Browser bei ${host} anmelden, dann das Cookie „xfss“ kopieren ` +
-    `(Entwicklertools → Anwendung/Speicher → Cookies → ${host}) und im Account als Passwort ` +
-    `„xfss=…“ eintragen.`;
+      `(Entwicklertools → Anwendung/Speicher → Cookies → ${host}) und im Account als Passwort ` +
+      `„xfss=…“ eintragen.`,
+    `Log in at ${host} in the browser, then copy the cookie “xfss” ` +
+      `(developer tools → Application/Storage → Cookies → ${host}) and enter it as the account password ` +
+      `“xfss=…”.`,
+  );
 
   const fileId = (link: string): string => {
     const m = linkRe.exec(link);
-    if (!m) throw new OfflineError('Link hat kein gültiges Dateikennzeichen');
+    if (!m) throw new OfflineError(t('Link hat kein gültiges Dateikennzeichen', 'The link has no valid file id'));
     return m[1].toLowerCase();
   };
   const fileUrl = (link: string) => `${base}/${fileId(link)}`;
@@ -226,10 +231,19 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   function assertOnline(res: HttpResponse) {
     const html = visible(res.body);
     if (res.status === 404 || offline.some((p) => p.test(html))) throw new OfflineError();
-    if (isCloudflare(res)) throw new TemporaryError(`${cfg.name}: Cloudflare-Prüfung, später erneut`);
-    if (/>\s*This server is in maintenance mode/i.test(html)) throw new TemporaryError(`${cfg.name}: Server in Wartung`);
+    if (isCloudflare(res)) {
+      throw new TemporaryError(t(`${cfg.name}: Cloudflare-Prüfung, später erneut`, `${cfg.name}: Cloudflare check, trying later`));
+    }
+    if (/>\s*This server is in maintenance mode/i.test(html)) {
+      throw new TemporaryError(t(`${cfg.name}: Server in Wartung`, `${cfg.name}: server under maintenance`));
+    }
     if (/>\s*Please enter your e-mail/i.test(html)) {
-      throw new AccountError(`${cfg.name}: im Account unter ${host}/?op=my_account eine E-Mail-Adresse eintragen`);
+      throw new AccountError(
+        t(
+          `${cfg.name}: im Account unter ${host}/?op=my_account eine E-Mail-Adresse eintragen`,
+          `${cfg.name}: add an e-mail address to the account at ${host}/?op=my_account`,
+        ),
+      );
     }
     if (res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status}`);
   }
@@ -243,13 +257,18 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       match(html, /((?:You have reached the download[- ]limit|You have to wait)[^<>]+)/i);
     if (limit) throw new AccountError(`${cfg.name}: ${limit}`);
     if (/premium only|only premium|available for Premium Users only|upgrade your account/i.test(html)) {
-      throw new AccountError(`${cfg.name}: Account ist nicht Premium`);
+      throw new AccountError(t(`${cfg.name}: Account ist nicht Premium`, `${cfg.name}: the account is not premium`));
     }
     const siteError = match(html, /class=["'][^"']*(?:\berr\b|alert-danger)[^"']*["'][^>]*>\s*([^<]{3,})</i);
-    const where = steps.length ? `nach ${steps.join(' → ')}` : 'kein Download-Formular';
-    const via = redirects.length ? `, weitergeleitet: ${redirects.map((r) => r.replace(/^https?:\/\/[^/]+/, '')).join(' → ')}` : '';
+    const path = steps.join(' → ');
+    const hops = redirects.map((r) => r.replace(/^https?:\/\/[^/]+/, '')).join(' → ');
     throw new TemporaryError(
-      `${cfg.name}: Direktlink nicht gefunden (${where}, HTTP ${res.status}${via}${siteError ? `, Seite: „${siteError}“` : ''})`,
+      t(
+        `${cfg.name}: Direktlink nicht gefunden (${steps.length ? `nach ${path}` : 'kein Download-Formular'}, HTTP ${res.status}` +
+          `${hops ? `, weitergeleitet: ${hops}` : ''}${siteError ? `, Seite: „${siteError}“` : ''})`,
+        `${cfg.name}: direct link not found (${steps.length ? `after ${path}` : 'no download form'}, HTTP ${res.status}` +
+          `${hops ? `, redirected: ${hops}` : ''}${siteError ? `, page: “${siteError}”` : ''})`,
+      ),
     );
   }
 
@@ -264,10 +283,10 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     try {
       data = res.json();
     } catch {
-      throw new TemporaryError(`${cfg.name}-API: unerwartete Antwort (HTTP ${res.status})`);
+      throw new TemporaryError(t(`${cfg.name}-API: unerwartete Antwort (HTTP ${res.status})`, `${cfg.name} API: unexpected answer (HTTP ${res.status})`));
     }
     if (data.status === 403 || /invalid key|wrong key/i.test(data.msg || '')) {
-      throw new AccountError(`${cfg.name}-API: ungültiger API-Key`);
+      throw new AccountError(t(`${cfg.name}-API: ungültiger API-Key`, `${cfg.name} API: invalid API key`));
     }
     if (data.status === 404) throw new OfflineError();
     if (data.status !== 200) throw new TemporaryError(`${cfg.name}-API: ${data.msg || data.status}`);
@@ -282,11 +301,17 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   async function accountPage(ctx: Ctx, m: Mode): Promise<HttpResponse | null> {
     // Follow redirects: some sites move the account page; logged out ends on the login form.
     const res = await web(ctx, m).get(`${base}/?op=my_account`);
-    if (isCloudflare(res)) throw new TemporaryError(`${cfg.name}: Cloudflare-Prüfung, später erneut`);
-    if (res.status === 429 || res.status >= 500) throw new TemporaryError(`${cfg.name}: HTTP ${res.status} beim Prüfen der Anmeldung`);
+    if (isCloudflare(res)) {
+      throw new TemporaryError(t(`${cfg.name}: Cloudflare-Prüfung, später erneut`, `${cfg.name}: Cloudflare check, trying later`));
+    }
+    if (res.status === 429 || res.status >= 500) {
+      throw new TemporaryError(
+        t(`${cfg.name}: HTTP ${res.status} beim Prüfen der Anmeldung`, `${cfg.name}: HTTP ${res.status} while checking the login`),
+      );
+    }
     // Like JD: sites comment out the logout button for expired sessions, so ignore comments and scripts.
     if (res.status === 200 && !/op=login|\/login/i.test(res.url) && loggedIn(res)) return res;
-    lastAccountDetail = `Kontoseite: HTTP ${res.status}, ${res.url.replace(/^https?:\/\/[^/]+/, '')}`;
+    lastAccountDetail = t('Kontoseite', 'account page') + `: HTTP ${res.status}, ${res.url.replace(/^https?:\/\/[^/]+/, '')}`;
     return null;
   }
 
@@ -303,9 +328,12 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         const retry = await accountPage(ctx, m);
         if (retry) return retry;
       }
-      throw new AccountError(`${cfg.name}: Sitzungs-Cookie ungültig oder abgelaufen (${lastAccountDetail}). ${cookieHelp}`);
+      throw new AccountError(
+        t(`${cfg.name}: Sitzungs-Cookie ungültig oder abgelaufen`, `${cfg.name}: session cookie invalid or expired`) +
+          ` (${lastAccountDetail}). ${cookieHelp}`,
+      );
     }
-    if (m.kind !== 'password') throw new AccountError(`${cfg.name}: keine Web-Anmeldung möglich`);
+    if (m.kind !== 'password') throw new AccountError(t(`${cfg.name}: keine Web-Anmeldung möglich`, `${cfg.name}: web login not possible`));
 
     const loginUrl = `${base}${cfg.loginPath ?? '/login.html'}`;
     const page = await ctx.http.get(loginUrl);
@@ -320,13 +348,16 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const after = await accountPage(ctx, m);
     if (after) return after;
     if (/Incorrect Login or Password/i.test(res.body)) {
-      throw new AccountError(`${cfg.name}: Benutzername oder Passwort falsch`);
+      throw new AccountError(t(`${cfg.name}: Benutzername oder Passwort falsch`, `${cfg.name}: wrong user name or password`));
     }
-    if (/account (?:was|has been) banned/i.test(res.body)) throw new AccountError(`${cfg.name}: Account gesperrt`);
+    if (/account (?:was|has been) banned/i.test(res.body)) throw new AccountError(t(`${cfg.name}: Account gesperrt`, `${cfg.name}: account banned`));
     if (CAPTCHA_WORDS.test(form?.html ?? page.body)) {
-      throw new AccountError(`${cfg.name} verlangt beim Login ein Captcha, das Haul nicht lösen kann. ${cookieHelp}`);
+      throw new AccountError(
+        t(`${cfg.name} verlangt beim Login ein Captcha, das Haul nicht lösen kann.`, `${cfg.name} asks for a captcha at login that Haul cannot solve.`) +
+          ` ${cookieHelp}`,
+      );
     }
-    throw new AccountError(`${cfg.name}: Login fehlgeschlagen`);
+    throw new AccountError(t(`${cfg.name}: Login fehlgeschlagen`, `${cfg.name}: login failed`));
   }
 
   function accountInfo(html: string): AccountInfo {
@@ -346,13 +377,13 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       premium,
       trafficLeft,
       validUntil,
-      message: premium === false ? 'Account ist nicht Premium' : undefined,
+      message: premium === false ? t('Account ist nicht Premium', 'The account is not premium') : undefined,
     };
   }
 
   function currentMode(ctx: Ctx): Mode {
     const acc = ctx.account.get();
-    if (!acc) throw new AccountError(`${cfg.name}: kein Premium-Account hinterlegt`);
+    if (!acc) throw new AccountError(t(`${cfg.name}: kein Premium-Account hinterlegt`, `${cfg.name}: no premium account set up`));
     return mode(acc.user, acc.secret);
   }
 
@@ -410,7 +441,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
           key: m.key,
           file_code: id,
         });
-        if (!r || !r.url) throw new TemporaryError(`${cfg.name}-API lieferte keinen Direktlink`);
+        if (!r || !r.url) throw new TemporaryError(t(`${cfg.name}-API lieferte keinen Direktlink`, `${cfg.name} API returned no direct link`));
         return { url: r.url, name: r.name, size: r.size !== undefined ? Number(r.size) : undefined, maxConnections: cfg.maxConnections };
       }
 
@@ -448,13 +479,22 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
           if (!isSitePage(target) || directs.some((p) => p.test(`"${target}"`))) return direct(target);
           if (/[?&]op=payments|\/upgrade|\/premium/i.test(target)) {
             // JD's isPremiumOnlyURL: the site does not treat this session as premium right now.
+            const where = target.replace(/^https?:\/\/[^/]+/, '');
             throw new AccountError(
-              `${cfg.name} leitet zur Premium-Kaufseite um (${target.replace(/^https?:\/\/[^/]+/, '')}): ` +
-                'die Sitzung gilt dort gerade nicht als Premium (abgemeldet oder Sitzung erneuert).',
+              t(
+                `${cfg.name} leitet zur Premium-Kaufseite um (${where}): ` +
+                  'die Sitzung gilt dort gerade nicht als Premium (abgemeldet oder Sitzung erneuert).',
+                `${cfg.name} redirects to the premium sales page (${where}): ` +
+                  'the session does not count as premium there right now (logged out or session renewed).',
+              ),
             );
           }
           if (/op=login|\/login/i.test(target)) {
-            if (sessionChecked) throw new AccountError(`${cfg.name}: nach der Anmeldung wieder zur Login-Seite umgeleitet`);
+            if (sessionChecked) {
+              throw new AccountError(
+                t(`${cfg.name}: nach der Anmeldung wieder zur Login-Seite umgeleitet`, `${cfg.name}: redirected to the login page again after logging in`),
+              );
+            }
             await session(ctx, m);
             sessionChecked = true;
             res = await http.get(url, { followRedirects: false });

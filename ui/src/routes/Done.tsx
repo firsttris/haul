@@ -6,7 +6,7 @@ import { PageHeader, useStats } from '../components/Layout';
 import { IconArchive, IconChevron, IconFolder, IconPlus, IconTrash } from '../components/icons';
 import { useLive } from '../live';
 import { bytes, date } from '../format';
-import { useT, type Messages } from '../i18n';
+import { localize, useT, type Messages } from '../i18n';
 
 type State = { label: string; tone: 'ok' | 'warn' | 'err' | 'muted' };
 
@@ -305,7 +305,7 @@ export function DonePage() {
             {t.done.extractingHere(here)}
           </div>
         )}
-        {data?.error && <div className="notice" role="alert">{data.error}</div>}
+        {data?.error && <div className="notice" role="alert">{localize(data.error)}</div>}
 
         <div className="table">
           <div className="table-scroll">
@@ -342,7 +342,7 @@ export function DonePage() {
             {entries.map((e) => {
               const state = folderState(e, path === '', t);
               const progress = live.extractPaths.get(e.path) ?? e.extracting ?? undefined;
-              const error = e.error ?? e.package?.extractError ?? null;
+              const error = localize(e.error ?? e.package?.extractError ?? null);
               return (
                 <div key={e.path}>
                   <div className={`frow${selected.has(e.path) ? ' selected' : ''}`} role="row">

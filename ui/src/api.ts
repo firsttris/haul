@@ -1,4 +1,4 @@
-import type { PluginText } from './i18n';
+import { localize, type PluginText } from './i18n';
 
 export type Status = 'collected' | 'queued' | 'resolving' | 'downloading' | 'paused' | 'finished' | 'failed';
 
@@ -127,9 +127,12 @@ export interface AuthState {
 export class ApiError extends Error {
   constructor(
     public status: number,
-    message: string,
+    /** As sent by the server, possibly in both languages. */
+    public raw: string,
   ) {
-    super(message);
+    super(raw);
+    // Always in the language shown right now, also for errors kept in the query cache.
+    Object.defineProperty(this, 'message', { get: () => localize(this.raw) });
   }
 }
 

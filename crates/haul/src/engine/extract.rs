@@ -254,9 +254,12 @@ async fn extract_one(
         .filter(|t| t.kind != Kind::Unrar || is_rar(archive))
         .collect();
     if tools.is_empty() {
-        return Err(anyhow!(
+        return Err(anyhow!(crate::tr!(
             "kein Entpacker gefunden. Empfohlen: 7-Zip mit RAR-Modul, unter Ubuntu/Debian \
-             „sudo apt install 7zip 7zip-rar“ (alternativ „7zip unrar“); im Docker-Image ist alles enthalten"));
+             „sudo apt install 7zip 7zip-rar“ (alternativ „7zip unrar“); im Docker-Image ist alles enthalten",
+            "no extractor found. Recommended: 7-Zip with the RAR module, on Ubuntu/Debian \
+             “sudo apt install 7zip 7zip-rar” (or “7zip unrar”); the Docker image has everything"
+        )));
     }
     let mut candidates: Vec<String> = vec![String::new()];
     candidates.extend(passwords.iter().cloned());
@@ -279,7 +282,11 @@ async fn extract_one(
         .rev()
         .collect::<Vec<_>>()
         .join(" ");
-    Err(anyhow!("Entpacken fehlgeschlagen: {tail}"))
+    Err(anyhow!(crate::tr!(
+        "Entpacken fehlgeschlagen: {}",
+        "Extraction failed: {}",
+        tail
+    )))
 }
 
 impl Engine {
@@ -318,7 +325,7 @@ impl Engine {
     pub async fn extract_package(&self, package_id: i64) -> Result<()> {
         let pkg = db::get_package(&self.db, package_id)
             .await?
-            .ok_or_else(|| anyhow!("Paket nicht gefunden"))?;
+            .ok_or_else(|| anyhow!(crate::tr!("Paket nicht gefunden", "Package not found")))?;
         let dir = self.package_dir(&pkg);
         if find_archives(&files::file_names(&dir)).0.is_empty() {
             return Ok(());
@@ -416,14 +423,19 @@ impl Engine {
             } else {
                 let dir = path
                     .parent()
-                    .ok_or_else(|| anyhow!("ungültiger Pfad"))?
+                    .ok_or_else(|| anyhow!(crate::tr!("ungültiger Pfad", "invalid path")))?
                     .to_path_buf();
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let set = archive_set(&files::file_names(&dir), &name)
-                    .ok_or_else(|| anyhow!("{name} ist kein Archiv oder der erste Teil fehlt"))?;
+                let set = archive_set(&files::file_names(&dir), &name).ok_or_else(|| {
+                    anyhow!(crate::tr!(
+                        "{} ist kein Archiv oder der erste Teil fehlt",
+                        "{} is not an archive or its first part is missing",
+                        name
+                    ))
+                })?;
                 (dir, Some(set))
             };
             // A whole folder covers its sets; a set is only needed once.
@@ -439,14 +451,21 @@ impl Engine {
             }
         }
         if jobs.is_empty() {
-            anyhow::bail!("nichts zum Entpacken ausgewählt");
+            anyhow::bail!(crate::tr!(
+                "nichts zum Entpacken ausgewählt",
+                "nothing selected to extract"
+            ));
         }
         for (dir, _) in &jobs {
             if self
                 .extract_progress_of(&files::relative(&self.cfg.done_dir, dir))
                 .is_some()
             {
-                anyhow::bail!("in {} wird bereits entpackt", dir.display());
+                anyhow::bail!(crate::tr!(
+                    "in {} wird bereits entpackt",
+                    "{} is already being extracted",
+                    dir.display()
+                ));
             }
         }
         let this = self.clone();

@@ -22,6 +22,7 @@ import {
   parseForms,
   PluginError,
   resolveUrl,
+  t as tr,
   TemporaryError,
 } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
@@ -68,7 +69,7 @@ export function parseLink(link: string): Target | undefined {
 
 function target(link: string): Target {
   const t = parseLink(link);
-  if (!t) throw new PluginError('fatal', `Mediafire-Link nicht erkannt: ${link}`);
+  if (!t) throw new PluginError('fatal', tr(`Mediafire-Link nicht erkannt: ${link}`, `Mediafire link not recognised: ${link}`));
   return t;
 }
 
@@ -115,7 +116,7 @@ async function api(ctx: Ctx, command: string, query: Record<string, string>): Pr
   const r = body.response;
   if (!r) throw new TemporaryError(`Mediafire-API: HTTP ${res!.status}`);
   if (r.result === 'Error') {
-    if (r.error !== undefined && NOT_FOUND.includes(r.error)) throw new OfflineError(`Mediafire: ${r.message ?? 'nicht gefunden'}`);
+    if (r.error !== undefined && NOT_FOUND.includes(r.error)) throw new OfflineError(`Mediafire: ${r.message ?? tr('nicht gefunden', 'not found')}`);
     throw new TemporaryError(`Mediafire-API: ${r.message ?? r.error}`);
   }
   return r;
@@ -171,30 +172,33 @@ function pageErrors(res: HttpResponse) {
   const errno = /[?&]errno=(\d+)/.exec(res.url)?.[1];
   if (errno) {
     const gone: Record<string, string> = {
-      '320': 'vom Uploader oder Mediafire entfernt',
-      '323': 'als gefährlich blockiert',
-      '326': 'von Google Safe Browsing als gefährlich erkannt',
-      '378': 'wegen Regelverstoß entfernt',
-      '380': 'per DMCA entfernt',
-      '382': 'Account des Uploaders gesperrt',
-      '386': 'wegen Regelverstoß blockiert',
-      '388': 'als urheberrechtlich geschützt erkannt',
+      '320': tr('vom Uploader oder Mediafire entfernt', 'removed by the uploader or Mediafire'),
+      '323': tr('als gefährlich blockiert', 'blocked as dangerous'),
+      '326': tr('von Google Safe Browsing als gefährlich erkannt', 'flagged as dangerous by Google Safe Browsing'),
+      '378': tr('wegen Regelverstoß entfernt', 'removed for a terms violation'),
+      '380': tr('per DMCA entfernt', 'removed by a DMCA request'),
+      '382': tr('Account des Uploaders gesperrt', 'the uploader’s account is suspended'),
+      '386': tr('wegen Regelverstoß blockiert', 'blocked for a terms violation'),
+      '388': tr('als urheberrechtlich geschützt erkannt', 'identified as copyrighted work'),
     };
     if (gone[errno]) throw new OfflineError(`Mediafire: ${gone[errno]}`);
-    if (errno === '394') throw new PluginError('fatal', 'Mediafire: verschlüsseltes Archiv, Download-Limit des Uploaders erreicht');
-    if (errno === '999') throw new PluginError('fatal', 'Mediafire: privat, nur der Besitzer kann laden');
-    throw new PluginError('fatal', `Mediafire: Fehlercode ${errno}`);
+    if (errno === '394') throw new PluginError(
+        'fatal',
+        tr('Mediafire: verschlüsseltes Archiv, Download-Limit des Uploaders erreicht', 'Mediafire: encrypted archive, the uploader’s download limit is reached'),
+      );
+    if (errno === '999') throw new PluginError('fatal', tr('Mediafire: privat, nur der Besitzer kann laden', 'Mediafire: private, only the owner can download'));
+    throw new PluginError('fatal', tr(`Mediafire: Fehlercode ${errno}`, `Mediafire: error code ${errno}`));
   }
-  if (/download_repair\.php/i.test(res.url)) throw new TemporaryError('Mediafire erzeugt einen neuen Download-Schlüssel');
+  if (/download_repair\.php/i.test(res.url)) throw new TemporaryError(tr('Mediafire erzeugt einen neuen Download-Schlüssel', 'Mediafire is generating a new download key'));
   const html = res.body;
   if (/class="error-title">\s*Temporarily Unavailable\s*<\/p>/i.test(html)) {
-    throw new TemporaryError('Mediafire: Datei vorübergehend nicht verfügbar');
+    throw new TemporaryError(tr('Mediafire: Datei vorübergehend nicht verfügbar', 'Mediafire: file temporarily unavailable'));
   }
   if (/class="error-title"[^>]*>\s*This download is currently unavailable\s*</i.test(html)) {
-    throw new TemporaryError('Mediafire: Download gerade nicht verfügbar');
+    throw new TemporaryError(tr('Mediafire: Download gerade nicht verfügbar', 'Mediafire: download currently unavailable'));
   }
   const ttl = limitTtl(html);
-  if (ttl) throw new TemporaryError(`Mediafire: Download-Limit dieser IP erreicht (${ttl} s)`);
+  if (ttl) throw new TemporaryError(tr(`Mediafire: Download-Limit dieser IP erreicht (${ttl} s)`, `Mediafire: download limit of this IP reached (${ttl} s)`));
 }
 
 const limitTtl = (html: string) => /var limitReachedTTL = (\d+);/.exec(html)?.[1];
@@ -254,7 +258,7 @@ export default definePlugin({
     const infos = await fileInfos(ctx, ids.filter((id) => !isFolderKey(id)));
     if (t.kind === 'file') {
       const f = infos.get(t.id);
-      if (!f || deleted(f)) throw new OfflineError('Mediafire: Datei nicht gefunden');
+      if (!f || deleted(f)) throw new OfflineError(tr('Mediafire: Datei nicht gefunden', 'Mediafire: file not found'));
       return { files: [{ url: t.direct ?? link, name: f.filename, size: sizeOf(f) }] };
     }
     for (const f of infos.values()) if (!deleted(f)) files.push({ url: fileUrl(f), name: f.filename, size: sizeOf(f) });
@@ -275,14 +279,14 @@ export default definePlugin({
 
   async resolve(link, ctx) {
     const t = target(link);
-    if (t.kind !== 'file') throw new PluginError('fatal', 'Mediafire: Ordner-Link, bitte neu hinzufügen');
+    if (t.kind !== 'file') throw new PluginError('fatal', tr('Mediafire: Ordner-Link, bitte neu hinzufügen', 'Mediafire: folder link, please add it again'));
     if (t.direct && (await directLinkWorks(ctx, t.direct, USER_AGENTS[0]))) {
       return download(t.direct, USER_AGENTS[0], SITE + '/');
     }
     const info = (await fileInfos(ctx, [t.id])).get(t.id);
-    if (!info || deleted(info)) throw new OfflineError('Mediafire: Datei nicht gefunden');
+    if (!info || deleted(info)) throw new OfflineError(tr('Mediafire: Datei nicht gefunden', 'Mediafire: file not found'));
     if (info.privacy && info.privacy !== 'public') {
-      throw new PluginError('fatal', 'Mediafire: private Datei, nur mit Berechtigung ladbar');
+      throw new PluginError('fatal', tr('Mediafire: private Datei, nur mit Berechtigung ladbar', 'Mediafire: private file, only downloadable with permission'));
     }
     const pageUrl = `${SITE}/file/${t.id}`;
     let ua = USER_AGENTS[0];
@@ -300,24 +304,24 @@ export default definePlugin({
       const form = parseForms(res.body).find((f) => /name="form_captcha"/i.test(f.html));
       if (!form) break;
       if (/g-recaptcha|h-captcha|cf-turnstile/i.test(form.html)) {
-        throw new TemporaryError('Mediafire verlangt gerade ein Captcha, später erneut');
+        throw new TemporaryError(tr('Mediafire verlangt gerade ein Captcha, später erneut', 'Mediafire asks for a captcha right now, trying later'));
       }
-      if (!/customCaptchaCheckbox/i.test(form.html)) throw new PluginError('fatal', 'Mediafire: unbekanntes Captcha');
+      if (!/customCaptchaCheckbox/i.test(form.html)) throw new PluginError('fatal', tr('Mediafire: unbekanntes Captcha', 'Mediafire: unknown captcha'));
       res = await ctx.http.post(resolveUrl(res.url, form.action || res.url), { ...form.fields, mf_captcha_response: '1' }, {
         headers: { 'User-Agent': ua, Referer: res.url },
       });
       if (res.file) return { ...download(res.url, ua, pageUrl), name: info.filename, size: sizeOf(info) };
     }
     if (/aria-labelledby\s*=\s*"passwordmsg"|class\s*=\s*"passwordPrompt"/i.test(res.body)) {
-      throw new PluginError('fatal', 'Mediafire: passwortgeschützte Datei (noch nicht unterstützt)');
+      throw new PluginError('fatal', tr('Mediafire: passwortgeschützte Datei (noch nicht unterstützt)', 'Mediafire: password-protected file (not supported yet)'));
     }
     if (/class="MalwareAdvisory"/i.test(res.body)) {
-      throw new PluginError('fatal', 'Mediafire: Datei als Schadsoftware markiert');
+      throw new PluginError('fatal', tr('Mediafire: Datei als Schadsoftware markiert', 'Mediafire: the file is flagged as malware'));
     }
     const url = findDownloadLink(res.body);
     if (!url) {
       pageErrors(res);
-      throw new PluginError('fatal', `Mediafire: Download-Link nicht gefunden (${res.url})`);
+      throw new PluginError('fatal', tr(`Mediafire: Download-Link nicht gefunden (${res.url})`, `Mediafire: download link not found (${res.url})`));
     }
     return { ...download(url, ua, res.url), name: info.filename, size: sizeOf(info) };
   },

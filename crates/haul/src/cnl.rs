@@ -23,10 +23,18 @@ type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
 /// hex. Key and IV are the same, AES-128-CBC without padding, `crypted` is Base64.
 pub fn decrypt_cnl2(crypted: &str, jk: &str) -> Result<Vec<String>> {
     let key_hex = eval_isolated(jk, "String(f())")?;
-    let key =
-        hex::decode(key_hex.trim()).map_err(|_| anyhow!("jk liefert keinen Hex-Schlüssel"))?;
+    let key = hex::decode(key_hex.trim()).map_err(|_| {
+        anyhow!(crate::tr!(
+            "jk liefert keinen Hex-Schlüssel",
+            "jk returns no hex key"
+        ))
+    })?;
     if key.len() != 16 {
-        return Err(anyhow!("Schlüssel hat {} statt 16 Bytes", key.len()));
+        return Err(anyhow!(crate::tr!(
+            "Schlüssel hat {} statt 16 Bytes",
+            "the key has {} instead of 16 bytes",
+            key.len()
+        )));
     }
     // Form decoding turns an unescaped '+' into a space.
     let cleaned: String = crypted
@@ -36,12 +44,23 @@ pub fn decrypt_cnl2(crypted: &str, jk: &str) -> Result<Vec<String>> {
         .collect();
     let mut data = base64::engine::general_purpose::STANDARD
         .decode(cleaned.trim())
-        .map_err(|e| anyhow!("crypted ist kein Base64: {e}"))?;
+        .map_err(|e| {
+            anyhow!(crate::tr!(
+                "crypted ist kein Base64: {}",
+                "crypted is not base64: {}",
+                e
+            ))
+        })?;
     let usable = data.len() - data.len() % 16;
     data.truncate(usable);
     let plain = Aes128CbcDec::new(key.as_slice().into(), key.as_slice().into())
         .decrypt_padded_mut::<NoPadding>(&mut data)
-        .map_err(|_| anyhow!("Entschlüsselung fehlgeschlagen"))?;
+        .map_err(|_| {
+            anyhow!(crate::tr!(
+                "Entschlüsselung fehlgeschlagen",
+                "decryption failed"
+            ))
+        })?;
     let text = String::from_utf8_lossy(plain).replace('\0', "");
     Ok(parse_links(&text))
 }

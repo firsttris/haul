@@ -196,7 +196,7 @@ const de = {
     extractors: 'Entpacker',
     noExtractor: 'keiner gefunden: sudo apt install 7zip 7zip-rar',
     language: 'Sprache',
-    languageHelp: 'Gilt für diesen Browser. Meldungen von Server und Hostern sind auf Deutsch.',
+    languageHelp: 'Gilt für diesen Browser, auch für Meldungen von Server und Hostern.',
     cnlTitle: "Click'n'Load vom Desktop",
     cnlIntroA: 'Webseiten schicken Links an',
     cnlIntroB: 'des Browser-Rechners. Dort leitet',
@@ -455,7 +455,7 @@ const en: Messages = {
     extractors: 'Extractors',
     noExtractor: 'none found: sudo apt install 7zip 7zip-rar',
     language: 'Language',
-    languageHelp: 'Applies to this browser. Messages from the server and hosters are in German.',
+    languageHelp: 'Applies to this browser, including messages from the server and hosters.',
     cnlTitle: "Click'n'Load from the desktop",
     cnlIntroA: 'Web pages send links to',
     cnlIntroB: 'on the browser’s machine. There',
@@ -584,11 +584,25 @@ export function currentMessages(): Messages {
   return messages[current];
 }
 
+/**
+ * A message from the server or a plugin in the viewer's language. Messages carry both languages
+ * as `\u0002` de `\u001f` en `\u0003`, possibly inside other text; plain text stays as it is.
+ */
+export function localize(text: string, lang?: Lang): string;
+export function localize(text: string | null | undefined, lang?: Lang): string | null;
+export function localize(text: string | null | undefined, lang: Lang = current): string | null {
+  if (text == null) return null;
+  if (!text.includes('\u0002')) return text;
+  return text.replace(/\u0002([^\u0003]*?)(?:\u001f([^\u0003]*))?(?:\u0003|$)/g, (_, de: string, en?: string) =>
+    lang === 'en' ? (en ?? de) : de,
+  );
+}
+
 /** A text from a plugin: plain, or one per language (`{ de, en }`). */
 export type PluginText = string | Partial<Record<Lang, string>>;
 
 export function pluginText(text: PluginText | null | undefined, lang: Lang): string | undefined {
   if (text == null) return undefined;
-  if (typeof text === 'string') return text;
+  if (typeof text === 'string') return localize(text, lang);
   return text[lang] ?? text.en ?? text.de ?? Object.values(text)[0];
 }

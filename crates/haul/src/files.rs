@@ -16,16 +16,19 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf> {
     for c in rel_path.components() {
         match c {
             Component::Normal(_) | Component::CurDir => {}
-            _ => bail!("ungültiger Pfad"),
+            _ => bail!(crate::tr!("ungültiger Pfad", "invalid path")),
         }
     }
     let root = root.canonicalize()?;
     let full = root
         .join(rel_path)
         .canonicalize()
-        .map_err(|_| anyhow!("nicht gefunden: {rel}"))?;
+        .map_err(|_| anyhow!(crate::tr!("nicht gefunden: {}", "not found: {}", rel)))?;
     if !full.starts_with(&root) {
-        bail!("Pfad liegt außerhalb des Fertig-Ordners");
+        bail!(crate::tr!(
+            "Pfad liegt außerhalb des Fertig-Ordners",
+            "path is outside the done folder"
+        ));
     }
     Ok(full)
 }
@@ -34,7 +37,10 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf> {
 pub fn resolve_entry(root: &Path, rel: &str) -> Result<PathBuf> {
     let full = resolve(root, rel)?;
     if full == root.canonicalize()? {
-        bail!("der Fertig-Ordner selbst kann nicht bearbeitet werden");
+        bail!(crate::tr!(
+            "der Fertig-Ordner selbst kann nicht bearbeitet werden",
+            "the done folder itself cannot be changed"
+        ));
     }
     Ok(full)
 }
@@ -167,7 +173,7 @@ pub fn valid_name(name: &str) -> Result<&str> {
         || name.len() > 255
         || name.contains(['/', '\\', '\0'])
     {
-        bail!("ungültiger Name");
+        bail!(crate::tr!("ungültiger Name", "invalid name"));
     }
     Ok(name)
 }
@@ -194,14 +200,17 @@ pub fn free_name(dir: &Path, name: &str) -> PathBuf {
 /// gets a suffix; a folder cannot go into itself.
 pub async fn move_within(src: &Path, dest_dir: &Path) -> Result<PathBuf> {
     if dest_dir.starts_with(src) {
-        bail!("ein Ordner kann nicht in sich selbst verschoben werden");
+        bail!(crate::tr!(
+            "ein Ordner kann nicht in sich selbst verschoben werden",
+            "a folder cannot be moved into itself"
+        ));
     }
     if src.parent() == Some(dest_dir) {
         return Ok(src.to_path_buf());
     }
     let name = src
         .file_name()
-        .ok_or_else(|| anyhow!("ungültiger Pfad"))?
+        .ok_or_else(|| anyhow!(crate::tr!("ungültiger Pfad", "invalid path")))?
         .to_string_lossy()
         .to_string();
     let dest = free_name(dest_dir, &name);

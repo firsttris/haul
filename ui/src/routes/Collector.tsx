@@ -6,7 +6,7 @@ import { PageHeader, usePackages } from '../components/Layout';
 import { IconPlay, IconRefresh, IconTrash } from '../components/icons';
 import { describe, toneColor } from '../components/status';
 import { bytes } from '../format';
-import { useT } from '../i18n';
+import { localize, useT } from '../i18n';
 
 function AddLinksForm() {
   const t = useT();
@@ -143,7 +143,7 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
               </div>
               <span className="pill">{d.pluginId ?? 'http'}</span>
               <span className="cell-mono" style={{ width: 80 }}>{bytes(d.size)}</span>
-              <div className="status" style={{ color: toneColor[s.tone].color, width: 140 }} title={d.error ?? s.label}>
+              <div className="status" style={{ color: toneColor[s.tone].color, width: 140 }} title={localize(d.error) ?? s.label}>
                 <span className="dot" style={{ background: toneColor[s.tone].color }} />
                 <span>{s.label}</span>
               </div>

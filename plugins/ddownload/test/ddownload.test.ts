@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fakeCtx } from '@haul/plugin-sdk/testing';
-import type { HttpRequest } from '@haul/plugin-sdk';
+import { pickLang, type HttpRequest } from '@haul/plugin-sdk';
 import plugin from '../src/index';
 
 const LINK = 'https://ddownload.com/abcdefghijkl/Some.File.part1.rar';
@@ -202,10 +202,10 @@ describe('ddownload', () => {
       },
       { id: 1, user: 'bob', secret: 'xfss=OLD' },
     );
-    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
-      haulKind: 'account',
-      message: expect.stringContaining('Kontoseite: HTTP 302'),
-    });
+    const err = await plugin.resolve(LINK, ctx).catch((e) => e);
+    expect(err.haulKind).toBe('account');
+    expect(pickLang(err.message, 'de')).toContain('Sitzungs-Cookie ungültig oder abgelaufen (Kontoseite: HTTP 302');
+    expect(pickLang(err.message, 'en')).toContain('session cookie invalid or expired (account page: HTTP 302');
   });
 
   it('names the redirects when nothing is found', async () => {

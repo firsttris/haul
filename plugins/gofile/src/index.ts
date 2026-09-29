@@ -15,7 +15,7 @@
  *   only an expired link lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
  */
-import { definePlugin, OfflineError, PluginError, TemporaryError } from '@haul/plugin-sdk';
+import { definePlugin, OfflineError, PluginError, t, TemporaryError } from '@haul/plugin-sdk';
 import type { Ctx, CrawledFile, HttpResponse } from '@haul/plugin-sdk';
 
 const SITE = 'https://gofile.io';
@@ -61,7 +61,7 @@ interface Fragment {
 
 function folderCode(link: string): string {
   const m = LINK.exec(link);
-  if (!m) throw new PluginError('fatal', `kein Gofile-Link: ${link}`);
+  if (!m) throw new PluginError('fatal', t(`kein Gofile-Link: ${link}`, `not a Gofile link: ${link}`));
   return m[1];
 }
 
@@ -116,7 +116,7 @@ async function api(ctx: Ctx, send: () => Promise<HttpResponse>): Promise<ApiResp
     }
     return r;
   }
-  throw new TemporaryError('Gofile: Rate-Limit für Gäste erreicht, später erneut');
+  throw new TemporaryError(t('Gofile: Rate-Limit für Gäste erreicht, später erneut', 'Gofile: guest rate limit reached, trying later'));
 }
 
 function headers(token: string): Record<string, string> {
@@ -146,7 +146,7 @@ async function guestToken(ctx: Ctx): Promise<string> {
   if (saved) return saved;
   const r = await api(ctx, () => ctx.http.post(`${API}/accounts`, null, { json: {}, headers: headers('') }));
   const token = r.data?.token;
-  if (r.status !== 'ok' || !token) throw new TemporaryError(`Gofile: kein Gast-Token (${r.status})`);
+  if (r.status !== 'ok' || !token) throw new TemporaryError(t(`Gofile: kein Gast-Token (${r.status})`, `Gofile: no guest token (${r.status})`));
   ctx.cookies.set(SITE + '/', `${TOKEN_COOKIE}=${token}; Domain=gofile.io; Path=/; Max-Age=86400`);
   return token;
 }
@@ -164,17 +164,20 @@ async function contents(ctx: Ctx, code: string): Promise<{ data: Item; token: st
     );
     if (r.status !== 'error-notPremium') break;
   }
-  if (!r) throw new TemporaryError('Gofile: keine Antwort');
-  if (r.status === 'error-notFound') throw new OfflineError('Gofile: Ordner oder Datei gelöscht');
+  if (!r) throw new TemporaryError(t('Gofile: keine Antwort', 'Gofile: no answer'));
+  if (r.status === 'error-notFound') throw new OfflineError(t('Gofile: Ordner oder Datei gelöscht', 'Gofile: folder or file deleted'));
   if (r.status === 'error-notPremium') {
-    throw new PluginError('fatal', 'Gofile: Website-Token abgelehnt (Salt geändert?) oder nur mit Premium');
+    throw new PluginError(
+      'fatal',
+      t('Gofile: Website-Token abgelehnt (Salt geändert?) oder nur mit Premium', 'Gofile: website token rejected (salt changed?) or premium only'),
+    );
   }
   if (r.status !== 'ok') throw new TemporaryError(`Gofile: ${r.status}`);
   const data = r.data;
   if (data.passwordStatus === 'passwordRequired' || data.passwordStatus === 'passwordWrong') {
-    throw new PluginError('fatal', 'Gofile: Ordner ist passwortgeschützt (noch nicht unterstützt)');
+    throw new PluginError('fatal', t('Gofile: Ordner ist passwortgeschützt (noch nicht unterstützt)', 'Gofile: the folder is password protected (not supported yet)'));
   }
-  if (data.canAccess === false) throw new PluginError('fatal', 'Gofile: privater Ordner');
+  if (data.canAccess === false) throw new PluginError('fatal', t('Gofile: privater Ordner', 'Gofile: private folder'));
   return { data, token };
 }
 
@@ -269,15 +272,18 @@ export default definePlugin({
     const { data, token } = await contents(ctx, folderCode(link));
     const file = pick(data, link);
     if (!file) {
-      if (f.file) throw new OfflineError('Gofile: Datei nicht mehr im Ordner');
-      throw new PluginError('fatal', 'Gofile: Ordner mit mehreren Dateien, bitte den Link neu hinzufügen');
+      if (f.file) throw new OfflineError(t('Gofile: Datei nicht mehr im Ordner', 'Gofile: the file is no longer in the folder'));
+      throw new PluginError(
+        'fatal',
+        t('Gofile: Ordner mit mehreren Dateien, bitte den Link neu hinzufügen', 'Gofile: folder with several files, please add the link again'),
+      );
     }
     // JD refuses these too: the website offers no download for them.
     if (file.viruses && file.viruses.length) {
-      throw new PluginError('fatal', 'Gofile: Datei als Schadsoftware markiert');
+      throw new PluginError('fatal', t('Gofile: Datei als Schadsoftware markiert', 'Gofile: the file is flagged as malware'));
     }
     const url = file.link || file.directLink;
-    if (!url) throw new TemporaryError('Gofile: kein Download-Link');
+    if (!url) throw new TemporaryError(t('Gofile: kein Download-Link', 'Gofile: no download link'));
     return download(url, token, file);
   },
 });

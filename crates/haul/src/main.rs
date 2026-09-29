@@ -7,6 +7,7 @@ mod db;
 mod engine;
 mod events;
 mod files;
+mod i18n;
 mod plugins;
 mod ui;
 mod util;

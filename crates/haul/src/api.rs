@@ -42,7 +42,10 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
     pub fn not_found() -> Self {
-        Self::new(StatusCode::NOT_FOUND, "nicht gefunden")
+        Self::new(
+            StatusCode::NOT_FOUND,
+            crate::tr!("nicht gefunden", "not found"),
+        )
     }
 }
 
@@ -476,10 +479,16 @@ async fn create_account(
     Json(n): Json<NewAccount>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if app.engine.plugins.get(&n.plugin_id).is_none() {
-        return Err(ApiError::bad_request("unbekanntes Plugin"));
+        return Err(ApiError::bad_request(crate::tr!(
+            "unbekanntes Plugin",
+            "unknown plugin"
+        )));
     }
     if n.secret.is_empty() {
-        return Err(ApiError::bad_request("Passwort oder API-Key fehlt"));
+        return Err(ApiError::bad_request(crate::tr!(
+            "Passwort oder API-Key fehlt",
+            "password or API key missing"
+        )));
     }
     let secret = app.engine.secrets.encrypt(&n.secret)?;
     let id: i64 = sqlx::query_scalar(
@@ -581,7 +590,11 @@ pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
         return Ok(());
     };
     let Some(plugin) = engine.plugins.get(&acc.plugin_id) else {
-        anyhow::bail!("Plugin {} nicht geladen", acc.plugin_id);
+        anyhow::bail!(crate::tr!(
+            "Plugin {} nicht geladen",
+            "plugin {} not loaded",
+            acc.plugin_id
+        ));
     };
     if !plugin.has_check_account {
         return Ok(());
@@ -601,7 +614,10 @@ pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
             i.premium,
             None,
             None,
-            Some(i.message.unwrap_or_else(|| "Login fehlgeschlagen".into())),
+            Some(
+                i.message
+                    .unwrap_or_else(|| crate::tr!("Login fehlgeschlagen", "Login failed")),
+            ),
         ),
         Err(e) if e.kind == crate::plugins::ErrorKind::Account => {
             ("invalid", None, None, None, Some(e.message))
@@ -680,7 +696,10 @@ async fn list_files(
     tokio::fs::create_dir_all(&root).await?;
     let dir = crate::files::resolve(&root, &q.path).map_err(bad)?;
     if !dir.is_dir() {
-        return Err(ApiError::bad_request("kein Ordner"));
+        return Err(ApiError::bad_request(crate::tr!(
+            "kein Ordner",
+            "not a folder"
+        )));
     }
     let listing = {
         let (root, dir) = (root.clone(), dir.clone());
@@ -768,8 +787,10 @@ async fn delete_files(
         if app.engine.extract_progress_of(path).is_some()
             || app.engine.extract_progress_of(&folder).is_some()
         {
-            return Err(ApiError::bad_request(format!(
-                "{path}: wird gerade entpackt"
+            return Err(ApiError::bad_request(crate::tr!(
+                "{}: wird gerade entpackt",
+                "{}: extraction in progress",
+                path
             )));
         }
         crate::files::delete(&full)
@@ -798,8 +819,10 @@ async fn delete_archives(
             continue;
         }
         if app.engine.extract_progress_of(path).is_some() {
-            return Err(ApiError::bad_request(format!(
-                "{path}: wird gerade entpackt"
+            return Err(ApiError::bad_request(crate::tr!(
+                "{}: wird gerade entpackt",
+                "{}: extraction in progress",
+                path
             )));
         }
         let (_, all) = crate::engine::extract::find_archives(&crate::files::file_names(&dir));
@@ -832,7 +855,10 @@ async fn move_files(State(app): State<Arc<App>>, Json(b): Json<MoveBody>) -> Api
     let root = &app.engine.cfg.done_dir;
     let dest = crate::files::resolve(root, &b.to).map_err(bad)?;
     if !dest.is_dir() {
-        return Err(ApiError::bad_request("Ziel ist kein Ordner"));
+        return Err(ApiError::bad_request(crate::tr!(
+            "Ziel ist kein Ordner",
+            "the target is not a folder"
+        )));
     }
     let sources = b
         .paths
@@ -842,8 +868,10 @@ async fn move_files(State(app): State<Arc<App>>, Json(b): Json<MoveBody>) -> Api
         .map_err(bad)?;
     for (path, src) in b.paths.iter().zip(sources) {
         if app.engine.extract_progress_of(path).is_some() {
-            return Err(ApiError::bad_request(format!(
-                "{path}: wird gerade entpackt"
+            return Err(ApiError::bad_request(crate::tr!(
+                "{}: wird gerade entpackt",
+                "{}: extraction in progress",
+                path
             )));
         }
         crate::files::move_within(&src, &dest)
@@ -872,8 +900,10 @@ async fn make_folder(
     let name = crate::files::valid_name(&b.name).map_err(bad)?;
     let dir = parent.join(name);
     if dir.exists() {
-        return Err(ApiError::bad_request(format!(
-            "„{name}“ gibt es hier schon"
+        return Err(ApiError::bad_request(crate::tr!(
+            "„{}“ gibt es hier schon",
+            "“{}” already exists here",
+            name
         )));
     }
     tokio::fs::create_dir(&dir).await?;

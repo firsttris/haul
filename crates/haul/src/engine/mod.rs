@@ -406,7 +406,10 @@ impl Engine {
     pub async fn add_links(self: &Arc<Self>, req: AddLinks) -> Result<i64> {
         let links = parse_links(&req.links);
         if links.is_empty() {
-            return Err(anyhow!("keine gültigen Links gefunden"));
+            return Err(anyhow!(crate::tr!(
+                "keine gültigen Links gefunden",
+                "no valid links found"
+            )));
         }
         let (links, folder_name) = self.crawl_links(links).await;
         let names: Vec<String> = links
@@ -506,7 +509,7 @@ impl Engine {
                     }));
                 }
                 Ok(_) => out.push(NewLink {
-                    error: Some("Ordner ist leer".into()),
+                    error: Some(crate::tr!("Ordner ist leer", "Folder is empty")),
                     ..NewLink::plain(url)
                 }),
                 Err(e) => {

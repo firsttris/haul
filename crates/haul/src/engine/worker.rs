@@ -42,7 +42,7 @@ pub enum Failure {
 
 impl From<std::io::Error> for Failure {
     fn from(e: std::io::Error) -> Self {
-        Failure::Retry(format!("Dateifehler: {e}"))
+        Failure::Retry(crate::tr!("Dateifehler: {}", "File error: {}", e))
     }
 }
 
@@ -54,7 +54,7 @@ impl From<anyhow::Error> for Failure {
 
 impl From<sqlx::Error> for Failure {
     fn from(e: sqlx::Error) -> Self {
-        Failure::Retry(format!("Datenbankfehler: {e}"))
+        Failure::Retry(crate::tr!("Datenbankfehler: {}", "Database error: {}", e))
     }
 }
 
@@ -70,10 +70,18 @@ impl From<PluginError> for Failure {
 
 fn http_failure(code: StatusCode) -> Failure {
     match code.as_u16() {
-        404 | 410 => Failure::Offline(format!("Datei offline (HTTP {})", code.as_u16())),
-        403 => Failure::Retry("HTTP 403: Direktlink abgelaufen oder Zugriff verweigert".into()),
-        429 | 503 => Failure::Retry(format!(
+        404 | 410 => Failure::Offline(crate::tr!(
+            "Datei offline (HTTP {})",
+            "File offline (HTTP {})",
+            code.as_u16()
+        )),
+        403 => Failure::Retry(crate::tr!(
+            "HTTP 403: Direktlink abgelaufen oder Zugriff verweigert",
+            "HTTP 403: direct link expired or access denied"
+        )),
+        429 | 503 => Failure::Retry(crate::tr!(
             "HTTP {}: Server ausgelastet oder zu viele Verbindungen",
+            "HTTP {}: server busy or too many connections",
             code.as_u16()
         )),
         _ => Failure::Retry(format!("HTTP {}", code.as_u16())),
@@ -81,7 +89,7 @@ fn http_failure(code: StatusCode) -> Failure {
 }
 
 fn net_failure(e: reqwest::Error) -> Failure {
-    Failure::Retry(format!("Netzwerkfehler: {e}"))
+    Failure::Retry(crate::tr!("Netzwerkfehler: {}", "Network error: {}", e))
 }
 
 /// Where the bytes come from, after the plugin resolved the link.
@@ -191,7 +199,10 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
             d.online.as_str(),
             None,
             d.attempts + 1,
-            format!("{m} (nach {} Versuchen)", d.attempts + 1),
+            format!(
+                "{m} {}",
+                crate::tr!("(nach {} Versuchen)", "(after {} attempts)", d.attempts + 1)
+            ),
         ),
         Failure::Retry(m) => {
             let backoff = (10_000i64 << d.attempts.min(6)).min(600_000);
@@ -205,7 +216,12 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
         }
         Failure::Cancelled => return Ok(()),
     };
-    tracing::warn!(id, status = new_status, "download: {msg}");
+    tracing::warn!(
+        id,
+        status = new_status,
+        "download: {}",
+        crate::i18n::pick(&msg, false)
+    );
     sqlx::query(
         "UPDATE downloads SET status = ?, online = ?, retry_at = ?, attempts = ?, error = ?
          WHERE id = ? AND status IN (?, ?)",
@@ -265,8 +281,9 @@ async fn execute(
                 .await
                 .map_err(|e| Failure::Fail(format!("{e:#}")))?;
             if plugin.account_required && acc.is_none() {
-                return Err(Failure::Fail(format!(
+                return Err(Failure::Fail(crate::tr!(
                     "Kein aktiver Account für {}",
+                    "No active account for {}",
                     plugin.name
                 )));
             }
@@ -343,9 +360,11 @@ async fn execute(
             .collect::<Vec<_>>()
             .join(" ");
         tracing::debug!(id, "direct link returned HTML: {body:.2000}");
-        return Err(Failure::Retry(format!(
+        let text = text.chars().take(160).collect::<String>();
+        return Err(Failure::Retry(crate::tr!(
             "Server lieferte eine Webseite statt der Datei: {}",
-            text.chars().take(160).collect::<String>()
+            "The server sent a web page instead of the file: {}",
+            text
         )));
     }
     let probe = probe_from(&resp);
@@ -508,7 +527,7 @@ async fn execute(
                 }
                 Some(Err(e)) => {
                     seg_cancel.cancel();
-                    failure.get_or_insert(Failure::Retry(format!("interner Fehler: {e}")));
+                    failure.get_or_insert(Failure::Retry(crate::tr!("interner Fehler: {}", "internal error: {}", e)));
                 }
             },
             _ = persist.tick() => {
@@ -526,8 +545,11 @@ async fn execute(
     let written: u64 = segs.iter().map(|s| s.done.load(Ordering::Relaxed)).sum();
     if let Some(t) = total {
         if written != t {
-            return Err(Failure::Retry(format!(
-                "unvollständig: {written} von {t} Bytes"
+            return Err(Failure::Retry(crate::tr!(
+                "unvollständig: {} von {} Bytes",
+                "incomplete: {} of {} bytes",
+                written,
+                t
             )));
         }
     }
@@ -638,9 +660,10 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
                     .map_err(net_failure);
                 match r {
                     Ok(r) if r.status() == StatusCode::PARTIAL_CONTENT => Ok(r),
-                    Ok(r) if r.status().is_success() => {
-                        Err(Failure::Retry("Server ignoriert Range-Anfrage".into()))
-                    }
+                    Ok(r) if r.status().is_success() => Err(Failure::Retry(crate::tr!(
+                        "Server ignoriert Range-Anfrage",
+                        "Server ignores the range request"
+                    ))),
                     Ok(r) => Err(http_failure(r.status())),
                     Err(e) => Err(e),
                 }?
@@ -655,7 +678,10 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
             Ok(()) => match seg.end {
                 None => return Ok(()),
                 Some(e) if seg.start + seg.done.load(Ordering::Relaxed) >= e => return Ok(()),
-                Some(_) => Failure::Retry("Verbindung vorzeitig geschlossen".into()),
+                Some(_) => Failure::Retry(crate::tr!(
+                    "Verbindung vorzeitig geschlossen",
+                    "Connection closed early"
+                )),
             },
             Err(e) => e,
         };
@@ -686,7 +712,12 @@ async fn pump(ctx: &SegCtx, resp: Response, file: &mut tokio::fs::File) -> Resul
         )
         .await?;
         let chunk = match next {
-            Err(_) => return Err(Failure::Retry("Zeitüberschreitung beim Lesen".into())),
+            Err(_) => {
+                return Err(Failure::Retry(crate::tr!(
+                    "Zeitüberschreitung beim Lesen",
+                    "Read timed out"
+                )))
+            }
             Ok(None) => return Ok(()),
             Ok(Some(Err(e))) => return Err(net_failure(e)),
             Ok(Some(Ok(c))) => c,

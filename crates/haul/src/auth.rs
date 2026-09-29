@@ -74,7 +74,7 @@ pub async fn require_auth(
     }
     (
         StatusCode::UNAUTHORIZED,
-        Json(serde_json::json!({ "error": "nicht angemeldet" })),
+        Json(serde_json::json!({ "error": crate::tr!("nicht angemeldet", "not logged in") })),
     )
         .into_response()
 }
@@ -141,13 +141,14 @@ pub async fn setup(
     {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
-            "Benutzer existiert bereits",
+            crate::tr!("Benutzer existiert bereits", "The user already exists"),
         ));
     }
     if c.user.trim().is_empty() || c.password.len() < 8 {
-        return Err(ApiError::bad_request(
+        return Err(ApiError::bad_request(crate::tr!(
             "Benutzername und ein Passwort mit mindestens 8 Zeichen angeben",
-        ));
+            "Enter a user name and a password with at least 8 characters"
+        )));
     }
     db::set_setting(&app.engine.db, "auth.user", c.user.trim()).await?;
     db::set_setting(
@@ -171,7 +172,10 @@ pub async fn login(
         tokio::time::sleep(Duration::from_millis(700)).await;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
-            "Benutzername oder Passwort falsch",
+            crate::tr!(
+                "Benutzername oder Passwort falsch",
+                "Wrong user name or password"
+            ),
         ));
     }
     Ok((new_session(&app, jar).await?, StatusCode::NO_CONTENT))
@@ -207,12 +211,16 @@ pub async fn change_password(
         .await?
         .unwrap_or_default();
     if !verify_password(&p.current, &hash) {
-        return Err(ApiError::bad_request("aktuelles Passwort falsch"));
+        return Err(ApiError::bad_request(crate::tr!(
+            "aktuelles Passwort falsch",
+            "wrong current password"
+        )));
     }
     if p.new.len() < 8 {
-        return Err(ApiError::bad_request(
+        return Err(ApiError::bad_request(crate::tr!(
             "neues Passwort braucht mindestens 8 Zeichen",
-        ));
+            "the new password needs at least 8 characters"
+        )));
     }
     db::set_setting(&app.engine.db, "auth.password", &hash_password(&p.new)?).await?;
     Ok(StatusCode::NO_CONTENT)
