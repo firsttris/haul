@@ -311,6 +311,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
             ctx.globals().set("__host_sha256", Func::from(|| ()))?;
             ctx.globals().set("__host_aes", Func::from(|| ()))?;
+            ctx.globals().set("__host_crypto", Func::from(|| ()))?;
             ctx.globals().set("__host_captcha", Func::from(|| ()))?;
             ctx.globals().set("__host_password", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
@@ -538,6 +539,22 @@ async fn invoke_inner(
                         Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
                     }
                 }),
+            )?;
+            g.set(
+                "__host_crypto",
+                // Off the async runtime: PBKDF2 and the hashcash take a while.
+                Func::from(Async(|op: String, args: String| async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let args: serde_json::Value = serde_json::from_str(&args)?;
+                        super::crypto::run(&op, &args)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(out)) => serde_json::json!({ "data": out }).to_string(),
+                        Ok(Err(e)) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
+                        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                    }
+                })),
             )?;
             let jar = clients.jar.clone();
             g.set(
@@ -804,6 +821,38 @@ mod bundled {
         .await
         .unwrap();
         assert_eq!(v["url"], "Film ä.rar");
+    }
+
+    /// `ctx.crypto.run` in QuickJS: async, off the runtime, errors as exceptions.
+    #[tokio::test]
+    async fn crypto_run_in_quickjs() {
+        let code = r#"var __plugin = { default: { id: "c", version: 1, matches: [],
+            async resolve(_, ctx) {
+                const k = await ctx.crypto.run("pbkdf2Sha512", { password: "password", salt: "73616c74", iterations: 1, length: 8 });
+                const m = await ctx.crypto.run("modPow", { base: "4", exp: "d", mod: ["7", "47"] });
+                let err = "";
+                try { await ctx.crypto.run("nope", {}); } catch (e) { err = String(e.message); }
+                return { url: [k, m, err].join("|") };
+            } } };"#;
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let v = invoke(
+            "c",
+            code,
+            "resolve",
+            serde_json::json!(["x"]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v["url"],
+            "867f70cf1ade02cf|1bd|crypto nope: unknown crypto operation nope"
+        );
     }
 
     /// Google Drive's confirm-link parsing in QuickJS (no URL class there).

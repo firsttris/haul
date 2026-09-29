@@ -91,6 +91,12 @@
           if (r.error) throw new Error('aesDecrypt: ' + r.error);
           return r.data;
         },
+        // Heavier operations in the core (plugins/crypto.rs); resolves to hex.
+        run: async function (op, args) {
+          var r = JSON.parse(await __host_crypto(String(op), JSON.stringify(args || {})));
+          if (r.error) throw new Error('crypto ' + op + ': ' + r.error);
+          return r.data;
+        },
       },
       captcha: {
         // Waits until the user solved it in the browser (see captcha.rs); returns the token.

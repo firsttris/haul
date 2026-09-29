@@ -2,7 +2,7 @@
  * A fake `ctx` for unit-testing plugins in Node without the Rust core.
  * Routes are matched by `METHOD url` prefix; unmatched requests fail the test.
  */
-import { createDecipheriv, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync } from 'node:crypto';
 import type { Account, CaptchaRequest, Ctx, HttpRequest, HttpResponse } from './index';
 
 export interface FakeRoute {
@@ -144,6 +144,46 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
         const d = createDecipheriv(`aes-128-${mode}`, Buffer.from(key, 'hex'), mode === 'cbc' ? Buffer.from(iv ?? '0'.repeat(32), 'hex') : null);
         d.setAutoPadding(false);
         return Buffer.concat([d.update(Buffer.from(data, 'hex')), d.final()]).toString('hex');
+      },
+      // Node's crypto doing what plugins/crypto.rs does.
+      async run(op, a) {
+        const s = (k: string) => String(a[k]);
+        if (op === 'pbkdf2Sha512') return pbkdf2Sync(s('password'), Buffer.from(s('salt'), 'hex'), Number(a.iterations), Number(a.length), 'sha512').toString('hex');
+        if (op === 'aesEncrypt') {
+          const c = createCipheriv(`aes-128-${s('mode')}`, Buffer.from(s('key'), 'hex'), s('mode') === 'cbc' ? Buffer.from(a.iv ? s('iv') : '0'.repeat(32), 'hex') : null);
+          c.setAutoPadding(false);
+          return Buffer.concat([c.update(Buffer.from(s('data'), 'hex')), c.final()]).toString('hex');
+        }
+        if (op === 'modPow') {
+          let base = BigInt('0x' + s('base'));
+          let exp = BigInt('0x' + s('exp'));
+          // The modulus as hex or as factors (RSA p and q), like plugins/crypto.rs.
+          const mod = Array.isArray(a.mod) ? a.mod.reduce((acc: bigint, f) => acc * BigInt('0x' + String(f)), 1n) : BigInt('0x' + s('mod'));
+          let r = 1n;
+          base %= mod;
+          while (exp > 0n) {
+            if (exp & 1n) r = (r * base) % mod;
+            base = (base * base) % mod;
+            exp >>= 1n;
+          }
+          return r.toString(16);
+        }
+        if (op === 'megaHashcash') {
+          // pyLoad solve_hashcash.
+          let token = Buffer.from(s('challenge').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+          token = Buffer.concat([token, Buffer.alloc((16 - (token.length % 16)) % 16)]);
+          const buf = Buffer.alloc(4 + 48 * 0x40000);
+          for (let i = 0; i < 0x40000; i++) token.copy(buf, 4 + 48 * i);
+          const e = Number(a.easiness);
+          const threshold = (((e & 63) << 1) + 1) * 2 ** ((e >> 6) * 7 + 3);
+          for (let n = 1; ; n++) {
+            buf.writeUInt32LE(n >>> 0, 0);
+            if (createHash('sha256').update(buf).digest().readUInt32BE(0) <= threshold) {
+              return buf.subarray(0, 4).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+          }
+        }
+        throw new Error(`fake crypto: ${op} not available in tests`);
       },
     },
     cookies: {

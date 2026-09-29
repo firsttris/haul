@@ -20,13 +20,19 @@
  *   to the core as `hash: { type: 'mega' }` and is checked after the download.
  * - Missing or wrong key: JD asks the user ("Decryption key?"); here it is asked like a
  *   download password and kept with the download.
+ * - Account (JD apiLogin / fetchAccountInfo): prelogin `us0` gives the version; v2 derives key
+ *   and user hash with PBKDF2-SHA512 (100000 rounds), v1 with MEGA's old key function. `us`
+ *   answers the master key (AES with the password key) and the session: `csid` decrypted with
+ *   the account's RSA key (JD, pyLoad) or `tsid` (pyLoad). A Hashcash challenge (HTTP 402) is
+ *   solved like pyLoad does; JD does not know it yet. The session goes along as `sid`;
+ *   `uq` gives the account type, expiry and transfer quota like JD computes it.
  * - Folders (`/folder/<id>#<key>`, pyLoad MegaCoNzFolder, JD crawler): `a:"f", c:1, r:1, ca:1`
  *   with `n=<id>` lists all nodes; a file's key is `<root>:<key>` in `k`, AES-ECB encrypted with
  *   the folder key. Files become `/folder/<id>#<key>/file/<node>`; `/folder/<id>#<key>/folder/
  *   <sub>` takes only that subfolder.
  */
-import { definePlugin, HosterLimitError, OfflineError, PluginError, TemporaryError, withPassword, WRONG_PASSWORD } from '@haul/plugin-sdk';
-import type { CrawledFile, Ctx, Resolved } from '@haul/plugin-sdk';
+import { AccountError, definePlugin, HosterLimitError, memo, OfflineError, PluginError, TemporaryError, withPassword, WRONG_PASSWORD } from '@haul/plugin-sdk';
+import type { AccountInfo, CrawledFile, Ctx, Resolved } from '@haul/plugin-sdk';
 
 const API = 'https://g.api.mega.co.nz/cs';
 const HOST = '(?:www\\.)?mega(?:\\.co)?\\.nz';
@@ -123,10 +129,15 @@ function apiError(code: number, when: 'check' | 'download'): Error {
 
 let seq = Math.floor(Math.random() * 1e9);
 
-/** One API command; `node` is the folder a node belongs to (`n=`). */
-async function api(ctx: Ctx, cmd: Record<string, unknown>, when: 'check' | 'download', node?: string): Promise<Record<string, unknown>> {
-  const url = `${API}?id=${seq++}${node ? `&n=${encodeURIComponent(node)}` : ''}`;
-  const res = await ctx.http.post(url, JSON.stringify([cmd]), { headers: { 'Content-Type': 'text/plain;charset=UTF-8' } });
+/** One API request as sent (JD apiRequest: `id`, `sid` when logged in, `n` for folder nodes). */
+function apiPost(ctx: Ctx, cmd: Record<string, unknown>, opts: { node?: string; sid?: string; headers?: Record<string, string> } = {}) {
+  const url = `${API}?id=${seq++}${opts.sid ? `&sid=${encodeURIComponent(opts.sid)}` : ''}${opts.node ? `&n=${encodeURIComponent(opts.node)}` : ''}`;
+  return ctx.http.post(url, JSON.stringify([cmd]), { headers: { 'Content-Type': 'text/plain;charset=UTF-8', ...(opts.headers ?? {}) } });
+}
+
+/** One API command; `node` is the folder a node belongs to (`n=`), `sid` the account session. */
+async function api(ctx: Ctx, cmd: Record<string, unknown>, when: 'check' | 'download', node?: string, sid?: string): Promise<Record<string, unknown>> {
+  const res = await apiPost(ctx, cmd, { node, sid });
   if (res.status >= 500) {
     // JD checkServerBusy.
     throw new HosterLimitError({ de: `MEGA: Server ausgelastet (HTTP ${res.status})`, en: `MEGA: server busy (HTTP ${res.status})` }, 60);
@@ -143,6 +154,163 @@ async function api(ctx: Ctx, cmd: Record<string, unknown>, when: 'check' | 'down
   if (typeof answer.e === 'number' && answer.e < 0) throw apiError(answer.e, when);
   return answer;
 }
+
+// ---- account (JD MegaConz.apiLogin / fetchAccountInfo) ------------------------------------
+
+const b64url = (b: number[]) => {
+  let out = '';
+  for (let i = 0; i < b.length; i += 3) {
+    const n = (b[i] << 16) | ((b[i + 1] ?? 0) << 8) | (b[i + 2] ?? 0);
+    const chars = [(n >> 18) & 63, (n >> 12) & 63, (n >> 6) & 63, n & 63].map((x) => B64[x]);
+    out += chars.slice(0, i + 2 < b.length ? 4 : i + 1 < b.length ? 3 : 2).join('');
+  }
+  return out;
+};
+
+/** pyLoad mpi_to_int: a PGP MPI (2 bytes bit length, then the number), as hex. */
+function mpis(bytes: number[], count: number): string[] | undefined {
+  const out: string[] = [];
+  let i = 0;
+  for (let n = 0; n < count; n++) {
+    if (i + 2 > bytes.length) return undefined;
+    const len = Math.floor(((bytes[i] << 8) + bytes[i + 1] + 7) / 8);
+    if (i + 2 + len > bytes.length) return undefined;
+    out.push(hex(bytes.slice(i + 2, i + 2 + len)) || '0');
+    i += 2 + len;
+  }
+  return out;
+}
+
+const SESSION = 'https://mega.nz';
+
+const loginFailed = () => new AccountError({ de: 'MEGA: E-Mail oder Passwort falsch', en: 'MEGA: wrong e-mail or password' });
+
+/** A login command; answers MEGA's Hashcash challenge (HTTP 402, pyLoad; JD does not know it yet). */
+async function loginCommand(ctx: Ctx, cmd: Record<string, unknown>): Promise<ApiAnswer> {
+  let headers: Record<string, string> | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await apiPost(ctx, cmd, { headers });
+    if (res.status === 402) {
+      const challenge = res.header('x-hashcash') ?? '';
+      const parts = challenge.split(':');
+      const easiness = Number(parts[1]);
+      if (attempt > 0 || parts.length !== 4 || parts[0] !== '1' || !(easiness >= 0 && easiness <= 255)) {
+        throw new AccountError({ de: `MEGA: Hashcash-Aufgabe nicht lösbar (${challenge})`, en: `MEGA: hashcash challenge not solvable (${challenge})` });
+      }
+      const nonce = await ctx.crypto.run('megaHashcash', { challenge: parts[3], easiness });
+      headers = { 'X-Hashcash': `1:${parts[3]}:${nonce}` };
+      continue;
+    }
+    if (res.status >= 500) throw new HosterLimitError({ de: `MEGA: Server ausgelastet (HTTP ${res.status})`, en: `MEGA: server busy (HTTP ${res.status})` }, 60);
+    try {
+      const body = res.json<unknown>();
+      return (Array.isArray(body) ? body[0] : body) as ApiAnswer;
+    } catch {
+      throw new TemporaryError({ de: `MEGA: unerwartete Antwort (HTTP ${res.status})`, en: `MEGA: unexpected answer (HTTP ${res.status})` });
+    }
+  }
+  throw loginFailed();
+}
+
+/** JD apiLogin: the saved session if MEGA still accepts it, else a fresh login. Returns the sid. */
+async function login(ctx: Ctx): Promise<string> {
+  const acc = ctx.account.get()!;
+  const email = acc.user.trim().toLowerCase();
+  if (!/^.+?@.+?\.[^.]+$/.test(email)) {
+    throw new AccountError({ de: 'MEGA: als Benutzer die E-Mail-Adresse eintragen', en: 'MEGA: enter the e-mail address as user' });
+  }
+  if (!acc.secret) throw loginFailed();
+  const saved = memo.get(ctx, SESSION, 'mega_sid');
+  if (saved) {
+    // JD: "login via sid", valid when the answer carries the private key.
+    const check = await apiPost(ctx, { a: 'us' }, { sid: saved });
+    try {
+      const body = check.json<unknown>();
+      const a = (Array.isArray(body) ? body[0] : body) as ApiAnswer;
+      if (a && typeof a === 'object' && 'privk' in a) return saved;
+    } catch {
+      /* log in again */
+    }
+  }
+  // JD: prelogin "us0" gives the account version and, for v2, the salt.
+  const pre = await loginCommand(ctx, { a: 'us0', user: email });
+  if (typeof pre !== 'object' || !pre) throw loginFailed();
+  let pwKey: number[];
+  let uh: string;
+  if (Number(pre.v) === 2) {
+    const salt = typeof pre.s === 'string' ? pre.s : '';
+    if (!salt) throw new TemporaryError({ de: 'MEGA: Login ohne Salt', en: 'MEGA: login without salt' });
+    const dk = unhex(await ctx.crypto.run('pbkdf2Sha512', { password: acc.secret, salt: hex(b64(salt)), iterations: 100000, length: 32 }));
+    pwKey = dk.slice(0, 16);
+    uh = b64url(dk.slice(16, 32));
+  } else if (Number(pre.v) === 1) {
+    pwKey = unhex(await ctx.crypto.run('megaPrepareKey', { password: acc.secret }));
+    uh = await ctx.crypto.run('megaUserHashV1', { email, key: hex(pwKey) });
+  } else {
+    throw new PluginError('fatal', `MEGA: unknown account version ${String(pre.v)}`);
+  }
+  const res = await loginCommand(ctx, { a: 'us', user: email, uh });
+  if (typeof res === 'number' || (res && typeof res.e === 'number')) {
+    const code = typeof res === 'number' ? res : Number(res.e);
+    // JD: -26 multi-factor authentication required, -16 user blocked, -9 user not found.
+    if (code === -26) {
+      throw new AccountError({ de: 'MEGA: Zwei-Faktor-Anmeldung ist aktiv, das kann Haul noch nicht', en: 'MEGA: two-factor login is on, Haul cannot do that yet' });
+    }
+    if (code === -16) throw new AccountError({ de: 'MEGA: Account gesperrt', en: 'MEGA: account blocked' });
+    if (code === -3 || code === -4) throw new TemporaryError({ de: `MEGA: Login später erneut (${code})`, en: `MEGA: login later again (${code})` }, RETRY);
+    throw loginFailed();
+  }
+  if (!res || typeof res.k !== 'string') throw loginFailed();
+  const master = unhex(ctx.crypto.aesDecrypt({ mode: 'ecb', key: hex(pwKey), data: hex(b64(res.k)) }));
+  let sid: string | undefined;
+  if (typeof res.tsid === 'string') {
+    // pyLoad: a temporary session, proven by encrypting its first half with the master key.
+    const tsid = b64(res.tsid);
+    const check = unhex(await ctx.crypto.run('aesEncrypt', { mode: 'ecb', key: hex(master), data: hex(tsid.slice(0, 16)) }));
+    if (hex(check) !== hex(tsid.slice(-16))) throw loginFailed();
+    sid = res.tsid;
+  } else if (typeof res.csid === 'string' && typeof res.privk === 'string') {
+    // JD/pyLoad: the RSA private key (p, q, d, u as MPIs) decrypts the session id.
+    let privk = b64(res.privk);
+    if (privk.length % 16) privk = privk.concat(new Array(16 - (privk.length % 16)).fill(0));
+    const rsa = mpis(unhex(ctx.crypto.aesDecrypt({ mode: 'ecb', key: hex(master), data: hex(privk) })), 4);
+    const csid = mpis(b64(res.csid), 1);
+    if (!rsa || !csid) throw loginFailed();
+    let sidHex = await ctx.crypto.run('modPow', { base: csid[0], exp: rsa[2], mod: [rsa[0], rsa[1]] });
+    if (sidHex.length % 2) sidHex = '0' + sidHex;
+    sid = b64url(unhex(sidHex).slice(0, 43));
+  }
+  if (!sid) throw loginFailed();
+  memo.set(ctx, SESSION, 'mega_sid', sid, 30 * 86400);
+  return sid;
+}
+
+/** JD fetchAccountInfo: `uq` with xfer and pro; utype 0 = free. */
+async function accountInfo(ctx: Ctx): Promise<AccountInfo> {
+  const sid = await login(ctx);
+  const uq = await api(ctx, { a: 'uq', xfer: 1, pro: 1 }, 'check', undefined, sid);
+  const n = (k: string) => (typeof uq[k] === 'number' ? (uq[k] as number) : 0);
+  const utype = n('utype');
+  const names: Record<number, string> = {
+    1: 'Pro I', 2: 'Pro II', 3: 'Pro III', 4: 'Lite', 11: 'Starter', 12: 'Basic', 13: 'Essential', 100: 'Business', 101: 'Pro Flexi',
+  };
+  let premium = utype in names;
+  const info: AccountInfo = { valid: true, message: names[utype] ?? (utype === 0 ? 'Free' : `Type ${utype}`) };
+  if (premium && typeof uq.suntil === 'number') {
+    info.validUntil = uq.suntil * 1000;
+    if (info.validUntil < Date.now()) premium = false;
+  }
+  if (typeof uq.mxfer === 'number') {
+    // JD: used by the owner and served to others, each with what is not committed yet.
+    info.trafficLeft = uq.mxfer - (n('caxfer') + n('tuo') + n('csxfer') + n('tua'));
+    if (info.trafficLeft > 0 && !premium) premium = true;
+  }
+  info.premium = premium;
+  return info;
+}
+
+/** The session for downloads with an account (JD getSID). */
+const sidFor = async (ctx: Ctx) => (ctx.account.get() ? login(ctx) : undefined);
 
 // ---- links ---------------------------------------------------------------------------------
 
@@ -242,7 +410,9 @@ async function probe(ctx: Ctx, url: string): Promise<void> {
 
 async function resolveFile(ctx: Ctx, t: Target): Promise<Resolved> {
   const cmd = { a: 'g', g: 1, v: 1, ssl: 1, ...(t.folder ? { n: t.id } : { p: t.id }) };
-  const info = await api(ctx, cmd, 'download', t.folder);
+  // JD: with an account the request carries its session, so its transfer quota counts.
+  const sid = await sidFor(ctx);
+  const info = await api(ctx, cmd, 'download', t.folder, sid);
   const at = typeof info.at === 'string' ? info.at : undefined;
   if (typeof info.s !== 'number' || !at) throw new OfflineError();
 
@@ -331,9 +501,21 @@ async function crawlFolder(ctx: Ctx, link: string) {
 export default definePlugin({
   id: 'mega',
   name: 'MEGA',
-  version: 2,
+  version: 3,
   matches: [FILE, FOLDER],
   accountRequired: false,
+  account: {
+    userLabel: { de: 'E-Mail', en: 'E-mail' },
+    secretLabel: { de: 'Passwort', en: 'Password' },
+    help: {
+      de: 'Wie bei JDownloader: E-Mail und Passwort des MEGA-Accounts. Mit Pro-Account zählt dessen Transfer-Kontingent statt des freien pro IP. Zwei-Faktor-Anmeldung geht noch nicht.',
+      en: 'Like JDownloader: the MEGA account\'s e-mail and password. With a Pro account its transfer quota counts instead of the free one per IP. Two-factor login does not work yet.',
+    },
+  },
+
+  async checkAccount(ctx) {
+    return accountInfo(ctx);
+  },
 
   async crawl(link, ctx) {
     const d = FOLDER.exec(link);

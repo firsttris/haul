@@ -62,6 +62,8 @@ export interface Account {
   secret: string;
 }
 
+export type CryptoOp = 'pbkdf2Sha512' | 'aesEncrypt' | 'modPow' | 'megaPrepareKey' | 'megaHashcash';
+
 export interface Ctx {
   pluginId: string;
   /** Cookies are kept per account between calls, so a login survives until it expires. */
@@ -81,6 +83,13 @@ export interface Ctx {
      * zeros) and data as hex; data a multiple of 16 bytes. Returns hex.
      */
     aesDecrypt(opts: { mode: 'ecb' | 'cbc'; key: string; iv?: string; data: string }): string;
+    /**
+     * Heavier operations in the core, hex in and out (the MEGA login, JD/pyLoad):
+     * `pbkdf2Sha512 {password, salt, iterations, length}`, `aesEncrypt {mode, key, iv?, data}`,
+     * `modPow {base, exp, mod}` (RSA), `megaPrepareKey {password}` (v1 accounts),
+     * `megaHashcash {challenge, easiness}` (returns the base64url nonce).
+     */
+    run(op: CryptoOp, args: Record<string, unknown>): Promise<string>;
   };
   /**
    * Captchas the user solves in the browser, on the hoster's page (like JD's browser solver).

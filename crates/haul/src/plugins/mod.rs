@@ -1,3 +1,4 @@
+mod crypto;
 pub mod host;
 
 use std::collections::HashMap;

@@ -160,3 +160,92 @@ describe('mega folders (pyLoad MegaCoNzFolder)', () => {
     expect(r).toMatchObject({ url: DL, name: 'a.rar', decrypt: { key: K.toString('hex') } });
   });
 });
+
+describe('mega account (JD apiLogin, pyLoad hashcash)', async () => {
+  const { generateKeyPairSync, pbkdf2Sync, randomBytes } = await import('node:crypto');
+  const EMAIL = 'me@example.org';
+  const PASSWORD = 'geheim';
+  const salt = randomBytes(16);
+  const dk = pbkdf2Sync(PASSWORD, salt, 100000, 32, 'sha512');
+  const master = randomBytes(16);
+  // The account's RSA key as MEGA stores it: p, q, d, u as MPIs, AES-ECB with the master key.
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = privateKey.export({ format: 'jwk' }) as Record<string, string>;
+  const big = (b64u: string) => Buffer.from(b64u, 'base64url');
+  const mpi = (b: Buffer) => {
+    const bits = b.length * 8 - Math.clz32(b[0]) + 24;
+    return Buffer.concat([Buffer.from([bits >> 8, bits & 255]), b]);
+  };
+  let privk = Buffer.concat([mpi(big(jwk.p)), mpi(big(jwk.q)), mpi(big(jwk.d)), mpi(big(jwk.qi))]);
+  privk = Buffer.concat([privk, Buffer.alloc((16 - (privk.length % 16)) % 16)]);
+  // The session id: 43 bytes, encrypted with the public key (m^e mod n).
+  const sid = Buffer.concat([Buffer.from([0x42]), randomBytes(42)]);
+  const m = BigInt('0x' + Buffer.concat([sid, randomBytes(20)]).toString('hex'));
+  const n = BigInt('0x' + big(jwk.n).toString('hex'));
+  let c = 1n;
+  let b = m % n;
+  for (let e = BigInt('0x' + big(jwk.e).toString('hex')); e > 0n; e >>= 1n) {
+    if (e & 1n) c = (c * b) % n;
+    b = (b * b) % n;
+  }
+  let cHex = c.toString(16);
+  if (cHex.length % 2) cHex = '0' + cHex;
+  const csid = mpi(Buffer.from(cHex, 'hex'));
+  const SID = enc64(sid);
+
+  const server = (opts: { hashcash?: boolean; utype?: number } = {}) => {
+    let challenged = false;
+    const seen: Cmd[] = [];
+    const route = (req: HttpRequest) => {
+      const [cmd] = JSON.parse(req.body!) as Cmd[];
+      seen.push(cmd);
+      const reply = (body: unknown) => ({ body: JSON.stringify([body]), headers: { 'content-type': 'application/json' } });
+      if (cmd.a === 'us0') return reply({ v: 2, s: enc64(salt) });
+      if (cmd.a === 'us' && cmd.user) {
+        if (opts.hashcash && !challenged) {
+          challenged = true;
+          return { status: 402, headers: { 'X-Hashcash': `1:180:1700000000:${enc64(Buffer.from([...Array(48).keys()]))}` } };
+        }
+        if (opts.hashcash) expect(req.headers?.['X-Hashcash']).toMatch(/^1:[\w-]+:[\w-]+$/);
+        if (cmd.uh !== enc64(dk.subarray(16))) return reply(-9);
+        return reply({ k: enc64(aes('ecb', dk.subarray(0, 16), master)), privk: enc64(aes('ecb', master, privk)), csid: enc64(csid) });
+      }
+      // JD "login via sid": a valid session answers with the private key.
+      if (cmd.a === 'us' && !cmd.user) return req.url.includes(`&sid=${SID}`) ? reply({ privk: 'x', k: 'y' }) : reply(-15);
+      if (cmd.a === 'uq') {
+        expect(req.url).toContain(`&sid=${SID}`);
+        return reply({ utype: opts.utype ?? 1, suntil: 4102444800, mxfer: 1000, caxfer: 100, tuo: 5, csxfer: 20, tua: 5 });
+      }
+      if (cmd.a === 'g') {
+        expect(req.url).toContain(`&sid=${SID}`);
+        return reply({ s: 1234, at: attr('Film ä.part1.rar', K), g: DL });
+      }
+      throw new Error(`unexpected ${JSON.stringify(cmd)}`);
+    };
+    return { seen, routes: { 'POST https://g.api.mega.co.nz/cs?id=': route, [`GET ${DL}`]: { status: 206, file: true } } };
+  };
+
+  it('logs in with PBKDF2 and the RSA session, then reads the quota like JD', async () => {
+    const s = server();
+    const ctx = fakeCtx(s.routes, { id: 1, user: 'Me@Example.org', secret: PASSWORD });
+    expect(await plugin.checkAccount!(ctx)).toEqual({ valid: true, premium: true, validUntil: 4102444800000, trafficLeft: 870, message: 'Pro I' });
+    expect(s.seen[0]).toEqual({ a: 'us0', user: EMAIL });
+    // Downloads carry the session; the saved one is reused without a new login.
+    const logins = s.seen.filter((c) => c.a === 'us0').length;
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(DL);
+    expect(s.seen.filter((c) => c.a === 'us0')).toHaveLength(logins);
+  });
+
+  it('solves the hashcash challenge (HTTP 402) like pyLoad', async () => {
+    const s = server({ hashcash: true });
+    const ctx = fakeCtx(s.routes, { id: 1, user: EMAIL, secret: PASSWORD });
+    expect(await plugin.checkAccount!(ctx)).toMatchObject({ premium: true });
+  }, 20000);
+
+  it('reports a wrong password and free accounts', async () => {
+    await expect(plugin.checkAccount!(fakeCtx(server().routes, { id: 1, user: EMAIL, secret: 'falsch' }))).rejects.toMatchObject({ haulKind: 'account' });
+    // Free, but traffic left: JD counts it as premium ("but still premium?"); none left: free.
+    const free = server({ utype: 0 });
+    expect(await plugin.checkAccount!(fakeCtx(free.routes, { id: 1, user: EMAIL, secret: PASSWORD }))).toMatchObject({ premium: true, message: 'Free' });
+  });
+});
