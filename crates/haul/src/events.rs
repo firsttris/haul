@@ -39,6 +39,9 @@ pub struct ProgressItem {
     pub size: Option<u64>,
     /// Bytes per second, averaged over the last few seconds.
     pub speed: u64,
+    /// After the last byte: `hashWait` (waiting for its turn) or `hashing`; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]

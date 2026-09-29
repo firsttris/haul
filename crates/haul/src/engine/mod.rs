@@ -9,7 +9,7 @@ mod worker;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
@@ -33,6 +33,24 @@ pub struct Progress {
     pub done: AtomicU64,
     /// -1 while unknown.
     pub size: AtomicI64,
+    /// What happens after the last byte: `PHASE_*`.
+    pub phase: AtomicU8,
+}
+
+/// Downloading (or anything without its own label).
+pub const PHASE_DOWNLOAD: u8 = 0;
+/// All bytes there, waiting for its turn to verify the checksum (`Engine::hash_checks`).
+pub const PHASE_HASH_WAIT: u8 = 1;
+/// Verifying the checksum.
+pub const PHASE_HASHING: u8 = 2;
+
+/// The phase as the UI gets it; none while downloading.
+fn phase_name(phase: u8) -> Option<&'static str> {
+    match phase {
+        PHASE_HASH_WAIT => Some("hashWait"),
+        PHASE_HASHING => Some("hashing"),
+        _ => None,
+    }
 }
 
 struct Active {
@@ -301,6 +319,7 @@ impl Engine {
         let progress = Arc::new(Progress {
             done: AtomicU64::new(0),
             size: AtomicI64::new(-1),
+            phase: AtomicU8::new(PHASE_DOWNLOAD),
         });
         let (tx, rx) = watch::channel(false);
         active.insert(
@@ -343,7 +362,7 @@ impl Engine {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            let snapshot: Vec<(i64, u64, i64)> = {
+            let snapshot: Vec<(i64, u64, i64, u8)> = {
                 let active = self.active.lock().unwrap();
                 active
                     .iter()
@@ -352,6 +371,7 @@ impl Engine {
                             *id,
                             a.progress.done.load(Ordering::Relaxed),
                             a.progress.size.load(Ordering::Relaxed),
+                            a.progress.phase.load(Ordering::Relaxed),
                         )
                     })
                     .collect()
@@ -359,7 +379,7 @@ impl Engine {
             let mut items = Vec::with_capacity(snapshot.len());
             let mut next = HashMap::new();
             let mut total = 0u64;
-            for (id, done, size) in snapshot {
+            for (id, done, size, phase) in snapshot {
                 let (prev_done, prev_speed) = last.get(&id).copied().unwrap_or((done, 0.0));
                 let delta = done.saturating_sub(prev_done) as f64;
                 // Exponential moving average keeps the number readable.
@@ -375,6 +395,7 @@ impl Engine {
                     bytes_done: done,
                     size: (size >= 0).then_some(size as u64),
                     speed: speed as u64,
+                    phase: phase_name(phase),
                 });
             }
             last = next;
@@ -2014,6 +2035,48 @@ mod engine_tests {
         let d = wait_for(&e, id, status::FINISHED).await;
         assert_eq!(d.hash_ok, None);
         assert!(dir.path().join("done/Off/file.bin").is_file());
+
+        // Another check holds the one slot: the finished download waits ("hashWait"), then
+        // verifies once the slot is free.
+        e.update_settings(Settings {
+            verify_checksums: true,
+            ..e.settings()
+        })
+        .await
+        .unwrap();
+        let slot = e.hash_checks.acquire().await.unwrap();
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://sum.test/f/good".into(),
+                package_name: Some("Turn".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        let phase = || {
+            e.active
+                .lock()
+                .unwrap()
+                .get(&id)
+                .map(|a| a.progress.phase.load(Ordering::Relaxed))
+        };
+        let mut waited = false;
+        for _ in 0..400 {
+            if phase() == Some(PHASE_HASH_WAIT) {
+                waited = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(waited, "never waited for the check slot");
+        assert_eq!(phase_name(PHASE_HASH_WAIT), Some("hashWait"));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(phase(), Some(PHASE_HASH_WAIT));
+        drop(slot);
+        let d = wait_for(&e, id, status::FINISHED).await;
+        assert_eq!(d.hash_ok, Some(true));
         e.shutdown().await;
     }
 

@@ -18,7 +18,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use super::{Engine, Progress};
+use super::{Engine, Progress, PHASE_DOWNLOAD, PHASE_HASHING, PHASE_HASH_WAIT};
 use crate::db::{self, status, Segment};
 use crate::events::Topic;
 use crate::plugins::{ErrorKind, PluginError, Resolved};
@@ -624,9 +624,11 @@ async fn execute(
         .or_else(|| d.hash.as_deref().and_then(super::hash::HashSpec::from_db))
         .filter(|h| h.usable());
     if let Some(spec) = spec.filter(|_| engine.settings().verify_checksums) {
+        progress.phase.store(PHASE_HASH_WAIT, Ordering::Relaxed);
         let _turn = cancellable(cancel, engine.hash_checks.acquire())
             .await?
             .map_err(|e| Failure::Retry(format!("{e}")))?;
+        progress.phase.store(PHASE_HASHING, Ordering::Relaxed);
         let (p, h) = (path.clone(), spec.clone());
         let ok = cancellable(
             cancel,
@@ -665,6 +667,7 @@ async fn execute(
                 spec.kind.to_uppercase()
             )));
         }
+        progress.phase.store(PHASE_DOWNLOAD, Ordering::Relaxed);
     }
 
     // 6. Move into the package folder.

@@ -56,6 +56,7 @@ const de = {
     captcha: 'Wartet auf Captcha',
     password: 'Wartet auf Passwort',
     verifying: 'Prüfe Datei …',
+    verifyWait: 'Wartet auf Prüfung',
     offline: 'Datei offline',
     online: 'Online',
     unchecked: 'Ungeprüft',
@@ -377,6 +378,7 @@ const en: Messages = {
     captcha: 'Waiting for captcha',
     password: 'Waiting for password',
     verifying: 'Verifying file …',
+    verifyWait: 'Waiting for verification',
     offline: 'File offline',
     online: 'Online',
     unchecked: 'Unchecked',
@@ -651,7 +653,7 @@ const en: Messages = {
   },
 };
 
-const messages: Record<Lang, Messages> = { de, en };
+export const messages: Record<Lang, Messages> = { de, en };
 const STORAGE_KEY = 'haul.lang';
 
 function initialLang(): Lang {

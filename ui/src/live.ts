@@ -5,6 +5,8 @@ export interface LiveProgress {
   bytesDone: number;
   size: number | null;
   speed: number;
+  /** After the last byte: waiting for its turn to verify the checksum, or verifying. */
+  phase?: 'hashWait' | 'hashing';
 }
 
 type Snapshot = {
@@ -86,7 +88,7 @@ export function useLiveEvents(enabled: boolean) {
         const e = JSON.parse(msg.data);
         if (e.type === 'progress') {
           const items = new Map<number, LiveProgress>();
-          for (const i of e.items) items.set(i.id, { bytesDone: i.bytesDone, size: i.size, speed: i.speed });
+          for (const i of e.items) items.set(i.id, { bytesDone: i.bytesDone, size: i.size, speed: i.speed, phase: i.phase });
           const finished = [...snapshot.items.keys()].some((id) => !items.has(id));
           const extract = new Map<number, number>();
           const extractPaths = new Map<string, number>();

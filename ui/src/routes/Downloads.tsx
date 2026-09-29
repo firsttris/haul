@@ -105,7 +105,7 @@ export function DownloadsPage() {
           const d = row.original.d;
           const p = progressOf(d, live.items);
           const pct = d.status === 'finished' ? 100 : percent(p.done, p.size);
-          const tone = describe(d, t).tone;
+          const tone = describe(d, t, undefined, live.items.get(d.id)).tone;
           return (
             <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={t.downloads.progressOf(d.name)}>
               <div className="bar">
@@ -140,7 +140,7 @@ export function DownloadsPage() {
         header: t.common.status,
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
-          const s = describe(row.original.d, t, captchaLinks);
+          const s = describe(row.original.d, t, captchaLinks, live.items.get(row.original.d.id));
           return (
             <div className="status" style={{ color: toneColor[s.tone].color }} title={localize(row.original.d.error) ?? s.label}>
               <span className="dot" style={{ background: toneColor[s.tone].color }} />
