@@ -11,7 +11,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 
   | Hoster | Anmeldung | Premium |
   |---|---|---|
-  | ddownload, Datanodes | Benutzer/Passwort oder xfss-Cookie | Premium-Weg der Seite |
+  | ddownload, Datanodes, FileQ, Filekeeper | Benutzer/Passwort oder xfss-Cookie | Premium-Weg der Seite |
   | Send | Benutzer/Passwort, xfss-Cookie oder API-Key (Benutzer leer) | API nur mit Direktlink-Traffic |
   | 1fichier | API-Key aus den 1fichier-Einstellungen | API, ohne Wartezeiten |
   | Gofile | API-Token aus dem Profil | Links mit dem Account-Token |
@@ -33,6 +33,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Rate-Limit mit Wartezeit); Google-Dokumente noch nicht
 - Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); ein reCaptcha löst du im Browser
   (siehe [Captchas](#captchas))
+- FileQ (fileq.net) und Filekeeper (filekeeper.net) ohne Account über den XFS-Free-Weg wie bei
+  JDownloader: FileQ ohne Sonderfälle (das Ziffern-Captcha liest Haul selbst), Filekeeper mit
+  JDs Anpassungen (Countdown, per JavaScript gebautes Formular); dessen reCaptcha löst du im Browser
 - MEGA (mega.nz) ohne Account wie bei JDownloader und pyLoad: Datei- und Ordner-Links (auch
   Unterordner), Name über die MEGA-API; die Datei kommt verschlüsselt und wird beim Laden
   entschlüsselt (AES-CTR, pro Segment, auch beim Fortsetzen). Fehlt der Schlüssel im Link, fragt
@@ -47,7 +50,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   jede Datei hat ein Häkchen (anfangs alle an, Shift-Klick für Bereiche), gestartet werden nur die
   angehakten, der Rest bleibt im Linksammler. Teilweise angehakte mehrteilige Archive meldet Haul
 - passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
-  ddownload, Datanodes): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
+  ddownload, Datanodes, FileQ, Filekeeper): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
 - automatisches Entpacken fertiger Pakete mit `7z`/`unrar`, mit Fortschritt in Prozent
 - Ansicht **Fertig**: der Fertig-Ordner wie auf der Platte, mit Paketzustand (entpackt, Archive übrig,
@@ -214,6 +217,8 @@ plugins/send        Send-Plugin (XFS, free und premium)
 plugins/1fichier    1fichier-Plugin (mit Ordner-Crawler)
 plugins/gdrive      Google-Drive-Plugin (Dateien)
 plugins/datanodes   Datanodes-Plugin (XFS, free)
+plugins/fileq       FileQ-Plugin (XFS, free und premium)
+plugins/filekeeper  Filekeeper-Plugin (XFS, free und premium)
 ui                  Web-UI
 ```
 

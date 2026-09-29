@@ -167,7 +167,8 @@ export function plainTextCaptcha(html: string): string | undefined {
     .join('');
 }
 
-const DEFAULT_NAMES = [
+/** JD scanInfo's file name patterns; a site's own go before them (`[...mine, ...DEFAULT_NAMES]`). */
+export const DEFAULT_NAMES = [
   /class=["']file-info-name["'][^>]*>([^<]+)</i,
   /<div class=["']name position-relative["']>\s*<h4>([^<>"]+)<\/h4>/i,
   />File\s*:\s*<font[^>]*>([^<>"]+)</i,
@@ -177,7 +178,8 @@ const DEFAULT_NAMES = [
   /<title>\s*Download\s+([^<]+?)\s*<\/title>/i,
 ];
 
-const DEFAULT_SIZES = [
+/** JD scanInfo's file size patterns. */
+export const DEFAULT_SIZES = [
   /<span[^>]+class=["'][^"']*file-size[^"']*["'][^>]*>([^<]+)</i,
   /class=["']file-size["']>([^<>"]+)</i,
   /\[<font[^>]*>(\d+[^<>"]+)<\/font>\]/i,

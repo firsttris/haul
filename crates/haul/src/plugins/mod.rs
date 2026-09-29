@@ -713,6 +713,8 @@ mod replace_tests {
         for id in [
             "1fichier",
             "ddownload",
+            "filekeeper",
+            "fileq",
             "gdrive",
             "gofile",
             "mediafire",
@@ -740,5 +742,15 @@ mod replace_tests {
         }
         // Send's short link goes to Send, not to the plain HTTP download.
         assert_eq!(pm.find_for("https://send.now/d/1pLfI").unwrap().id, "send");
+        for (link, id) in [
+            ("https://fileq.net/abcdefghijkl/Film.rar.html", "fileq"),
+            ("https://filekeeper.net/abcdefghijkl", "filekeeper"),
+        ] {
+            assert_eq!(
+                pm.find_for(link).map(|p| p.id.clone()).as_deref(),
+                Some(id),
+                "{link}"
+            );
+        }
     }
 }

@@ -41,6 +41,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  plugins/filekeeper:
+    dependencies:
+      '@haul/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/fileq:
+    dependencies:
+      '@haul/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   plugins/gdrive:
     dependencies:
       '@haul/plugin-sdk':
