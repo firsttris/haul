@@ -164,6 +164,18 @@ describe('ddownload', () => {
     expect(info.trafficLeft).toBe(Math.round(187 * 1024 ** 3));
   });
 
+  it('reads the 2026 layout (JD r53187)', async () => {
+    const page = `<div class="dk-dl-name">Film.2026.mkv</div><span class="dk-dl-size">4,7 GB</span>`;
+    const ctx = fakeCtx({ 'GET https://ddownload.com/abcdefghijkl': { body: page } });
+    expect(await plugin.check!(LINK, ctx)).toEqual({ online: true, name: 'Film.2026.mkv', size: Math.round(4.7 * 1024 ** 3) });
+
+    const dash = `<a href="/?op=logout">Logout</a><div class="traffic-bar" data-traffic="78700"></div>
+      <div>Active until 18 August 2027</div>`;
+    const acc = fakeCtx({ 'GET https://ddownload.com/?op=my_account': { body: dash } }, { id: 1, user: 'bob', secret: 'pw' });
+    // No Ultimate badge in the new layout: the expiry date decides.
+    expect(await plugin.checkAccount!(acc)).toMatchObject({ valid: true, premium: true, trafficLeft: 78_700_000_000 });
+  });
+
   it('flags a free account', async () => {
     const ctx = fakeCtx(
       { 'GET https://ddownload.com/?op=my_account': { body: '<a href="/?op=logout">Logout</a> Free account' } },

@@ -311,11 +311,9 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const t = match(html, /Traffic available(?: today)?:?\s*(?:<[^>]+>\s*)*([^<]+)/i);
       trafficLeft = t && !/unlimited/i.test(t) ? parseSize(t) : undefined;
     }
-    const premium = cfg.premiumPattern
-      ? cfg.premiumPattern.test(html)
-      : validUntil !== undefined
-        ? validUntil > Date.now()
-        : undefined;
+    // A future expiry date is proof enough; the badge pattern breaks with every redesign.
+    const byDate = validUntil !== undefined ? validUntil > Date.now() : undefined;
+    const premium = cfg.premiumPattern ? cfg.premiumPattern.test(html) || byDate === true : byDate;
     return {
       valid: true,
       premium,
