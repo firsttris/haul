@@ -8,12 +8,16 @@ export interface FakeRoute {
   status?: number;
   body?: string;
   headers?: Record<string, string>;
+  /** Simulates a file response (attachment). */
+  file?: boolean;
 }
 
 export type Handler = (req: HttpRequest) => FakeRoute;
 
 export interface FakeCtx extends Ctx {
   requests: HttpRequest[];
+  /** The fake cookie jar: one jar for all hosts, name → value, in insertion order. */
+  jar: Map<string, string>;
 }
 
 function response(req: HttpRequest, r: FakeRoute): HttpResponse {
@@ -25,6 +29,7 @@ function response(req: HttpRequest, r: FakeRoute): HttpResponse {
     url: req.url,
     headers,
     body,
+    file: !!r.file,
     ok() {
       return this.status >= 200 && this.status < 300;
     },
@@ -36,7 +41,18 @@ function response(req: HttpRequest, r: FakeRoute): HttpResponse {
 
 export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Account | null = null): FakeCtx {
   const requests: HttpRequest[] = [];
-  const request = async (req: HttpRequest) => {
+  const jar = new Map<string, string>();
+  const setCookie = (line: string) => {
+    const [pair] = line.split(';');
+    const i = pair.indexOf('=');
+    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+  };
+  const request = async (input: HttpRequest) => {
+    // Like the real client: the jar's cookies go along unless a Cookie header is given.
+    const req =
+      jar.size && !input.headers?.Cookie
+        ? { ...input, headers: { ...(input.headers ?? {}), Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') } }
+        : input;
     requests.push(req);
     const key = `${(req.method || 'GET').toUpperCase()} ${req.url}`;
     const hit = Object.keys(routes)
@@ -44,7 +60,9 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
       .sort((a, b) => b.length - a.length)[0];
     if (!hit) throw new Error(`unexpected request: ${key}`);
     const route = routes[hit];
-    return response(req, typeof route === 'function' ? route(req) : route);
+    const res = response(req, typeof route === 'function' ? route(req) : route);
+    for (const line of (res.header('set-cookie') ?? '').split('\n')) if (line) setCookie(line);
+    return res;
   };
   const log = Object.assign(() => {}, { info() {}, warn() {}, error() {}, debug() {} });
   return {
@@ -64,5 +82,10 @@ export function fakeCtx(routes: Record<string, FakeRoute | Handler>, account: Ac
     wait: async () => {},
     log,
     account: { get: () => account },
+    cookies: {
+      get: () => [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
+      set: (_url, cookie) => setCookie(cookie),
+    },
+    jar,
   };
 }

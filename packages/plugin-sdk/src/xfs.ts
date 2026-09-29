@@ -169,15 +169,22 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
   }
 
   /** Web requests; in cookie mode the session cookie is sent explicitly. */
+  /**
+   * Web requests of this account. In cookie mode the user's cookie goes into the cookie jar
+   * (like JD's `setCookies(userCookies)`), not into a fixed header: the site may renew the
+   * session while we browse, and the jar keeps the renewed cookie for the next request and
+   * across restarts. It is seeded only while the jar has no session yet, so a renewed
+   * cookie is not overwritten by the stale value the user pasted.
+   */
   function web(ctx: Ctx, m: Mode | null) {
-    const withCookie = (opts?: HttpOptions): HttpOptions | undefined => {
-      if (!m || m.kind !== 'cookie') return opts;
-      const cookie = /(?:^|;\s*)lang=/.test(m.cookie) ? m.cookie : `${m.cookie}; lang=english`;
-      return { ...opts, headers: { ...(opts?.headers ?? {}), Cookie: cookie } };
-    };
+    if (m?.kind === 'cookie' && !/(?:^|;\s*)xfss=/.test(ctx.cookies.get(base))) {
+      const pairs = m.cookie.split(';').map((p) => p.trim()).filter((p) => p.includes('='));
+      if (!pairs.some((p) => /^lang=/i.test(p))) pairs.push('lang=english');
+      for (const pair of pairs) ctx.cookies.set(base, `${pair}; Domain=${host}; Path=/`);
+    }
     return {
-      get: (url: string, opts?: HttpOptions) => ctx.http.get(url, withCookie(opts)),
-      post: (url: string, body: Record<string, string>, opts?: HttpOptions) => ctx.http.post(url, body, withCookie(opts)),
+      get: (url: string, opts?: HttpOptions) => ctx.http.get(url, opts),
+      post: (url: string, body: Record<string, string>, opts?: HttpOptions) => ctx.http.post(url, body, opts),
     };
   }
 
@@ -288,6 +295,14 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const existing = await accountPage(ctx, m);
     if (existing) return existing;
     if (m.kind === 'cookie') {
+      // The jar may hold a renewed cookie that stopped working; try the pasted one once more.
+      const pasted = /(?:^|;\s*)xfss=([^;]+)/.exec(m.cookie)?.[1];
+      const current = /(?:^|;\s*)xfss=([^;]+)/.exec(ctx.cookies.get(base))?.[1];
+      if (pasted && current !== pasted) {
+        ctx.cookies.set(base, `xfss=${pasted}; Domain=${host}; Path=/`);
+        const retry = await accountPage(ctx, m);
+        if (retry) return retry;
+      }
       throw new AccountError(`${cfg.name}: Sitzungs-Cookie ungültig oder abgelaufen (${lastAccountDetail}). ${cookieHelp}`);
     }
     if (m.kind !== 'password') throw new AccountError(`${cfg.name}: keine Web-Anmeldung möglich`);
@@ -399,11 +414,21 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const steps: string[] = [];
       const redirects: string[] = [];
       for (let round = 0; round < 10; round++) {
+        // The server answered with the file itself (JD: looksLikeDownloadableContent).
+        if (res.file) return direct(res.url);
         const target = redirectOf(res);
         if (target) {
-          // A redirect to a download server or CDN is the file ("direct downloads" enabled or
-          // after the form). A redirect within the site is an intermediate page: follow it.
-          if (!isSitePage(target)) return direct(target);
+          // A redirect to a download server or CDN, or to a download path, is the file
+          // ("direct downloads" enabled or after the form). A redirect within the site is an
+          // intermediate page: follow it.
+          if (!isSitePage(target) || directs.some((p) => p.test(`"${target}"`))) return direct(target);
+          if (/[?&]op=payments|\/upgrade|\/premium/i.test(target)) {
+            // JD's isPremiumOnlyURL: the site does not treat this session as premium right now.
+            throw new AccountError(
+              `${cfg.name} leitet zur Premium-Kaufseite um (${target.replace(/^https?:\/\/[^/]+/, '')}): ` +
+                'die Sitzung gilt dort gerade nicht als Premium (abgemeldet oder Sitzung erneuert).',
+            );
+          }
           if (/op=login|\/login/i.test(target)) {
             if (sessionChecked) throw new AccountError(`${cfg.name}: nach der Anmeldung wieder zur Login-Seite umgeleitet`);
             await session(ctx, m);

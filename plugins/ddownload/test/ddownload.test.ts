@@ -220,6 +220,81 @@ describe('ddownload', () => {
     });
   });
 
+  it('keeps a session cookie that the site renews (cookie jar, not a fixed header)', async () => {
+    const seen: string[] = [];
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': (req) => {
+          seen.push(req.headers!.Cookie);
+          return { body: `<a href="/?op=logout">x</a>${FILE_PAGE}`, headers: { 'Set-Cookie': 'xfss=RENEWED; path=/' } };
+        },
+        'POST https://ddownload.com/abcdefghijkl': (req) => {
+          seen.push(req.headers!.Cookie);
+          return FILE_POST(req);
+        },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=PASTED' },
+    );
+    await plugin.resolve(LINK, ctx);
+    await plugin.resolve(LINK, ctx);
+    expect(seen).toEqual([
+      'xfss=PASTED; lang=english',
+      'xfss=RENEWED; lang=english',
+      'xfss=RENEWED; lang=english',
+      'xfss=RENEWED; lang=english',
+    ]);
+  });
+
+  it('explains a redirect to the payments page (JD: premium-only URL)', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/?op=payments' } },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({
+      haulKind: 'account',
+      message: expect.stringContaining('Premium-Kaufseite'),
+    });
+  });
+
+  it('takes a download path on the main domain as the file without loading it', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/d/HASH123/Some.File.part1.rar' } },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    expect((await plugin.resolve(LINK, ctx)).url).toBe('https://ddownload.com/d/HASH123/Some.File.part1.rar');
+    expect(ctx.requests.some((r) => r.url.includes('/d/HASH123'))).toBe(false);
+  });
+
+  it('hands over a response that is the file itself', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/abcdefghijkl': { body: `<a href="/?op=logout">x</a>${FILE_PAGE}` },
+        'POST https://ddownload.com/abcdefghijkl': { status: 302, headers: { location: '/?op=get&id=abcdefghijkl' } },
+        'GET https://ddownload.com/?op=get&id=abcdefghijkl': { file: true },
+      },
+      { id: 1, user: 'bob', secret: 'xfss=SESSION' },
+    );
+    expect((await plugin.resolve(LINK, ctx)).url).toBe('https://ddownload.com/?op=get&id=abcdefghijkl');
+  });
+
+  it('falls back to the pasted cookie when the renewed one stopped working', async () => {
+    const ctx = fakeCtx(
+      {
+        'GET https://ddownload.com/?op=my_account': (req) =>
+          req.headers!.Cookie.includes('xfss=PASTED') ? { body: ACCOUNT_PAGE } : LOGGED_OUT,
+      },
+      { id: 1, user: 'bob', secret: 'xfss=PASTED' },
+    );
+    ctx.jar.set('xfss', 'STALE');
+    expect((await plugin.checkAccount!(ctx)).valid).toBe(true);
+  });
+
   it('flags a free account', async () => {
     const ctx = fakeCtx(
       { 'GET https://ddownload.com/?op=my_account': { body: '<a href="/?op=logout">Logout</a> Free account' } },

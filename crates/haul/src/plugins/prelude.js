@@ -13,6 +13,7 @@
     this.url = r.url;
     this.headers = r.headers;
     this.body = r.body;
+    this.file = !!r.file;
   }
   Response.prototype.ok = function () { return this.status >= 200 && this.status < 300; };
   Response.prototype.text = function () { return this.body; };
@@ -74,6 +75,10 @@
       log: logger,
       account: {
         get: function () { return env.account || null; },
+      },
+      cookies: {
+        get: function (url) { return __host_cookies(String(url)); },
+        set: function (url, cookie) { __host_set_cookie(String(url), String(cookie)); },
       },
     };
   }

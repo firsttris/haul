@@ -196,6 +196,7 @@ fn build_clients(user_agent: &str, jar: Option<Arc<CookieStoreMutex>>) -> HttpCl
     HttpClients {
         follow: build(true),
         no_follow: build(false),
+        jar,
     }
 }
 

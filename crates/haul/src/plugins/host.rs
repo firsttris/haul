@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
+use reqwest::cookie::CookieStore;
+use reqwest::header::HeaderValue;
 use reqwest::Client;
+use reqwest_cookie_store::CookieStoreMutex;
 use rquickjs::prelude::{Async, Func};
 use rquickjs::{
     async_with, AsyncContext, AsyncRuntime, CatchResultExt, Context, Function, Promise, Runtime,
@@ -23,6 +26,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 pub struct HttpClients {
     pub follow: Client,
     pub no_follow: Client,
+    /// The cookie store both clients use; plugins read and seed it via `ctx.cookies`.
+    pub jar: Option<Arc<CookieStoreMutex>>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +55,29 @@ struct HttpResp {
     url: String,
     headers: HashMap<String, String>,
     body: String,
+    /// The response is a file, not a page; its body was not read (like JD's
+    /// `looksLikeDownloadableContent`). The core downloads it from `url`.
+    file: bool,
+}
+
+/// Attachments and binary content types are downloads, not pages to parse.
+fn looks_like_file(headers: &reqwest::header::HeaderMap) -> bool {
+    let get = |h: reqwest::header::HeaderName| {
+        headers
+            .get(h)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    if get(reqwest::header::CONTENT_DISPOSITION).contains("attachment") {
+        return true;
+    }
+    let ct = get(reqwest::header::CONTENT_TYPE);
+    !ct.is_empty()
+        && !ct.starts_with("text/")
+        && !["json", "xml", "javascript", "x-www-form-urlencoded"]
+            .iter()
+            .any(|t| ct.contains(t))
 }
 
 async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
@@ -93,6 +121,15 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
             })
             .or_insert(v);
     }
+    if looks_like_file(resp.headers()) {
+        return Ok(HttpResp {
+            status,
+            url,
+            headers,
+            body: String::new(),
+            file: true,
+        });
+    }
     let mut body = Vec::new();
     while let Some(chunk) = resp.chunk().await? {
         body.extend_from_slice(&chunk);
@@ -105,6 +142,7 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
         url,
         headers,
         body: String::from_utf8_lossy(&body).into_owned(),
+        file: false,
     })
 }
 
@@ -162,6 +200,8 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_http", Func::from(|| ()))?;
             ctx.globals().set("__host_sleep", Func::from(|| ()))?;
             ctx.globals().set("__host_log", Func::from(|| ()))?;
+            ctx.globals().set("__host_cookies", Func::from(|| ()))?;
+            ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
             ctx.eval::<(), _>(code.as_str())?;
             let meta: Function = ctx.globals().get("__haul_meta")?;
@@ -251,6 +291,29 @@ async fn invoke_inner(
                     _ => tracing::info!(plugin = %id, "{msg}"),
                 }),
             )?;
+            let jar = clients.jar.clone();
+            g.set(
+                "__host_cookies",
+                Func::from(move |url: String| -> String {
+                    let (Some(jar), Ok(url)) = (&jar, url::Url::parse(&url)) else {
+                        return String::new();
+                    };
+                    jar.cookies(&url)
+                        .and_then(|v| v.to_str().ok().map(str::to_string))
+                        .unwrap_or_default()
+                }),
+            )?;
+            let jar = clients.jar.clone();
+            g.set(
+                "__host_set_cookie",
+                Func::from(move |url: String, cookie: String| {
+                    if let (Some(jar), Ok(url), Ok(value)) =
+                        (&jar, url::Url::parse(&url), HeaderValue::from_str(&cookie))
+                    {
+                        jar.set_cookies(&mut std::iter::once(&value), &url);
+                    }
+                }),
+            )?;
             ctx.eval::<(), _>(PRELUDE)?;
             ctx.eval::<(), _>(code.as_str())?;
             let invoke: Function = g.get("__haul_invoke")?;
@@ -303,6 +366,7 @@ mod tests {
         HttpClients {
             follow: Client::new(),
             no_follow: Client::new(),
+            jar: Some(Arc::default()),
         }
     }
 
@@ -374,6 +438,7 @@ mod bundled {
         let clients = HttpClients {
             follow: Client::new(),
             no_follow: Client::new(),
+            jar: None,
         };
         let err = invoke(
             "ddownload",
@@ -386,5 +451,75 @@ mod bundled {
         .await
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::Account, "{}", err.message);
+    }
+}
+
+#[cfg(test)]
+mod cookie_and_file_tests {
+    use super::*;
+    use axum::http::{header, HeaderMap};
+    use axum::routing::get;
+
+    #[tokio::test]
+    async fn cookies_and_file_responses() {
+        let app = axum::Router::new()
+            .route(
+                "/page",
+                get(|h: HeaderMap| async move {
+                    let sent = h
+                        .get(header::COOKIE)
+                        .map(|v| v.to_str().unwrap().to_string())
+                        .unwrap_or_default();
+                    ([(header::SET_COOKIE, "xfss=RENEWED; Path=/")], sent)
+                }),
+            )
+            .route(
+                "/file.bin",
+                get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/octet-stream")],
+                        vec![0u8; 20 * 1024 * 1024],
+                    )
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let jar: Arc<CookieStoreMutex> = Arc::default();
+        let build = || {
+            Client::builder()
+                .cookie_provider(jar.clone())
+                .build()
+                .unwrap()
+        };
+        let clients = HttpClients {
+            follow: build(),
+            no_follow: build(),
+            jar: Some(jar.clone()),
+        };
+        let code = r#"
+            var __plugin = { default: { id: "c", version: 1, matches: [],
+                async resolve(base, ctx) {
+                    ctx.cookies.set(base, "xfss=PASTED; Path=/");
+                    const first = (await ctx.http.get(base + "/page")).body;
+                    const second = (await ctx.http.get(base + "/page")).body;
+                    const file = await ctx.http.get(base + "/file.bin");
+                    return { url: [first, second, ctx.cookies.get(base), String(file.file), String(file.body.length)].join("|") };
+                },
+            }};
+        "#;
+        let v = invoke(
+            "c",
+            code,
+            "resolve",
+            serde_json::json!([base]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        // 20 MB would exceed the page limit: the file is recognised without reading it.
+        assert_eq!(v["url"], "xfss=PASTED|xfss=RENEWED|xfss=RENEWED|true|0");
     }
 }

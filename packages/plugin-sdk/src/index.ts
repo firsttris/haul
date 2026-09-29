@@ -31,6 +31,8 @@ export interface HttpResponse {
   /** Lower-case header names; repeated headers are joined (`set-cookie` with newlines). */
   headers: Record<string, string>;
   body: string;
+  /** The response is a file (attachment / binary); its body was not loaded. Download `url`. */
+  file: boolean;
   ok(): boolean;
   text(): string;
   json<T = unknown>(): T;
@@ -67,6 +69,13 @@ export interface Ctx {
   wait(seconds: number): Promise<void>;
   log: Logger;
   account: { get(): Account | null };
+  /** The account's cookie jar, shared by all requests and kept across restarts. */
+  cookies: {
+    /** `Cookie` header value the jar would send to `url`. */
+    get(url: string): string;
+    /** Adds a cookie like a `Set-Cookie` header from `url` would, e.g. `a=b; Domain=.x.com; Path=/`. */
+    set(url: string, cookie: string): void;
+  };
 }
 
 export interface CheckResult {
