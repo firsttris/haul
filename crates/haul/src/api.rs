@@ -93,6 +93,11 @@ pub fn router(app: Arc<App>) -> Router {
             patch(update_account).delete(delete_account),
         )
         .route("/accounts/{id}/check", post(check_account))
+        .route("/files", get(list_files))
+        .route("/files/delete", post(delete_files))
+        .route("/files/delete-archives", post(delete_archives))
+        .route("/files/extract", post(extract_folder))
+        .route("/files/move", post(move_file))
         .route("/plugins", get(list_plugins))
         .route("/plugins/reload", post(reload_plugins))
         .route("/settings", get(get_settings).put(put_settings))
@@ -617,6 +622,245 @@ pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ---- Fertig view: the done folder ------------------------------------------------
+
+#[derive(Deserialize)]
+struct PathQuery {
+    #[serde(default)]
+    path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderPackage {
+    id: i64,
+    name: String,
+    extract: Option<String>,
+    extract_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileView {
+    #[serde(flatten)]
+    entry: crate::files::Entry,
+    /// For folders: the Haul package they belong to.
+    package: Option<FolderPackage>,
+    /// For folders: archive files directly inside (volumes count one by one).
+    archives: usize,
+    /// For folders: extraction running, in percent.
+    extracting: Option<u8>,
+    /// For folders: last extraction error from the Fertig view.
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetView {
+    name: String,
+    path: String,
+    available: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderView {
+    path: String,
+    root: String,
+    entries: Vec<FileView>,
+    targets: Vec<TargetView>,
+    /// Extraction running in the listed folder itself, in percent.
+    extracting: Option<u8>,
+    error: Option<String>,
+}
+
+fn targets(app: &App) -> Vec<TargetView> {
+    app.engine
+        .cfg
+        .move_targets
+        .iter()
+        .map(|t| TargetView {
+            name: t.name.clone(),
+            path: t.path.display().to_string(),
+            available: t.path.is_dir(),
+        })
+        .collect()
+}
+
+fn bad(e: anyhow::Error) -> ApiError {
+    ApiError::bad_request(format!("{e:#}"))
+}
+
+async fn list_files(
+    State(app): State<Arc<App>>,
+    Query(q): Query<PathQuery>,
+) -> ApiResult<Json<FolderView>> {
+    let engine = &app.engine;
+    let root = engine.cfg.done_dir.clone();
+    tokio::fs::create_dir_all(&root).await?;
+    let dir = crate::files::resolve(&root, &q.path).map_err(bad)?;
+    if !dir.is_dir() {
+        return Err(ApiError::bad_request("kein Ordner"));
+    }
+    let listing = {
+        let (root, dir) = (root.clone(), dir.clone());
+        tokio::task::spawn_blocking(move || crate::files::list(&root, &dir))
+            .await?
+            .map_err(bad)?
+    };
+    // Package folders by their real location.
+    let packages: Vec<Package> = sqlx::query_as("SELECT * FROM packages")
+        .fetch_all(&engine.db)
+        .await?;
+    let by_dir: Vec<(std::path::PathBuf, Package)> = packages
+        .into_iter()
+        .filter_map(|p| engine.package_dir(&p).canonicalize().ok().map(|d| (d, p)))
+        .collect();
+    let errors = engine.folder_errors.lock().unwrap().clone();
+    let entries = listing
+        .into_iter()
+        .map(|entry| {
+            let full = root.join(&entry.path);
+            let (package, archives) = if entry.dir {
+                let real = full.canonicalize().ok();
+                let package =
+                    by_dir
+                        .iter()
+                        .find(|(d, _)| Some(d) == real.as_ref())
+                        .map(|(_, p)| FolderPackage {
+                            id: p.id,
+                            name: p.name.clone(),
+                            extract: p.extract.clone(),
+                            extract_error: p.extract_error.clone(),
+                        });
+                let names = crate::files::file_names(&full);
+                (
+                    package,
+                    crate::engine::extract::find_archives(&names).1.len(),
+                )
+            } else {
+                (None, 0)
+            };
+            FileView {
+                extracting: entry
+                    .dir
+                    .then(|| engine.extract_progress_of(&entry.path))
+                    .flatten(),
+                error: errors.get(&entry.path).cloned(),
+                entry,
+                package,
+                archives,
+            }
+        })
+        .collect();
+    let path = crate::files::relative(&root, &dir);
+    Ok(Json(FolderView {
+        extracting: engine.extract_progress_of(&path),
+        error: errors.get(&path).cloned(),
+        path,
+        root: root.display().to_string(),
+        entries,
+        targets: targets(&app),
+    }))
+}
+
+#[derive(Deserialize)]
+struct PathsBody {
+    paths: Vec<String>,
+}
+
+async fn delete_files(
+    State(app): State<Arc<App>>,
+    Json(b): Json<PathsBody>,
+) -> ApiResult<StatusCode> {
+    let root = &app.engine.cfg.done_dir;
+    // Check every path before deleting anything.
+    let resolved = b
+        .paths
+        .iter()
+        .map(|p| crate::files::resolve_entry(root, p))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(bad)?;
+    for (path, full) in b.paths.iter().zip(resolved) {
+        let folder = std::path::Path::new(path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if app.engine.extract_progress_of(path).is_some()
+            || app.engine.extract_progress_of(&folder).is_some()
+        {
+            return Err(ApiError::bad_request(format!(
+                "{path}: wird gerade entpackt"
+            )));
+        }
+        crate::files::delete(&full)
+            .await
+            .map_err(|e| bad(anyhow::anyhow!("{path}: {e}")))?;
+        tracing::info!(path, "deleted from done folder");
+    }
+    app.engine.events.changed(Topic::Files);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_archives(
+    State(app): State<Arc<App>>,
+    Json(b): Json<PathQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let dir = crate::files::resolve_entry(&app.engine.cfg.done_dir, &b.path).map_err(bad)?;
+    if !dir.is_dir() {
+        return Err(ApiError::bad_request("kein Ordner"));
+    }
+    if app.engine.extract_progress_of(&b.path).is_some() {
+        return Err(ApiError::bad_request("wird gerade entpackt"));
+    }
+    let (_, all) = crate::engine::extract::find_archives(&crate::files::file_names(&dir));
+    for name in &all {
+        tokio::fs::remove_file(dir.join(name)).await?;
+    }
+    app.engine.events.changed(Topic::Files);
+    Ok(Json(serde_json::json!({ "deleted": all.len() })))
+}
+
+async fn extract_folder(
+    State(app): State<Arc<App>>,
+    Json(b): Json<PathQuery>,
+) -> ApiResult<StatusCode> {
+    app.engine.extract_folder(&b.path).map_err(bad)?;
+    app.engine.events.changed(Topic::Files);
+    Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Deserialize)]
+struct MoveBody {
+    path: String,
+    target: String,
+}
+
+async fn move_file(
+    State(app): State<Arc<App>>,
+    Json(b): Json<MoveBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let engine = &app.engine;
+    let src = crate::files::resolve_entry(&engine.cfg.done_dir, &b.path).map_err(bad)?;
+    let target = engine
+        .cfg
+        .move_targets
+        .iter()
+        .find(|t| t.name == b.target)
+        .ok_or_else(|| ApiError::bad_request("unbekanntes Ziel"))?;
+    if engine.extract_progress_of(&b.path).is_some() {
+        return Err(ApiError::bad_request("wird gerade entpackt"));
+    }
+    let dest = crate::files::move_into(&src, &target.path)
+        .await
+        .map_err(bad)?;
+    tracing::info!(from = %b.path, to = %dest.display(), "moved to '{}'", target.name);
+    engine.events.changed(Topic::Files);
+    Ok(Json(
+        serde_json::json!({ "to": dest.display().to_string() }),
+    ))
+}
+
 // ---- plugins & settings ------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -650,6 +894,7 @@ struct SettingsView {
     version: &'static str,
     /// Installed extractors (7-Zip, unrar, unar), best first.
     extractors: Vec<String>,
+    move_targets: Vec<TargetView>,
 }
 
 async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsView>> {
@@ -663,6 +908,7 @@ async fn get_settings(State(app): State<Arc<App>>) -> ApiResult<Json<SettingsVie
             .await?
             .is_some(),
         version: env!("CARGO_PKG_VERSION"),
+        move_targets: targets(&app),
         extractors: crate::engine::extract::available_tools()
             .iter()
             .map(|t| t.describe())
@@ -674,5 +920,16 @@ async fn put_settings(
     State(app): State<Arc<App>>,
     Json(s): Json<Settings>,
 ) -> ApiResult<Json<Settings>> {
+    if let Some(name) = s.auto_move_target.as_deref().filter(|n| !n.is_empty()) {
+        if !app.engine.cfg.move_targets.iter().any(|t| t.name == name) {
+            return Err(ApiError::bad_request(format!(
+                "Ziel '{name}' ist nicht in HAUL_MOVE_TARGETS"
+            )));
+        }
+    }
+    let s = Settings {
+        auto_move_target: s.auto_move_target.clone().filter(|n| !n.is_empty()),
+        ..s
+    };
     Ok(Json(app.engine.update_settings(s).await?))
 }

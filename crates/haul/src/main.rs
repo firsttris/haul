@@ -6,6 +6,7 @@ mod crypto;
 mod db;
 mod engine;
 mod events;
+mod files;
 mod plugins;
 mod ui;
 mod util;

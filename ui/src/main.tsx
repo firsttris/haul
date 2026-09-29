@@ -13,6 +13,7 @@ import { DownloadsPage } from './routes/Downloads';
 import { CollectorPage } from './routes/Collector';
 import { AccountsPage } from './routes/Accounts';
 import { SettingsPage } from './routes/Settings';
+import { DonePage } from './routes/Done';
 
 const onAuthError = (err: unknown) => {
   if (err instanceof ApiError && err.status === 401) queryClient.invalidateQueries({ queryKey: ['auth'] });
@@ -42,6 +43,12 @@ const rootRoute = createRootRoute({ component: Root });
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: DownloadsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/linksammler', component: CollectorPage }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/fertig',
+    component: DonePage,
+    validateSearch: (s: Record<string, unknown>) => ({ path: typeof s.path === 'string' ? s.path : '' }),
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: '/accounts', component: AccountsPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/einstellungen', component: SettingsPage }),
 ]);

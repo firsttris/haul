@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type Package, type SettingsView, type Stats } from '../api';
 import { useLive } from '../live';
 import { bytes } from '../format';
-import { IconDownload, IconKey, IconLink, IconSliders, Logo } from './icons';
+import { IconDownload, IconFolder, IconKey, IconLink, IconSliders, Logo } from './icons';
 
 export function useStats() {
   return useQuery({ queryKey: ['stats'], queryFn: () => api<Stats>('/stats'), refetchInterval: 30_000 });
@@ -71,6 +71,10 @@ export function Layout({ children }: { children: ReactNode }) {
             <IconLink />
             <span className="label">Linksammler</span>
             {collectorCount > 0 && <span className="count">{collectorCount}</span>}
+          </Link>
+          <Link to="/fertig" search={{ path: '' }} activeProps={{ className: 'active' }}>
+            <IconFolder />
+            <span className="label">Fertig</span>
           </Link>
           <Link to="/accounts" activeProps={{ className: 'active' }}>
             <IconKey />

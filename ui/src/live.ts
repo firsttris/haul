@@ -13,9 +13,17 @@ type Snapshot = {
   connected: boolean;
   /** Extraction progress in percent per package id. */
   extract: Map<number, number>;
+  /** Extraction progress in percent per folder (relative to the done folder). */
+  extractPaths: Map<string, number>;
 };
 
-let snapshot: Snapshot = { items: new Map(), totalSpeed: 0, connected: false, extract: new Map() };
+let snapshot: Snapshot = {
+  items: new Map(),
+  totalSpeed: 0,
+  connected: false,
+  extract: new Map(),
+  extractPaths: new Map(),
+};
 const listeners = new Set<() => void>();
 
 function publish(next: Partial<Snapshot>) {
@@ -38,6 +46,7 @@ const topicKeys: Record<string, string[][]> = {
   accounts: [['accounts'], ['stats']],
   plugins: [['plugins']],
   settings: [['settings'], ['stats']],
+  files: [['files']],
 };
 
 /** Opens the SSE connection once and turns events into query invalidations. */
@@ -79,8 +88,15 @@ export function useLiveEvents(enabled: boolean) {
           for (const i of e.items) items.set(i.id, { bytesDone: i.bytesDone, size: i.size, speed: i.speed });
           const finished = [...snapshot.items.keys()].some((id) => !items.has(id));
           const extract = new Map<number, number>();
-          for (const x of e.extract ?? []) extract.set(x.packageId, x.percent);
-          publish({ items, totalSpeed: e.totalSpeed, extract });
+          const extractPaths = new Map<string, number>();
+          for (const x of e.extract ?? []) {
+            if (x.packageId != null) extract.set(x.packageId, x.percent);
+            extractPaths.set(x.path, x.percent);
+          }
+          // An extraction just ended: the folder contents changed.
+          const ended = [...snapshot.extractPaths.keys()].some((p) => !extractPaths.has(p));
+          publish({ items, totalSpeed: e.totalSpeed, extract, extractPaths });
+          if (ended) invalidate('files');
           if (finished) invalidate('downloads');
         } else if (e.type === 'changed') {
           invalidate(e.topic);

@@ -11,7 +11,10 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
 - Linksammler mit Online-Check, Paketname, Zielordner und Archiv-Passwörtern
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
-- automatisches Entpacken fertiger Pakete mit `7z`/`unrar`
+- automatisches Entpacken fertiger Pakete mit `7z`/`unrar`, mit Fortschritt in Prozent
+- Ansicht **Fertig**: der Fertig-Ordner wie auf der Platte, mit Paketzustand (entpackt, Archive übrig,
+  Fehler, nicht von Haul); Entpacken (ein beliebiger Teil entpackt den ganzen Satz), Archive löschen,
+  Löschen und Verschieben an feste Ziele (z. B. den Renamer), optional automatisch nach dem Entpacken
 
 **Bewusst nicht in v1:** Free-Downloads mit Captcha, Link-Crawler, DLC-Container, Multi-User.
 
@@ -51,6 +54,7 @@ Dann `http://server:8080` öffnen und beim ersten Aufruf den Benutzer anlegen (o
 | `HAUL_CNL_LISTEN` | `127.0.0.1:9666` (im Image `0.0.0.0:9666`) | Click'n'Load; `off` schaltet es ab |
 | `HAUL_BUILTIN_PLUGINS` | im Image `/app/plugins` | mitgelieferte Plugins |
 | `HAUL_USER`, `HAUL_PASSWORD` | – | legt den Login beim ersten Start an |
+| `HAUL_MOVE_TARGETS` | – | Ziele zum Verschieben aus der Fertig-Ansicht, `Name=/pfad;Name2=/pfad2` (im Container gemountet) |
 | `HAUL_USER_AGENT` | Desktop-Browser | User-Agent gegenüber Hostern |
 | `HAUL_7Z`, `HAUL_UNRAR` | `7z`, `unrar` | Programme zum Entpacken |
 | `RUST_LOG` | `info` | Log-Level |

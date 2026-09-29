@@ -10,9 +10,12 @@ services:
       - ./config:/config
       - /mnt/cache/downloads/tmp:/downloads/tmp
       - /mnt/disk1/downloads:/downloads/done
+      # Optional: target folders for "Verschieben" in the Fertig view.
+      # - /mnt/disk1/media/inbox:/targets/renamer
     environment:
       # Encrypts stored account passwords. Keep it stable and secret: `openssl rand -hex 32`
       - APP_SECRET=change-me
+      # - HAUL_MOVE_TARGETS=Renamer=/targets/renamer
       # Optional: create the web login on first start instead of in the UI.
       # - HAUL_USER=admin
       # - HAUL_PASSWORD=...

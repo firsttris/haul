@@ -51,8 +51,10 @@ pub struct Engine {
     wake: Notify,
     limiter: Limiter,
     shutdown: CancellationToken,
-    /// Extraction progress per package, sent with the progress events.
-    extracting: Mutex<HashMap<i64, u8>>,
+    /// Extraction progress per folder (relative to the done folder) and its package.
+    extracting: Mutex<HashMap<String, (Option<i64>, u8)>>,
+    /// Last extraction error of folders without a package (Fertig view).
+    pub(crate) folder_errors: Mutex<HashMap<String, String>>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -100,6 +102,7 @@ impl Engine {
             limiter,
             shutdown: CancellationToken::new(),
             extracting: Mutex::new(HashMap::new()),
+            folder_errors: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -121,16 +124,25 @@ impl Engine {
         self.wake.notify_one();
     }
 
-    pub(crate) fn set_extract_progress(&self, package_id: i64, percent: Option<u8>) {
+    pub(crate) fn set_extract_progress(
+        &self,
+        rel: &str,
+        package_id: Option<i64>,
+        percent: Option<u8>,
+    ) {
         let mut map = self.extracting.lock().unwrap();
         match percent {
             Some(p) => {
-                map.insert(package_id, p);
+                map.insert(rel.to_string(), (package_id, p));
             }
             None => {
-                map.remove(&package_id);
+                map.remove(rel);
             }
         }
+    }
+
+    pub fn extract_progress_of(&self, rel: &str) -> Option<u8> {
+        self.extracting.lock().unwrap().get(rel).map(|(_, p)| *p)
     }
 
     pub fn active_count(&self) -> usize {
@@ -308,7 +320,8 @@ impl Engine {
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|(&package_id, &percent)| ExtractProgress {
+                .map(|(path, &(package_id, percent))| ExtractProgress {
+                    path: path.clone(),
                     package_id,
                     percent,
                 })
@@ -776,6 +789,7 @@ mod engine_tests {
             app_secret: "test".into(),
             initial_user: None,
             user_agent: None,
+            move_targets: vec![],
         };
         std::fs::create_dir_all(&cfg.config_dir).unwrap();
         let db = db::connect(&cfg.db_path()).await.unwrap();

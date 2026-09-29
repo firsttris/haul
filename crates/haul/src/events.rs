@@ -25,6 +25,8 @@ pub enum Topic {
     Accounts,
     Plugins,
     Settings,
+    /// Contents of the done folder.
+    Files,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,7 +42,9 @@ pub struct ProgressItem {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractProgress {
-    pub package_id: i64,
+    /// Folder being extracted, relative to the done folder.
+    pub path: String,
+    pub package_id: Option<i64>,
     pub percent: u8,
 }
 

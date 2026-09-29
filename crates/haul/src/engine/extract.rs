@@ -10,8 +10,47 @@ use tokio::process::Command;
 use super::Engine;
 use crate::db::{self, status};
 use crate::events::Topic;
+use crate::files;
 
 /// First volume of each archive set among `names`, plus every file belonging to a set.
+/// Which archive set a file belongs to, and whether it is the set's first volume
+/// (`x.part3.rar` → set `x` of `.partN.rar`, not first).
+fn set_key(name: &str) -> Option<(String, bool)> {
+    let lower = name.to_lowercase();
+    let part = Regex::new(r"^(.*)\.part0*(\d+)\.rar$").unwrap();
+    let split = Regex::new(r"^(.*\.(?:7z|zip|rar))\.0*(\d+)$").unwrap();
+    let rar_old = Regex::new(r"^(.*)\.r\d{2}$").unwrap();
+    if let Some(c) = part.captures(&lower) {
+        return Some((format!("{}|part", &c[1]), &c[2] == "1"));
+    }
+    if let Some(c) = split.captures(&lower) {
+        return Some((format!("{}|split", &c[1]), &c[2] == "1"));
+    }
+    if let Some(c) = rar_old.captures(&lower) {
+        return Some((format!("{}|rar", &c[1]), false));
+    }
+    if let Some(stem) = lower.strip_suffix(".rar") {
+        return Some((format!("{stem}|rar"), true));
+    }
+    (lower.ends_with(".zip") || lower.ends_with(".7z")).then(|| (lower.clone(), true))
+}
+
+/// The archive set of `name` among `names`: its first volume and all volumes.
+/// Clicking any part (`part3.rar`, `.r01`, `.7z.002`) extracts the whole set.
+pub fn archive_set(names: &[String], name: &str) -> Option<(String, Vec<String>)> {
+    let (key, _) = set_key(name)?;
+    let members: Vec<String> = names
+        .iter()
+        .filter(|n| set_key(n).is_some_and(|(k, _)| k == key))
+        .cloned()
+        .collect();
+    let first = members
+        .iter()
+        .find(|n| set_key(n).is_some_and(|(_, f)| f))?
+        .clone();
+    Some((first, members))
+}
+
 pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
     let part = Regex::new(r"(?i)\.part0*(\d+)\.rar$").unwrap();
     let rar_old = Regex::new(r"(?i)\.r\d{2}$").unwrap();
@@ -241,19 +280,26 @@ async fn extract_one(
 }
 
 impl Engine {
+    /// A download finished: once the whole package is done, extract it and/or move it.
     pub(super) async fn on_download_finished(self: Arc<Self>, package_id: i64) {
-        if !self.settings().auto_extract {
-            return;
-        }
         let Ok(downloads) = db::package_downloads(&self.db, package_id).await else {
             return;
         };
         if downloads.iter().any(|d| d.status != status::FINISHED) {
             return;
         }
-        if let Err(e) = self.extract_package(package_id).await {
-            tracing::warn!(package_id, "extract: {e:#}");
+        let Ok(Some(pkg)) = db::get_package(&self.db, package_id).await else {
+            return;
+        };
+        let dir = self.package_dir(&pkg);
+        let (archives, _) = find_archives(&files::file_names(&dir));
+        if self.settings().auto_extract && !archives.is_empty() {
+            if let Err(e) = self.extract_package(package_id).await {
+                tracing::warn!(package_id, "extract: {e:#}");
+                return;
+            }
         }
+        self.auto_move(&dir).await;
     }
 
     pub(super) async fn resume_pending_extractions(self: Arc<Self>) {
@@ -266,29 +312,27 @@ impl Engine {
         }
     }
 
+    /// Extracts the archives in the package folder (whatever is on disk there, so renamed or
+    /// added files count too) and records the result on the package.
     pub async fn extract_package(&self, package_id: i64) -> Result<()> {
         let pkg = db::get_package(&self.db, package_id)
             .await?
             .ok_or_else(|| anyhow!("Paket nicht gefunden"))?;
-        let names: Vec<String> = db::package_downloads(&self.db, package_id)
-            .await?
-            .into_iter()
-            .filter(|d| d.status == status::FINISHED)
-            .map(|d| d.name)
-            .collect();
-        let (first, all) = find_archives(&names);
-        if first.is_empty() {
+        let dir = self.package_dir(&pkg);
+        if find_archives(&files::file_names(&dir)).0.is_empty() {
             return Ok(());
         }
-        let claimed = sqlx::query("UPDATE packages SET extract = 'running', extract_error = NULL WHERE id = ? AND (extract IS NULL OR extract != 'running')")
-            .bind(package_id)
-            .execute(&self.db)
-            .await?;
+        let claimed = sqlx::query(
+            "UPDATE packages SET extract = 'running', extract_error = NULL
+             WHERE id = ? AND (extract IS NULL OR extract != 'running')",
+        )
+        .bind(package_id)
+        .execute(&self.db)
+        .await?;
         if claimed.rows_affected() == 0 {
             return Ok(());
         }
         self.events.changed(Topic::Downloads);
-        let dir = self.package_dir(&pkg);
         let passwords: Vec<String> = pkg
             .passwords
             .as_deref()
@@ -298,28 +342,12 @@ impl Engine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .collect();
-        let mut error = None;
-        let n = first.len() as u32;
-        self.set_extract_progress(package_id, Some(0));
-        for (i, a) in first.iter().enumerate() {
-            // Overall percent over all archives of the package.
-            let mut report = |p: u8| {
-                self.set_extract_progress(
-                    package_id,
-                    Some(((i as u32 * 100 + p as u32) / n) as u8),
-                );
-            };
-            if let Err(e) = extract_one(&dir.join(a), &dir, &passwords, &mut report).await {
-                error = Some(format!("{a}: {e:#}"));
-                break;
-            }
-        }
-        self.set_extract_progress(package_id, None);
-        if error.is_none() && self.settings().delete_archives {
-            for a in &all {
-                let _ = tokio::fs::remove_file(dir.join(a)).await;
-            }
-        }
+        let rel = files::relative(&self.cfg.done_dir, &dir);
+        let error = self
+            .extract_dir(&dir, &rel, Some(package_id), &passwords, None)
+            .await
+            .err()
+            .map(|e| format!("{e:#}"));
         sqlx::query("UPDATE packages SET extract = ?, extract_error = ? WHERE id = ?")
             .bind(if error.is_some() { "failed" } else { "done" })
             .bind(&error)
@@ -327,10 +355,146 @@ impl Engine {
             .execute(&self.db)
             .await?;
         self.events.changed(Topic::Downloads);
+        self.events.changed(Topic::Files);
         match error {
             Some(e) => Err(anyhow!(e)),
             None => Ok(()),
         }
+    }
+
+    /// Extracts every archive set directly inside `dir` (or only the set `only`: first volume
+    /// and all volumes), reporting the overall percentage under `rel` (the folder relative to
+    /// the done folder).
+    async fn extract_dir(
+        &self,
+        dir: &Path,
+        rel: &str,
+        package_id: Option<i64>,
+        passwords: &[String],
+        only: Option<(String, Vec<String>)>,
+    ) -> Result<()> {
+        let (first, all) = match only {
+            Some((first, members)) => (vec![first], members),
+            None => find_archives(&files::file_names(dir)),
+        };
+        let n = first.len().max(1) as u32;
+        self.set_extract_progress(rel, package_id, Some(0));
+        let mut result = Ok(());
+        for (i, a) in first.iter().enumerate() {
+            let mut report = |p: u8| {
+                self.set_extract_progress(
+                    rel,
+                    package_id,
+                    Some(((i as u32 * 100 + p as u32) / n) as u8),
+                );
+            };
+            if let Err(e) = extract_one(&dir.join(a), dir, passwords, &mut report).await {
+                result = Err(anyhow!("{a}: {e:#}"));
+                break;
+            }
+        }
+        self.set_extract_progress(rel, package_id, None);
+        if result.is_ok() && self.settings().delete_archives {
+            for a in &all {
+                let _ = tokio::fs::remove_file(dir.join(a)).await;
+            }
+        }
+        result
+    }
+
+    /// "Entpacken" in the Fertig view. A folder: all archive sets in it (through its package if
+    /// it has one, which keeps passwords and status). A file: the archive set it belongs to,
+    /// whichever volume was picked. Runs in the background.
+    pub fn extract_folder(self: &Arc<Self>, rel: &str) -> Result<()> {
+        let path = files::resolve(&self.cfg.done_dir, rel)?;
+        let (dir, set) = if path.is_dir() {
+            (path, None)
+        } else {
+            let dir = path
+                .parent()
+                .ok_or_else(|| anyhow!("ungültiger Pfad"))?
+                .to_path_buf();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let set = archive_set(&files::file_names(&dir), &name)
+                .ok_or_else(|| anyhow!("{name} ist kein Archiv oder der erste Teil fehlt"))?;
+            (dir, Some(set))
+        };
+        let folder = files::relative(&self.cfg.done_dir, &dir);
+        if self.extract_progress_of(&folder).is_some() {
+            anyhow::bail!("in diesem Ordner wird bereits entpackt");
+        }
+        let this = self.clone();
+        tokio::spawn(async move {
+            let package = this.package_for_dir(&dir).await;
+            let result = match (package, set) {
+                (Some(id), None) => this.extract_package(id).await,
+                (package, set) => {
+                    let passwords = match package {
+                        Some(id) => db::get_package(&this.db, id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|p| p.passwords)
+                            .map(|p| {
+                                p.lines()
+                                    .map(str::trim)
+                                    .filter(|l| !l.is_empty())
+                                    .map(str::to_string)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        None => Vec::new(),
+                    };
+                    this.extract_dir(&dir, &folder, package, &passwords, set)
+                        .await
+                }
+            };
+            let mut errors = this.folder_errors.lock().unwrap();
+            match result {
+                Ok(()) => errors.remove(&folder),
+                Err(e) => errors.insert(folder.clone(), format!("{e:#}")),
+            };
+            drop(errors);
+            this.events.changed(Topic::Files);
+        });
+        Ok(())
+    }
+
+    /// The package whose folder `dir` is, if any.
+    pub async fn package_for_dir(&self, dir: &Path) -> Option<i64> {
+        let packages: Vec<db::Package> = sqlx::query_as("SELECT * FROM packages")
+            .fetch_all(&self.db)
+            .await
+            .ok()?;
+        let dir = dir.canonicalize().ok()?;
+        packages
+            .into_iter()
+            .find(|p| self.package_dir(p).canonicalize().is_ok_and(|d| d == dir))
+            .map(|p| p.id)
+    }
+
+    /// Moves a finished package folder to the configured automatic target, if any.
+    async fn auto_move(&self, dir: &Path) {
+        let Some(name) = self.settings().auto_move_target else {
+            return;
+        };
+        let Some(target) = self.cfg.move_targets.iter().find(|t| t.name == name) else {
+            tracing::warn!(
+                "automatisches Verschieben: Ziel '{name}' ist nicht in HAUL_MOVE_TARGETS"
+            );
+            return;
+        };
+        if !dir.exists() || dir == self.cfg.done_dir {
+            return;
+        }
+        match files::move_into(dir, &target.path).await {
+            Ok(dest) => tracing::info!(to = %dest.display(), "package moved to '{name}'"),
+            Err(e) => tracing::warn!("moving {} to '{name}': {e:#}", dir.display()),
+        }
+        self.events.changed(Topic::Files);
     }
 }
 
@@ -349,6 +513,32 @@ mod tests {
             Some(46)
         );
         assert_eq!(last_percent("Everything is Ok"), None);
+    }
+
+    #[test]
+    fn set_of_any_volume() {
+        let names: Vec<String> = [
+            "X.part1.rar",
+            "X.part2.rar",
+            "X.part3.rar",
+            "Y.part1.rar",
+            "old.rar",
+            "old.r00",
+            "a.7z.001",
+            "a.7z.002",
+            "m.mkv",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let (first, members) = archive_set(&names, "X.part3.rar").unwrap();
+        assert_eq!(first, "X.part1.rar");
+        assert_eq!(members, ["X.part1.rar", "X.part2.rar", "X.part3.rar"]);
+        assert_eq!(archive_set(&names, "old.r00").unwrap().0, "old.rar");
+        assert_eq!(archive_set(&names, "a.7z.002").unwrap().1.len(), 2);
+        assert!(archive_set(&names, "m.mkv").is_none());
+        // First part missing: nothing to start with.
+        assert!(archive_set(&names[1..3], "X.part2.rar").is_none());
     }
 
     #[test]

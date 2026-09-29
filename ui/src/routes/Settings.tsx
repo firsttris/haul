@@ -193,6 +193,27 @@ export function SettingsPage() {
               Archive nach erfolgreichem Entpacken löschen
             </label>
           </div>
+          <div className="field" style={{ maxWidth: 420 }}>
+            <label htmlFor="automove">Fertige Pakete automatisch verschieben nach</label>
+            <select
+              id="automove"
+              className="select"
+              value={s.autoMoveTarget ?? ''}
+              onChange={(e) => set('autoMoveTarget', e.target.value || null)}
+              disabled={data.moveTargets.length === 0}
+            >
+              <option value="">nicht verschieben</option>
+              {data.moveTargets.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.name} ({t.path})
+                </option>
+              ))}
+            </select>
+            <span className="help">
+              Nach dem Entpacken (bzw. sofort, wenn es nichts zu entpacken gibt). Ziele über HAUL_MOVE_TARGETS, z. B.
+              „Renamer=/media/inbox“.
+            </span>
+          </div>
           {save.error && <div className="notice" role="alert">{save.error.message}</div>}
           <div className="toolbar">
             <div className="spacer" />
@@ -210,6 +231,7 @@ export function SettingsPage() {
               ['Laufende Downloads', data.tmpDir],
               ['Fertige Dateien', data.doneDir],
               ['Eigene Plugins', data.pluginDir],
+              ...data.moveTargets.map((t) => [`Ziel „${t.name}“`, t.available ? t.path : `${t.path} (nicht erreichbar)`]),
               ['Entpacker', data.extractors.length ? data.extractors.join(', ') : 'keiner gefunden: sudo apt install 7zip 7zip-rar'],
             ].map(([k, v]) => (
               <div className="list-row" key={k}>
