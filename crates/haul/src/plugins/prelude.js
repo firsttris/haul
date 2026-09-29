@@ -76,6 +76,9 @@
       account: {
         get: function () { return env.account || null; },
       },
+      hash: {
+        sha256: function (text) { return __host_sha256(String(text)); },
+      },
       cookies: {
         get: function (url) { return __host_cookies(String(url)); },
         set: function (url, cookie) { __host_set_cookie(String(url), String(cookie)); },
@@ -97,6 +100,7 @@
       account: p.account || null,
       hasCheck: typeof p.check === 'function',
       hasCheckAccount: typeof p.checkAccount === 'function',
+      hasCrawl: typeof p.crawl === 'function',
     });
   };
 

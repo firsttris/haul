@@ -30,6 +30,8 @@ struct Meta {
     account: Option<AccountForm>,
     has_check: bool,
     has_check_account: bool,
+    #[serde(default)]
+    has_crawl: bool,
 }
 
 /// Labels and hint for the account form, provided by the plugin.
@@ -58,6 +60,7 @@ pub struct Plugin {
     pub account: Option<AccountForm>,
     pub has_check: bool,
     pub has_check_account: bool,
+    pub has_crawl: bool,
     pub builtin: bool,
     pub file: PathBuf,
     #[serde(skip)]
@@ -122,6 +125,21 @@ impl Resolved {
             _ => None,
         }
     }
+}
+
+/// What `crawl` returns: the files behind a folder link.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CrawlResult {
+    pub package_name: Option<String>,
+    pub files: Vec<CrawledFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CrawledFile {
+    pub url: String,
+    pub name: Option<String>,
+    pub size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -396,6 +414,16 @@ impl PluginManager {
             .await
     }
 
+    /// Expands a folder link into its files; runs without an account.
+    pub async fn crawl(
+        &self,
+        plugin: &Plugin,
+        link: &str,
+    ) -> std::result::Result<CrawlResult, PluginError> {
+        self.call(plugin, "crawl", serde_json::json!([link]), None)
+            .await
+    }
+
     pub async fn resolve(
         &self,
         plugin: &Plugin,
@@ -444,6 +472,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
         account: meta.account,
         has_check: meta.has_check,
         has_check_account: meta.has_check_account,
+        has_crawl: meta.has_crawl,
         builtin,
         file: file.to_path_buf(),
         regexes,

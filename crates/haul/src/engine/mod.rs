@@ -408,13 +408,21 @@ impl Engine {
         if links.is_empty() {
             return Err(anyhow!("keine gültigen Links gefunden"));
         }
+        let (links, folder_name) = self.crawl_links(links).await;
         let names: Vec<String> = links
             .iter()
-            .map(|l| util::filename_from_url(l).unwrap_or_else(|| "download".into()))
+            .map(|l| {
+                l.name
+                    .as_deref()
+                    .map(util::sanitize_filename)
+                    .or_else(|| util::filename_from_url(&l.url))
+                    .unwrap_or_else(|| "download".into())
+            })
             .collect();
         let name = req
             .package_name
             .filter(|n| !n.trim().is_empty())
+            .or(folder_name)
             .unwrap_or_else(|| guess_package_name(&names));
         let target_dir = req
             .target_dir
@@ -437,15 +445,19 @@ impl Engine {
         .fetch_one(&mut *tx)
         .await?;
         for (link, fname) in links.iter().zip(names) {
-            let plugin = self.plugins.find_for(link).map(|p| p.id.clone());
+            let plugin = self.plugins.find_for(&link.url).map(|p| p.id.clone());
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(pkg_id)
-            .bind(link)
+            .bind(&link.url)
             .bind(plugin)
             .bind(if req.start { status::QUEUED } else { status::COLLECTED })
             .bind(fname)
+            .bind(link.size)
+            .bind(if link.crawled { "online" } else { "unknown" })
+            .bind(&link.error)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -457,7 +469,9 @@ impl Engine {
         } else {
             let this = self.clone();
             tokio::spawn(async move {
-                if let Err(e) = this.check_package(pkg_id).await {
+                // Files from a folder crawl are known already; checking each one again would
+                // only cost the hoster's rate limit.
+                if let Err(e) = this.check_downloads(pkg_id, true).await {
                     tracing::warn!("online check: {e:#}");
                 }
             });
@@ -465,9 +479,54 @@ impl Engine {
         Ok(pkg_id)
     }
 
+    /// Expands folder links through their plugin's `crawl`, like JD's link crawler does when
+    /// links are added. A failing crawl keeps the link, with the error, so it stays visible.
+    async fn crawl_links(&self, links: Vec<String>) -> (Vec<NewLink>, Option<String>) {
+        let mut out = Vec::new();
+        let mut folder_name = None;
+        for url in links {
+            let plugin = self.plugins.find_for(&url).filter(|p| p.has_crawl);
+            let Some(plugin) = plugin else {
+                out.push(NewLink::plain(url));
+                continue;
+            };
+            match self.plugins.crawl(&plugin, &url).await {
+                Ok(r) if !r.files.is_empty() => {
+                    folder_name = folder_name.or(r.package_name.filter(|n| !n.trim().is_empty()));
+                    out.extend(r.files.into_iter().map(|f| NewLink {
+                        crawled: f.name.is_some(),
+                        url: f.url,
+                        name: f.name,
+                        size: f.size,
+                        error: None,
+                    }));
+                }
+                Ok(_) => out.push(NewLink {
+                    error: Some("Ordner ist leer".into()),
+                    ..NewLink::plain(url)
+                }),
+                Err(e) => {
+                    tracing::warn!(%url, "crawl: {}", e.message);
+                    out.push(NewLink {
+                        error: Some(e.message),
+                        ..NewLink::plain(url)
+                    });
+                }
+            }
+        }
+        (out, folder_name)
+    }
+
     /// Online check for all downloads of a package: plugin `check` or an HTTP probe.
     pub async fn check_package(self: &Arc<Self>, package_id: i64) -> Result<()> {
-        let downloads = db::package_downloads(&self.db, package_id).await?;
+        self.check_downloads(package_id, false).await
+    }
+
+    async fn check_downloads(self: &Arc<Self>, package_id: i64, only_unknown: bool) -> Result<()> {
+        let downloads = db::package_downloads(&self.db, package_id)
+            .await?
+            .into_iter()
+            .filter(|d| !only_unknown || (d.online == "unknown" && d.error.is_none()));
         futures::stream::iter(downloads)
             .for_each_concurrent(4, |d| {
                 let this = self.clone();
@@ -638,6 +697,28 @@ impl Engine {
 }
 
 /// Extracts http(s) links from free text, one per whitespace-separated token, deduplicated.
+/// A link about to be added, possibly found by a folder crawl.
+struct NewLink {
+    url: String,
+    name: Option<String>,
+    size: Option<i64>,
+    /// Name and size come from the hoster, so the link counts as checked.
+    crawled: bool,
+    error: Option<String>,
+}
+
+impl NewLink {
+    fn plain(url: String) -> Self {
+        Self {
+            url,
+            name: None,
+            size: None,
+            crawled: false,
+            error: None,
+        }
+    }
+}
+
 pub fn parse_links(text: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     // Control characters separate too: decrypted Click'n'Load payloads end in padding bytes.
@@ -779,6 +860,10 @@ mod engine_tests {
     }
 
     async fn engine(dir: &std::path::Path) -> Arc<Engine> {
+        engine_with(dir, PluginManager::new(vec![], None)).await
+    }
+
+    async fn engine_with(dir: &std::path::Path, plugins: PluginManager) -> Arc<Engine> {
         let cfg = Config {
             listen: "127.0.0.1:0".parse().unwrap(),
             cnl_listen: None,
@@ -792,7 +877,7 @@ mod engine_tests {
         };
         std::fs::create_dir_all(&cfg.config_dir).unwrap();
         let db = db::connect(&cfg.db_path()).await.unwrap();
-        let plugins = Arc::new(PluginManager::new(vec![], None));
+        let plugins = Arc::new(plugins);
         let e = Engine::new(db, cfg, plugins, Events::new()).await.unwrap();
         tokio::spawn(e.clone().run());
         e
@@ -938,6 +1023,68 @@ mod engine_tests {
         let d = wait_for(&e, id, status::FINISHED).await;
         assert_eq!(d.name, "Movie.2026.part1.rar");
         assert!(dir.path().join("done/Crypt/Movie.2026.part1.rar").exists());
+        e.shutdown().await;
+    }
+
+    /// Folder links go through the plugin's `crawl` when added: one download per file, with
+    /// name and size from the hoster and the folder name as package name.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn folder_links_are_crawled() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("folder.js"),
+            r#"var __plugin = { default: { id: "folder", version: 1, matches: [/https?:\/\/folder\.test\//],
+                async crawl(link) {
+                    if (link.endsWith("/gone")) { const e = new Error("Ordner gelöscht"); e.haulKind = "offline"; throw e; }
+                    return { packageName: "My Folder", files: [
+                        { url: "https://folder.test/f#file=1", name: "a.part1.rar", size: 100 },
+                        { url: "https://folder.test/f#file=2", name: "a.part2.rar", size: 50 },
+                    ] };
+                },
+                async resolve() { throw new Error("not in this test"); },
+            }};"#,
+        )
+        .unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://folder.test/d/x https://folder.test/gone".into(),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let p = db::get_package(&e.db, pkg).await.unwrap().unwrap();
+        assert_eq!(p.name, "My Folder");
+        let d = db::package_downloads(&e.db, pkg).await.unwrap();
+        let got: Vec<_> = d
+            .iter()
+            .map(|d| (d.url.as_str(), d.name.as_str(), d.size, d.online.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "https://folder.test/f#file=1",
+                    "a.part1.rar",
+                    Some(100),
+                    "online"
+                ),
+                (
+                    "https://folder.test/f#file=2",
+                    "a.part2.rar",
+                    Some(50),
+                    "online"
+                ),
+                ("https://folder.test/gone", "gone", None, "unknown"),
+            ]
+        );
+        assert_eq!(d[2].error.as_deref(), Some("Ordner gelöscht"));
         e.shutdown().await;
     }
 }

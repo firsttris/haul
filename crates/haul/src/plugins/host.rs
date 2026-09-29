@@ -202,6 +202,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
             ctx.globals().set("__host_log", Func::from(|| ()))?;
             ctx.globals().set("__host_cookies", Func::from(|| ()))?;
             ctx.globals().set("__host_set_cookie", Func::from(|| ()))?;
+            ctx.globals().set("__host_sha256", Func::from(|| ()))?;
             ctx.eval::<(), _>(PRELUDE)?;
             ctx.eval::<(), _>(code.as_str())?;
             let meta: Function = ctx.globals().get("__haul_meta")?;
@@ -289,6 +290,13 @@ async fn invoke_inner(
                     "warn" => tracing::warn!(plugin = %id, "{msg}"),
                     "debug" => tracing::debug!(plugin = %id, "{msg}"),
                     _ => tracing::info!(plugin = %id, "{msg}"),
+                }),
+            )?;
+            g.set(
+                "__host_sha256",
+                Func::from(|text: String| -> String {
+                    use sha2::Digest;
+                    hex::encode(sha2::Sha256::digest(text.as_bytes()))
                 }),
             )?;
             let jar = clients.jar.clone();
@@ -451,6 +459,43 @@ mod bundled {
         .await
         .unwrap_err();
         assert_eq!(err.kind, ErrorKind::Account, "{}", err.message);
+    }
+
+    /// The gofile bundle declares `crawl`; `ctx.hash.sha256` works in QuickJS.
+    #[tokio::test]
+    async fn gofile_bundle_crawls_and_hashes() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/dist/gofile.js");
+        if let Ok(code) = std::fs::read_to_string(path) {
+            let meta: serde_json::Value =
+                serde_json::from_str(&read_meta(&code).await.unwrap()).unwrap();
+            assert_eq!(meta["id"], "gofile");
+            assert_eq!(meta["hasCrawl"], true);
+            assert_eq!(meta["accountRequired"], false);
+        }
+        let code = r#"
+            var __plugin = { default: { id: "h", version: 1, matches: [],
+                async resolve(text, ctx) { return { url: ctx.hash.sha256(text) }; },
+            }};
+        "#;
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let v = invoke(
+            "h",
+            code,
+            "resolve",
+            serde_json::json!(["abc"]),
+            serde_json::json!({}),
+            clients,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v["url"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }
 

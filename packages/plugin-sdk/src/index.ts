@@ -69,6 +69,11 @@ export interface Ctx {
   wait(seconds: number): Promise<void>;
   log: Logger;
   account: { get(): Account | null };
+  /** Hashes computed by the core (QuickJS has no crypto). */
+  hash: {
+    /** Lower-case hex SHA-256 of the UTF-8 text. */
+    sha256(text: string): string;
+  };
   /** The account's cookie jar, shared by all requests and kept across restarts. */
   cookies: {
     /** `Cookie` header value the jar would send to `url`. */
@@ -96,6 +101,19 @@ export interface Resolved {
   maxConnections?: number;
 }
 
+/** One file found by `crawl`. `url` is what `check`/`resolve` get later. */
+export interface CrawledFile {
+  url: string;
+  name?: string;
+  size?: number;
+}
+
+export interface CrawlResult {
+  /** Suggested package name, e.g. the folder name. */
+  packageName?: string;
+  files: CrawledFile[];
+}
+
 export interface AccountInfo {
   valid: boolean;
   premium?: boolean;
@@ -117,6 +135,11 @@ export interface PluginDefinition {
   /** Labels and hint for the account form in the UI. */
   account?: { userLabel?: string; secretLabel?: string; help?: string };
   check?(link: string, ctx: Ctx): Promise<CheckResult>;
+  /**
+   * Folder links: expands a link into its files when links are added (like JD's crawler).
+   * Runs without an account. Links the plugin does not expand return `[link]` unchanged.
+   */
+  crawl?(link: string, ctx: Ctx): Promise<CrawlResult>;
   resolve(link: string, ctx: Ctx): Promise<Resolved>;
   checkAccount?(ctx: Ctx): Promise<AccountInfo>;
 }

@@ -7,6 +7,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 
 - direkte HTTP-Links
 - ddownload mit Premium-Account (Web-Login oder API-Key)
+- Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
+  Unterordnern, Paketname = Ordnername), Download mit Gast-Token wie bei JDownloader
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
 - Linksammler mit Online-Check, Paketname, Zielordner und Archiv-Passwörtern
@@ -16,7 +18,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   Fehler, nicht von Haul); Auswahl per Checkbox, dann Entpacken (ein beliebiger Teil entpackt den ganzen
   Satz, in denselben Ordner), Verschieben in andere Ordner, neuer Ordner, Archive löschen, Löschen
 
-**Bewusst nicht in v1:** Free-Downloads mit Captcha, Link-Crawler, DLC-Container, Multi-User.
+**Bewusst nicht in v1:** Free-Downloads mit Captcha, DLC-Container, Multi-User, passwortgeschützte
+Gofile-Ordner.
 
 ## Schnellstart
 
@@ -118,6 +121,7 @@ crates/haul         Server (API, Engine, Plugin-Host, Click'n'Load)
 crates/haul-cnl     Click'n'Load-Forwarder für den Desktop
 packages/plugin-sdk Typen, Helfer, XFileSharing-Basis, Test-ctx für Plugins
 plugins/ddownload   ddownload-Plugin
+plugins/gofile      Gofile-Plugin (mit Ordner-Crawler)
 ui                  Web-UI
 ```
 
@@ -149,7 +153,9 @@ export default definePlugin({
 ```
 
 `ctx` bietet `http.get/post/request` (Cookie-Jar pro Account, der Login bleibt zwischen Aufrufen
-erhalten), `wait(sec)`, `log` und `account.get()`. Fehler signalisiert ein Plugin mit
+erhalten), `cookies.get/set`, `hash.sha256`, `wait(sec)`, `log` und `account.get()`. Optional
+`crawl(link)`: macht beim Hinzufügen aus einem Ordner-Link die einzelnen Datei-Links, mit Name
+und Größe (siehe `plugins/gofile`). Fehler signalisiert ein Plugin mit
 `OfflineError` (kein Retry), `TemporaryError` (später erneut) oder `AccountError`.
 Für XFileSharing-Hoster gibt es `createXfsPlugin` in `@haul/plugin-sdk/xfs`; ddownload ist damit
 fünf Zeilen Konfiguration.
@@ -192,7 +198,7 @@ Tests und Checks:
 ```sh
 cargo test --workspace        # Engine (Segmente, Pause/Resume), CNL2, QuickJS-Host, Limiter …
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm test                     # SDK-Helfer und ddownload-Plugin gegen Fake-ctx
+pnpm test                     # SDK-Helfer, ddownload- und Gofile-Plugin gegen Fake-ctx
 pnpm typecheck
 ```
 
