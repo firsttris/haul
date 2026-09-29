@@ -125,6 +125,8 @@ Send (SHA-256 auf der Dateiseite) und MEGA (die MAC im Schlüssel). Passt sie, s
 Datei „✓ geprüft“; passt sie nicht, lädt Haul die Datei einmal komplett neu und meldet danach
 „Prüfsumme falsch“. Plugins geben sie als `hash: { type: 'md5' | 'sha1' | 'sha256' | 'mega', value }`
 bei `crawl`, `check` oder `resolve` mit. Archive prüft zusätzlich das Entpacken selbst.
+Wie bei JDownloader läuft höchstens eine Prüfung gleichzeitig, weitere warten (`MaxConcurrentHashChecks`);
+abschalten lässt sie sich unter *Einstellungen → Downloads* (`HashCheckEnabled`, standardmäßig an).
 
 ## Passwortgeschützte Dateien
 

@@ -301,6 +301,10 @@ export function SettingsPage() {
               <input type="checkbox" checked={s.askArchivePassword} onChange={(e) => set('askArchivePassword', e.target.checked)} />
               {t.settings.askArchivePassword}
             </label>
+            <label className="checkbox">
+              <input type="checkbox" checked={s.verifyChecksums} onChange={(e) => set('verifyChecksums', e.target.checked)} />
+              {t.settings.verifyChecksums}
+            </label>
           </div>
           {save.error && <div className="notice" role="alert">{save.error.message}</div>}
           <div className="toolbar">

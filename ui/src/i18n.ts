@@ -242,6 +242,7 @@ const de = {
     autoExtract: 'Fertige Pakete automatisch entpacken',
     deleteArchives: 'Archive nach erfolgreichem Entpacken löschen',
     askArchivePassword: 'Beim Entpacken nach dem Passwort fragen, wenn keines passt',
+    verifyChecksums: 'Prüfsumme nach dem Download prüfen, wenn der Hoster eine angibt',
     archivePasswords: 'Archiv-Passwörter',
     archivePasswordsIntro:
       'Haul probiert diese Passwörter bei jedem geschützten Archiv durch, nach denen des Pakets. ' +
@@ -560,6 +561,7 @@ const en: Messages = {
     autoExtract: 'Extract finished packages automatically',
     deleteArchives: 'Delete archives after successful extraction',
     askArchivePassword: 'Ask for the archive password when none fits',
+    verifyChecksums: 'Verify the checksum after the download when the hoster publishes one',
     archivePasswords: 'Archive passwords',
     archivePasswordsIntro:
       'Haul tries these passwords on every protected archive, after the package’s own. ' +

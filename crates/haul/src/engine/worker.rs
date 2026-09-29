@@ -615,15 +615,18 @@ async fn execute(
         }
     }
 
-    // 5. Checksum, if the hoster published one (JD HashInfo, "CRC OK"). A mismatch loads the
-    //    file once more from scratch; a second one fails.
+    // 5. Checksum, if the hoster published one and checking is on (JD HashInfo, "CRC OK"). A
+    //    mismatch loads the file once more from scratch; a second one fails.
     let spec = resolved
         .hash
         .clone()
         .filter(|h| h.usable())
         .or_else(|| d.hash.as_deref().and_then(super::hash::HashSpec::from_db))
         .filter(|h| h.usable());
-    if let Some(spec) = spec {
+    if let Some(spec) = spec.filter(|_| engine.settings().verify_checksums) {
+        let _turn = cancellable(cancel, engine.hash_checks.acquire())
+            .await?
+            .map_err(|e| Failure::Retry(format!("{e}")))?;
         let (p, h) = (path.clone(), spec.clone());
         let ok = cancellable(
             cancel,

@@ -177,6 +177,9 @@ pub struct Settings {
     /// `isAskForUnknownPasswordsEnabled`, default on). The known ones are the package's and
     /// the archive password list (`ARCHIVE_PASSWORDS`).
     pub ask_archive_password: bool,
+    /// Verify a checksum the hoster published after the download (JD GeneralSettings
+    /// `isHashCheckEnabled`, default on).
+    pub verify_checksums: bool,
 }
 
 /// Settings key of the archive password list (JD ExtractionConfig `getPasswordList`): tried on
@@ -194,6 +197,7 @@ impl Default for Settings {
             auto_extract: true,
             delete_archives: false,
             ask_archive_password: true,
+            verify_checksums: true,
         }
     }
 }

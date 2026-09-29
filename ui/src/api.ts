@@ -115,6 +115,8 @@ export interface Settings {
   deleteArchives: boolean;
   /** Ask for the password when none of the known ones opens an archive. */
   askArchivePassword: boolean;
+  /** Verify a checksum the hoster published after the download. */
+  verifyChecksums: boolean;
 }
 
 export interface SettingsView extends Settings {

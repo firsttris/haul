@@ -62,6 +62,9 @@ pub struct Engine {
     hoster_waits: Mutex<HashMap<String, (i64, String)>>,
     /// Serializes changes to the archive password list (JD: `PWLOCK`).
     archive_passwords: tokio::sync::Mutex<()>,
+    /// One checksum check at a time, the others wait (JD GeneralSettings
+    /// `getMaxConcurrentHashChecks`, default 1): several at once only compete for the disk.
+    pub(crate) hash_checks: tokio::sync::Semaphore,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -116,6 +119,7 @@ impl Engine {
             folder_errors: Mutex::new(HashMap::new()),
             hoster_waits: Mutex::new(HashMap::new()),
             archive_passwords: tokio::sync::Mutex::new(()),
+            hash_checks: tokio::sync::Semaphore::new(1),
         }))
     }
 
@@ -1989,6 +1993,27 @@ mod engine_tests {
             failed.error
         );
         assert!(!dir.path().join("done/Sum/bad.bin").exists());
+
+        // Checking off (JD HashCheckEnabled): the same wrong checksum is not verified.
+        e.update_settings(Settings {
+            verify_checksums: false,
+            ..e.settings()
+        })
+        .await
+        .unwrap();
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://sum.test/f/unchecked".into(),
+                package_name: Some("Off".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        let d = wait_for(&e, id, status::FINISHED).await;
+        assert_eq!(d.hash_ok, None);
+        assert!(dir.path().join("done/Off/file.bin").is_file());
         e.shutdown().await;
     }
 
