@@ -277,9 +277,12 @@ Plugin in `/config/plugins`, ohne neues Image.
 
 ## Entwicklung
 
-Voraussetzungen: Rust (stable), Node 22, pnpm. Zum Entpacken 7-Zip mit RAR-Modul, unter
-Ubuntu/Debian `sudo apt install 7zip 7zip-rar` (alternativ `7zip unrar`). Haul findet `7zz`, `7z`,
-`7za`, `unrar` und `unar` selbst; welche gefunden wurden, steht unter *Einstellungen → Ordner*.
+Voraussetzungen: Rust (stable), Node 22, pnpm. Zum Entpacken 7-Zip und unrar, unter
+Ubuntu/Debian `sudo apt install 7zip unrar` (unrar aus `multiverse`/`non-free`). Für RAR nimmt Haul
+unrar zuerst: das RAR-Modul von 7-Zip 23.01 (`7zip-rar`) stürzt bei manchen Archiven ab. Haul
+findet `7zz`, `7z`, `7za`, `unrar` und `unar` selbst; welche gefunden wurden, steht unter
+*Einstellungen → Ordner*. Schlägt das Entpacken fehl, nennt die Meldung jeden versuchten Entpacker
+mit Exit-Code bzw. Signal und seinen Fehlerzeilen; die ganze Ausgabe steht im Server-Log.
 
 ```sh
 pnpm install

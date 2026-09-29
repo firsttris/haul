@@ -91,12 +91,28 @@ fn last_percent(text: &str) -> Option<u8> {
         .last()
 }
 
-/// Runs an extractor, reporting its percentage while it runs. Returns success and the
-/// output without the progress redraws, for error messages.
-async fn run_tool(
-    mut cmd: Command,
-    on_progress: &mut (dyn FnMut(u8) + Send),
-) -> Result<(bool, String)> {
+/// How an extractor run ended, with its output (progress redraws removed).
+struct Run {
+    ok: bool,
+    code: Option<i32>,
+    /// Killed by a signal, e.g. 11 when it crashed (exit status 139 in a shell).
+    signal: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+
+fn clean(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .replace(['\u{8}', '\r'], "\n")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && last_percent(l).is_none_or(|_| l.len() > 12))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Runs an extractor, reporting its percentage while it runs.
+async fn run_tool(mut cmd: Command, on_progress: &mut (dyn FnMut(u8) + Send)) -> Result<Run> {
     use tokio::io::AsyncReadExt;
     let mut child = cmd
         .stdin(std::process::Stdio::null())
@@ -127,19 +143,92 @@ async fn run_tool(
     }
     let status = child.wait().await?;
     let err = err_task.await.unwrap_or_default();
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&err)
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status);
+    #[cfg(not(unix))]
+    let signal = None;
+    Ok(Run {
+        ok: status.success(),
+        code: status.code(),
+        signal,
+        stdout: clean(&out),
+        stderr: clean(&err),
+    })
+}
+
+/// What went wrong in a failed run, as far as it can be told from the output.
+#[derive(Default, Clone, Copy)]
+struct Causes {
+    crashed: bool,
+    wrong_password: bool,
+    unsupported: bool,
+    no_space: bool,
+    damaged: bool,
+}
+
+/// The lines of a failed run that say what went wrong: everything on stderr, and the lines
+/// of stdout that read like an error (7-Zip and unrar print a lot of archive info there).
+fn error_lines(run: &Run) -> Vec<String> {
+    let re = Regex::new(
+        r"(?i)error|cannot|can't|wrong password|incorrect password|unsupported|crc failed|checksum|corrupt|damaged|no space|denied|unexpected end|failed|is not supported",
     )
-    .replace(['\u{8}', '\r'], "\n");
-    let text = text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && last_percent(l).is_none_or(|_| l.len() > 12))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok((status.success(), text))
+    .unwrap();
+    let mut lines: Vec<String> = run.stderr.lines().map(str::to_string).collect();
+    lines.extend(
+        run.stdout
+            .lines()
+            .filter(|l| re.is_match(l))
+            .map(str::to_string),
+    );
+    let mut seen = std::collections::HashSet::new();
+    lines.retain(|l| seen.insert(l.clone()));
+    lines
+}
+
+fn causes(run: &Run) -> Causes {
+    let text = format!("{}\n{}", run.stdout, run.stderr).to_lowercase();
+    Causes {
+        // A shell reports a signal as 128 + n (139 = segfault).
+        crashed: run.signal.is_some() || run.code.is_some_and(|c| c > 128),
+        wrong_password: text.contains("wrong password")
+            || text.contains("incorrect password")
+            || text.contains("encrypted file"),
+        unsupported: text.contains("unsupported method") || text.contains("is not supported"),
+        no_space: text.contains("no space left") || text.contains("disk full"),
+        damaged: text.contains("crc failed")
+            || text.contains("is corrupt")
+            || text.contains("unexpected end"),
+    }
+}
+
+/// One line for a failed run: the tool, how it ended and its error lines.
+fn describe_run(tool: &Tool, run: &Run) -> String {
+    let how = match (run.signal, run.code) {
+        (Some(sig), _) => crate::tr!("abgestürzt (Signal {})", "crashed (signal {})", sig),
+        (None, Some(c)) if c > 128 => crate::tr!("abgestürzt (Code {})", "crashed (code {})", c),
+        (None, Some(c)) => crate::tr!("Code {}", "code {}", c),
+        (None, None) => String::new(),
+    };
+    let mut lines = error_lines(run);
+    if lines.is_empty() {
+        // Nothing that reads like an error: the last lines, which at least show how far it got.
+        lines = run
+            .stdout
+            .lines()
+            .rev()
+            .take(2)
+            .map(str::to_string)
+            .collect();
+        lines.reverse();
+    }
+    lines.truncate(3);
+    let detail = lines.join(" · ");
+    let name = tool.name();
+    if detail.is_empty() {
+        format!("{name} ({how})")
+    } else {
+        format!("{name} ({how}): {detail}")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +247,14 @@ pub struct Tool {
 impl Tool {
     pub fn describe(&self) -> String {
         self.path.display().to_string()
+    }
+
+    fn name(&self) -> &'static str {
+        match self.kind {
+            Kind::SevenZip => "7-Zip",
+            Kind::Unrar => "unrar",
+            Kind::Unar => "unar",
+        }
     }
 }
 
@@ -255,38 +352,101 @@ async fn extract_one(
         .collect();
     if tools.is_empty() {
         return Err(anyhow!(crate::tr!(
-            "kein Entpacker gefunden. Empfohlen: 7-Zip mit RAR-Modul, unter Ubuntu/Debian \
-             „sudo apt install 7zip 7zip-rar“ (alternativ „7zip unrar“); im Docker-Image ist alles enthalten",
-            "no extractor found. Recommended: 7-Zip with the RAR module, on Ubuntu/Debian \
-             “sudo apt install 7zip 7zip-rar” (or “7zip unrar”); the Docker image has everything"
+            "kein Entpacker gefunden. Empfohlen: 7-Zip und unrar, unter Ubuntu/Debian \
+             „sudo apt install 7zip unrar“; im Docker-Image ist alles enthalten",
+            "no extractor found. Recommended: 7-Zip and unrar, on Ubuntu/Debian \
+             “sudo apt install 7zip unrar”; the Docker image has everything"
         )));
     }
     let mut candidates: Vec<String> = vec![String::new()];
     candidates.extend(passwords.iter().cloned());
-    let mut last = String::new();
+    // Per tool, its first failure (without password) says the most; the others add causes.
+    let mut failures: Vec<(Kind, String)> = Vec::new();
+    let mut found = Causes::default();
     for pw in &candidates {
         for tool in &tools {
-            match run_tool(command(tool, archive, dest, pw), on_progress).await {
-                Ok((true, _)) => return Ok(()),
-                Ok((false, out)) => last = format!("{}: {out}", tool.describe()),
-                Err(e) => last = format!("{}: {e}", tool.describe()),
+            let line = match run_tool(command(tool, archive, dest, pw), on_progress).await {
+                Ok(run) if run.ok => return Ok(()),
+                Ok(run) => {
+                    let c = causes(&run);
+                    found.crashed |= c.crashed;
+                    found.wrong_password |= c.wrong_password;
+                    found.unsupported |= c.unsupported;
+                    found.no_space |= c.no_space;
+                    found.damaged |= c.damaged;
+                    let tail: String = format!("{}\n{}", run.stdout, run.stderr);
+                    let tail = &tail[tail.len().saturating_sub(4000)..];
+                    tracing::warn!(
+                        archive = %archive.display(),
+                        tool = %tool.describe(),
+                        code = ?run.code,
+                        signal = ?run.signal,
+                        "extractor failed, its output:\n{tail}"
+                    );
+                    describe_run(tool, &run)
+                }
+                Err(e) => format!("{}: {e}", tool.name()),
+            };
+            if !failures.iter().any(|(k, _)| *k == tool.kind) {
+                failures.push((tool.kind, line));
             }
         }
     }
-    let tail: String = last
-        .lines()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join(" ");
-    Err(anyhow!(crate::tr!(
-        "Entpacken fehlgeschlagen: {}",
-        "Extraction failed: {}",
-        tail
+    let has_unrar = tools.iter().any(|t| t.kind == Kind::Unrar);
+    let lines = failures.into_iter().map(|(_, l)| l).collect();
+    Err(anyhow!(failure_message(
+        is_rar(archive),
+        has_unrar,
+        found,
+        lines
     )))
+}
+
+/// The error for the UI: what to do about it (most likely cause first), then what each
+/// extractor said.
+fn failure_message(rar: bool, has_unrar: bool, found: Causes, failures: Vec<String>) -> String {
+    let hint = if found.no_space {
+        Some(crate::tr!(
+            "kein Speicherplatz mehr frei",
+            "no space left on the disk"
+        ))
+    } else if found.wrong_password {
+        Some(crate::tr!(
+            "Passwort fehlt oder ist falsch: am Paket unter „Archiv-Passwörter“ eintragen und erneut entpacken",
+            "password missing or wrong: add it to the package's archive passwords and extract again"
+        ))
+    } else if rar && !has_unrar && (found.crashed || found.unsupported) {
+        Some(crate::tr!(
+            "7-Zip kann dieses RAR-Archiv nicht entpacken; unrar installieren („sudo apt install unrar“), Haul nimmt es für RAR zuerst",
+            "7-Zip cannot extract this RAR archive; install unrar (“sudo apt install unrar”), Haul uses it first for RAR"
+        ))
+    } else if found.crashed {
+        Some(crate::tr!(
+            "der Entpacker ist abgestürzt",
+            "the extractor crashed"
+        ))
+    } else if found.damaged {
+        Some(crate::tr!(
+            "Archiv beschädigt oder unvollständig",
+            "archive damaged or incomplete"
+        ))
+    } else {
+        None
+    };
+    let detail = failures.join("; ");
+    match hint {
+        Some(h) => crate::tr!(
+            "Entpacken fehlgeschlagen: {}. {}",
+            "Extraction failed: {}. {}",
+            h,
+            detail
+        ),
+        None => crate::tr!(
+            "Entpacken fehlgeschlagen: {}",
+            "Extraction failed: {}",
+            detail
+        ),
+    }
 }
 
 impl Engine {
@@ -621,7 +781,7 @@ mod tool_tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("kein Entpacker gefunden"), "{err}");
-        assert!(err.contains("apt install 7zip 7zip-rar"), "{err}");
+        assert!(err.contains("apt install 7zip unrar"), "{err}");
 
         // Stand-in for 7-Zip: `7zz x -y -bsp1 -o<dir> -p<pw> <archive>`, printing progress like 7-Zip.
         let fake = bin.join("7zz");
@@ -647,5 +807,98 @@ mod tool_tests {
             std::fs::read_to_string(out.join("hello.txt")).unwrap(),
             "hi"
         );
+
+        // 7-Zip crashing on a RAR archive (seen with 7-Zip 23.01's RAR module): the archive
+        // info, then a segfault. The message names the crash and recommends unrar.
+        std::fs::write(
+            &fake,
+            "#!/usr/bin/env python3\nimport os, signal, sys\n\
+             print('Extracting archive: a.rar'); print('Type = Rar'); print('Blocks = 125'); print('Volumes = 1')\n\
+             sys.stdout.flush(); os.kill(os.getpid(), signal.SIGSEGV)\n",
+        )
+        .unwrap();
+        let rar = dir.path().join("a.rar");
+        std::fs::write(&rar, b"Rar!").unwrap();
+        let err = extract_one(&rar, &out, &[], &mut |_| {})
+            .await
+            .unwrap_err()
+            .to_string();
+        let de = crate::i18n::pick(&err, false);
+        assert!(de.contains("Signal 11"), "{de}");
+        assert!(de.contains("unrar installieren"), "{de}");
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+
+    fn run(code: Option<i32>, signal: Option<i32>, stdout: &str, stderr: &str) -> Run {
+        Run {
+            ok: false,
+            code,
+            signal,
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        }
+    }
+
+    const SEVEN: Tool = Tool {
+        kind: Kind::SevenZip,
+        path: PathBuf::new(),
+    };
+
+    /// 7-Zip 23.01's RAR module crashing: only the archive info on stdout, no error line.
+    #[test]
+    fn crash_names_the_signal_and_recommends_unrar_for_rar() {
+        let r = run(
+            None,
+            Some(11),
+            "Extracting archive: a.rar\nType = Rar\nSolid = -\nBlocks = 125\nMultivolume = -\nVolumes = 1",
+            "",
+        );
+        let c = causes(&r);
+        assert!(c.crashed);
+        let line = describe_run(&SEVEN, &r);
+        assert_eq!(
+            crate::i18n::pick(&line, false),
+            "7-Zip (abgestürzt (Signal 11)): Multivolume = - · Volumes = 1"
+        );
+        let msg = failure_message(true, false, c, vec![line.clone()]);
+        let de = crate::i18n::pick(&msg, false);
+        assert!(de.contains("unrar installieren"), "{de}");
+        assert!(de.contains("Signal 11"), "{de}");
+        // With unrar present (it failed too) or for a zip, no unrar advice.
+        assert!(
+            !crate::i18n::pick(&failure_message(true, true, c, vec![line.clone()]), false)
+                .contains("unrar installieren")
+        );
+        assert!(
+            !crate::i18n::pick(&failure_message(false, false, c, vec![line]), false)
+                .contains("unrar installieren")
+        );
+        // A shell reports the same crash as 139.
+        assert!(causes(&run(Some(139), None, "", "")).crashed);
+    }
+
+    #[test]
+    fn error_lines_come_from_stderr_and_error_like_stdout() {
+        let r = run(
+            Some(2),
+            None,
+            "Type = 7z\nSolid = +\nSub items Errors: 1\nArchives with Errors: 1",
+            "ERROR: Data Error in encrypted file. Wrong password? : film.mkv",
+        );
+        let c = causes(&r);
+        assert!(c.wrong_password && !c.crashed);
+        let line = crate::i18n::pick(&describe_run(&SEVEN, &r), false);
+        assert!(
+            line.starts_with(
+                "7-Zip (Code 2): ERROR: Data Error in encrypted file. Wrong password? : film.mkv"
+            ),
+            "{line}"
+        );
+        let msg = crate::i18n::pick(&failure_message(false, false, c, vec![]), false);
+        assert!(msg.contains("Archiv-Passwörter"), "{msg}");
     }
 }

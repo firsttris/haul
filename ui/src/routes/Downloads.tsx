@@ -226,8 +226,13 @@ export function DownloadsPage() {
         {settings && settings.autoExtract && settings.extractors.length === 0 && (
           <div className="notice" role="alert">
             <strong>{t.downloads.noExtractorTitle}</strong> {t.downloads.noExtractorText}{' '}
-            <code className="mono">sudo apt install 7zip 7zip-rar</code> ({t.downloads.noExtractorOr}{' '}
-            <code className="mono">7zip unrar</code>). {t.downloads.noExtractorThen}
+            <code className="mono">sudo apt install 7zip unrar</code>. {t.downloads.noExtractorThen}
+          </div>
+        )}
+        {settings && settings.autoExtract && settings.extractors.length > 0 && !settings.extractors.some((p) => /(^|\/)(unrar|unar)$/.test(p)) && (
+          <div className="notice info">
+            <strong>{t.downloads.noUnrarTitle}</strong> {t.downloads.noUnrarText} <code className="mono">sudo apt install unrar</code>.{' '}
+            {t.downloads.noExtractorThen}
           </div>
         )}
         <div className="grid-4">
