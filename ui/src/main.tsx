@@ -14,6 +14,7 @@ import { CollectorPage } from './routes/Collector';
 import { AccountsPage } from './routes/Accounts';
 import { SettingsPage } from './routes/Settings';
 import { DonePage } from './routes/Done';
+import { useLang, useT } from './i18n';
 
 const onAuthError = (err: unknown) => {
   if (err instanceof ApiError && err.status === 401) queryClient.invalidateQueries({ queryKey: ['auth'] });
@@ -28,12 +29,15 @@ const queryClient = new QueryClient({
 function Root() {
   const auth = useQuery({ queryKey: ['auth'], queryFn: () => api<AuthState>('/auth/state'), staleTime: Infinity });
   const loggedIn = !!auth.data?.loggedIn;
+  const t = useT();
+  // Remounting on a language change re-renders every text, also those only formatted (numbers, dates).
+  const lang = useLang();
   useLiveEvents(loggedIn);
   if (auth.isPending) return null;
-  if (auth.isError) return <div className="login"><div className="notice">Server nicht erreichbar: {auth.error.message}</div></div>;
+  if (auth.isError) return <div className="login"><div className="notice">{t.app.serverUnreachable(auth.error.message)}</div></div>;
   if (!loggedIn) return <Login setup={!!auth.data?.setupRequired} />;
   return (
-    <Layout>
+    <Layout key={lang}>
       <Outlet />
     </Layout>
   );

@@ -6,8 +6,10 @@ import { PageHeader, usePackages } from '../components/Layout';
 import { IconPlay, IconRefresh, IconTrash } from '../components/icons';
 import { describe, toneColor } from '../components/status';
 import { bytes } from '../format';
+import { useT } from '../i18n';
 
 function AddLinksForm() {
+  const t = useT();
   const navigate = useNavigate();
   const [links, setLinks] = useState('');
   const [packageName, setPackageName] = useState('');
@@ -33,13 +35,13 @@ function AddLinksForm() {
 
   return (
     <form className="card" onSubmit={submit}>
-      <h2>Links einfügen</h2>
+      <h2>{t.collector.paste}</h2>
       <div className="field">
-        <label htmlFor="links">Links, einer pro Zeile oder beliebig gemischter Text</label>
+        <label htmlFor="links">{t.collector.linksLabel}</label>
         <textarea
           id="links"
           className="textarea"
-          placeholder={'https://ddownload.com/abc123def456\nhttps://example.org/datei.iso'}
+          placeholder={t.collector.linksPlaceholder}
           value={links}
           onChange={(e) => setLinks(e.target.value)}
           required
@@ -47,27 +49,27 @@ function AddLinksForm() {
       </div>
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="pkg">Paketname</label>
-          <input id="pkg" className="input" placeholder="aus Dateinamen ableiten" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+          <label htmlFor="pkg">{t.collector.packageName}</label>
+          <input id="pkg" className="input" placeholder={t.collector.packageNamePlaceholder} value={packageName} onChange={(e) => setPackageName(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="dir">Zielordner (relativ zu fertig)</label>
-          <input id="dir" className="input" placeholder="= Paketname" value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
+          <label htmlFor="dir">{t.collector.targetDir}</label>
+          <input id="dir" className="input" placeholder={t.collector.targetDirPlaceholder} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
         </div>
       </div>
       <div className="field">
-        <label htmlFor="pw">Archiv-Passwörter, eines pro Zeile</label>
+        <label htmlFor="pw">{t.collector.passwords}</label>
         <textarea id="pw" className="textarea" style={{ minHeight: 64 }} value={passwords} onChange={(e) => setPasswords(e.target.value)} />
       </div>
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
       <div className="toolbar">
         <label className="checkbox">
           <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} />
-          Direkt starten, ohne Linksammler
+          {t.collector.startNow}
         </label>
         <div className="spacer" />
         <button type="submit" className="btn primary" disabled={add.isPending || count === 0}>
-          {count > 0 ? `${count} ${count === 1 ? 'Link' : 'Links'} hinzufügen` : 'Links hinzufügen'}
+          {t.collector.addN(count)}
         </button>
       </div>
     </form>
@@ -75,6 +77,7 @@ function AddLinksForm() {
 }
 
 function CollectedPackage({ pkg }: { pkg: Package }) {
+  const t = useT();
   const [name, setName] = useState(pkg.name);
   const [targetDir, setTargetDir] = useState(pkg.targetDir);
   useEffect(() => {
@@ -91,10 +94,10 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
   const startable = pkg.downloads.length - offline;
 
   return (
-    <section className="card" aria-label={`Paket ${pkg.name}`}>
+    <section className="card" aria-label={t.collector.packageAria(pkg.name)}>
       <div className="grid-2">
         <div className="field">
-          <label htmlFor={`name-${pkg.id}`}>Paketname</label>
+          <label htmlFor={`name-${pkg.id}`}>{t.collector.packageName}</label>
           <input
             id={`name-${pkg.id}`}
             className="input"
@@ -104,7 +107,7 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
           />
         </div>
         <div className="field">
-          <label htmlFor={`dir-${pkg.id}`}>Zielordner</label>
+          <label htmlFor={`dir-${pkg.id}`}>{t.collector.target}</label>
           <input
             id={`dir-${pkg.id}`}
             className="input mono"
@@ -115,21 +118,21 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
         </div>
       </div>
       <div className="subtitle" style={{ fontSize: 13 }}>
-        {pkg.source === 'cnl' ? "Click'n'Load" : 'manuell'}
+        {pkg.source === 'cnl' ? "Click'n'Load" : t.collector.manual}
         {pkg.sourcePage && (
           <>
             {' '}
-            von <span className="mono">{pkg.sourcePage}</span>
+            {t.collector.from} <span className="mono">{pkg.sourcePage}</span>
           </>
         )}
         {' · '}
-        {pkg.downloads.length} Dateien · {bytes(total)}
-        {pkg.hasPasswords && ' · mit Passwort'}
-        {offline > 0 && <span style={{ color: 'var(--err)' }}> · {offline} offline</span>}
+        {t.common.files(pkg.downloads.length)} · {bytes(total)}
+        {pkg.hasPasswords && ` · ${t.collector.withPassword}`}
+        {offline > 0 && <span style={{ color: 'var(--err)' }}> · {t.collector.offline(offline)}</span>}
       </div>
       <div className="list">
         {pkg.downloads.map((d) => {
-          const s = describe(d);
+          const s = describe(d, t);
           return (
             <div className="list-row" key={d.id}>
               <div className="grow">
@@ -144,7 +147,7 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
                 <span className="dot" style={{ background: toneColor[s.tone].color }} />
                 <span>{s.label}</span>
               </div>
-              <button type="button" className="icon-btn" aria-label={`${d.name} entfernen`} onClick={() => api(`/downloads/${d.id}`, { method: 'DELETE' })}>
+              <button type="button" className="icon-btn" aria-label={t.common.remove(d.name)} onClick={() => api(`/downloads/${d.id}`, { method: 'DELETE' })}>
                 <IconTrash size={16} />
               </button>
             </div>
@@ -154,16 +157,16 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
       <div className="toolbar">
         <button type="button" className="btn small" onClick={() => act.mutate(`/packages/${pkg.id}/check`)}>
           <IconRefresh size={16} />
-          Online-Check
+          {t.collector.check}
         </button>
         <button type="button" className="btn small danger" onClick={() => remove.mutate()}>
           <IconTrash size={16} />
-          Verwerfen
+          {t.collector.discard}
         </button>
         <div className="spacer" />
         <button type="button" className="btn primary small" disabled={startable === 0} onClick={() => act.mutate(`/packages/${pkg.id}/start`)}>
           <IconPlay size={16} />
-          {offline > 0 ? `${startable} starten` : 'Starten'}
+          {offline > 0 ? t.collector.startN(startable) : t.collector.start}
         </button>
       </div>
     </section>
@@ -171,6 +174,7 @@ function CollectedPackage({ pkg }: { pkg: Package }) {
 }
 
 export function CollectorPage() {
+  const t = useT();
   const { data: packages = [] } = usePackages('collector');
   const startAll = useMutation({
     mutationFn: async () => {
@@ -181,13 +185,13 @@ export function CollectorPage() {
   return (
     <>
       <PageHeader
-        title="Linksammler"
-        subtitle={`${packages.length} ${packages.length === 1 ? 'Paket' : 'Pakete'} · ${links} Links · Click'n'Load landet hier und startet nie automatisch`}
+        title={t.collector.title}
+        subtitle={t.collector.subtitle(packages.length, links)}
       >
         {packages.length > 0 && (
           <button type="button" className="btn primary" onClick={() => startAll.mutate()}>
             <IconPlay size={16} />
-            Alle starten
+            {t.collector.startAll}
           </button>
         )}
       </PageHeader>

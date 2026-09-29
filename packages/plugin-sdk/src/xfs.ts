@@ -363,12 +363,20 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     matches: [linkRe],
     accountRequired: cfg.accountRequired ?? true,
     account: {
-      userLabel: 'Benutzer',
-      secretLabel: userApi ? 'Passwort, API-Key oder xfss-Cookie' : 'Passwort oder xfss-Cookie',
-      help:
-        `Benutzer und Passwort wie in JDownloader. Verlangt ${host} beim Login ein Captcha, ` +
-        `einmal im Browser anmelden und das Cookie „xfss“ als Passwort „xfss=…“ eintragen.` +
-        (userApi ? ' Mit leerem Benutzer wird das Passwortfeld als API-Key verwendet.' : ''),
+      userLabel: { de: 'Benutzer', en: 'User' },
+      secretLabel: userApi
+        ? { de: 'Passwort, API-Key oder xfss-Cookie', en: 'Password, API key or xfss cookie' }
+        : { de: 'Passwort oder xfss-Cookie', en: 'Password or xfss cookie' },
+      help: {
+        de:
+          `Benutzer und Passwort wie in JDownloader. Verlangt ${host} beim Login ein Captcha, ` +
+          `einmal im Browser anmelden und das Cookie „xfss“ als Passwort „xfss=…“ eintragen.` +
+          (userApi ? ' Mit leerem Benutzer wird das Passwortfeld als API-Key verwendet.' : ''),
+        en:
+          `User name and password as in JDownloader. If ${host} asks for a captcha at login, ` +
+          `log in once in the browser and enter its cookie “xfss” as password “xfss=…”.` +
+          (userApi ? ' With an empty user name, the password field is used as API key.' : ''),
+      },
     },
 
     async check(link, ctx): Promise<CheckResult> {

@@ -3,17 +3,20 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, post, type Account, type PluginList } from '../api';
 import { PageHeader } from '../components/Layout';
 import { IconRefresh, IconTrash } from '../components/icons';
-import { bytes, date } from '../format';
+import { bytes, date, dateTime } from '../format';
+import { pluginText, useLang, useT } from '../i18n';
 
-const statusText: Record<Account['status'], { label: string; color: string }> = {
-  unchecked: { label: 'Ungeprüft', color: 'var(--muted-2)' },
-  checking: { label: 'Prüfe …', color: 'var(--accent)' },
-  valid: { label: 'Gültig', color: 'var(--ok)' },
-  invalid: { label: 'Ungültig', color: 'var(--err)' },
-  error: { label: 'Fehler', color: 'var(--err)' },
+const statusColor: Record<Account['status'], string> = {
+  unchecked: 'var(--muted-2)',
+  checking: 'var(--accent)',
+  valid: 'var(--ok)',
+  invalid: 'var(--err)',
+  error: 'var(--err)',
 };
 
 function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
+  const t = useT();
+  const lang = useLang();
   const withAccounts = plugins.filter((p) => p.accountRequired || p.hasCheckAccount);
   const [pluginId, setPluginId] = useState('');
   const [user, setUser] = useState('');
@@ -34,14 +37,14 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
   const form = selected.account ?? {};
   return (
     <form className="card" onSubmit={submit}>
-      <h2>Account hinzufügen</h2>
+      <h2>{t.accounts.add}</h2>
       <div className="card-sub">
-        {form.help ?? 'Benutzer und Passwort des Hoster-Accounts.'} Gespeichert wird verschlüsselt mit{' '}
+        {pluginText(form.help, lang) ?? t.accounts.defaultHelp} {t.accounts.encrypted}{' '}
         <span className="mono">APP_SECRET</span>.
       </div>
       <div className="grid-4" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto', alignItems: 'end' }}>
         <div className="field">
-          <label htmlFor="acc-plugin">Hoster</label>
+          <label htmlFor="acc-plugin">{t.accounts.hoster}</label>
           <select id="acc-plugin" className="select" value={pluginId || withAccounts[0]?.id} onChange={(e) => setPluginId(e.target.value)}>
             {withAccounts.map((p) => (
               <option key={p.id} value={p.id}>
@@ -51,15 +54,15 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="acc-user">{form.userLabel ?? 'Benutzer'}</label>
+          <label htmlFor="acc-user">{pluginText(form.userLabel, lang) ?? t.common.user}</label>
           <input id="acc-user" className="input" autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="acc-secret">{form.secretLabel ?? 'Passwort'}</label>
+          <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
           <input id="acc-secret" className="input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} required />
         </div>
         <button type="submit" className="btn primary" disabled={add.isPending}>
-          Hinzufügen
+          {t.common.add}
         </button>
       </div>
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
@@ -68,6 +71,7 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
 }
 
 function EditSecret({ account, label, onDone }: { account: Account; label: string; onDone: () => void }) {
+  const t = useT();
   const [secret, setSecret] = useState('');
   const save = useMutation({
     mutationFn: () => api(`/accounts/${account.id}`, { method: 'PATCH', body: { secret } }),
@@ -83,7 +87,7 @@ function EditSecret({ account, label, onDone }: { account: Account; label: strin
       }}
     >
       <label htmlFor={`secret-${account.id}`} className="subtitle" style={{ fontSize: 13 }}>
-        Neu: {label}
+        {t.accounts.newSecret(label)}
       </label>
       <input
         id={`secret-${account.id}`}
@@ -96,10 +100,10 @@ function EditSecret({ account, label, onDone }: { account: Account; label: strin
         required
       />
       <button type="submit" className="btn small primary" disabled={save.isPending}>
-        Speichern und prüfen
+        {t.accounts.saveAndCheck}
       </button>
       <button type="button" className="btn small" onClick={onDone}>
-        Abbrechen
+        {t.common.cancel}
       </button>
       {save.error && <div className="notice" role="alert">{save.error.message}</div>}
     </form>
@@ -107,6 +111,8 @@ function EditSecret({ account, label, onDone }: { account: Account; label: strin
 }
 
 export function AccountsPage() {
+  const t = useT();
+  const lang = useLang();
   const [editing, setEditing] = useState<number | null>(null);
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => api<Account[]>('/accounts') });
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: () => api<PluginList>('/plugins') });
@@ -115,27 +121,27 @@ export function AccountsPage() {
 
   return (
     <>
-      <PageHeader title="Accounts & Plugins" subtitle="Premium-Accounts für Hoster und die geladenen Hoster-Plugins" />
+      <PageHeader title={t.accounts.title} subtitle={t.accounts.subtitle} />
       <div className="content">
         <AddAccount plugins={plugins.data?.plugins ?? []} />
 
         <section className="card" aria-labelledby="acc-title">
-          <h2 id="acc-title">Accounts</h2>
-          {accounts.data?.length === 0 && <div className="subtitle">Noch keine Accounts.</div>}
+          <h2 id="acc-title">{t.accounts.list}</h2>
+          {accounts.data?.length === 0 && <div className="subtitle">{t.accounts.none}</div>}
           <div className="list">
             {accounts.data?.map((a) => {
-              const s = statusText[a.status];
+              const s = { label: t.accounts.status[a.status], color: statusColor[a.status] };
               return (
                 <div className="list-row" key={a.id}>
                   <div className="grow">
                     <span className="title">
-                      {a.pluginName ?? a.pluginId} · {a.user || 'Sitzungs-Cookie'}
+                      {a.pluginName ?? a.pluginId} · {a.user || t.accounts.sessionCookie}
                     </span>
                     <span className="sub">
-                      {a.premium === true ? 'Premium' : a.premium === false ? 'Kein Premium' : 'Typ unbekannt'}
-                      {a.validUntil ? ` bis ${date(a.validUntil)}` : ''}
-                      {a.trafficLeft !== null ? ` · ${bytes(a.trafficLeft)} Traffic übrig` : ''}
-                      {a.checkedAt ? ` · geprüft ${new Date(a.checkedAt).toLocaleString('de-DE')}` : ''}
+                      {a.premium === true ? t.accounts.premium : a.premium === false ? t.accounts.noPremium : t.accounts.typeUnknown}
+                      {a.validUntil ? t.accounts.until(date(a.validUntil)) : ''}
+                      {a.trafficLeft !== null ? t.accounts.trafficLeft(bytes(a.trafficLeft)) : ''}
+                      {a.checkedAt ? t.accounts.checked(dateTime(a.checkedAt)) : ''}
                     </span>
                     {a.error && <span className="sub" style={{ color: 'var(--err)' }}>{a.error}</span>}
                   </div>
@@ -149,21 +155,21 @@ export function AccountsPage() {
                       checked={a.enabled}
                       onChange={(e) => act.mutate({ path: `/accounts/${a.id}`, method: 'PATCH', body: { enabled: e.target.checked } })}
                     />
-                    Aktiv
+                    {t.accounts.enabled}
                   </label>
                   <button type="button" className="btn small" onClick={() => setEditing(editing === a.id ? null : a.id)}>
-                    Zugang ändern
+                    {t.accounts.changeLogin}
                   </button>
-                  <button type="button" className="icon-btn" aria-label="Account prüfen" title="Prüfen" onClick={() => act.mutate({ path: `/accounts/${a.id}/check` })}>
+                  <button type="button" className="icon-btn" aria-label={t.accounts.checkAria} title={t.accounts.check} onClick={() => act.mutate({ path: `/accounts/${a.id}/check` })}>
                     <IconRefresh size={16} />
                   </button>
-                  <button type="button" className="icon-btn" aria-label="Account löschen" onClick={() => act.mutate({ path: `/accounts/${a.id}`, method: 'DELETE' })}>
+                  <button type="button" className="icon-btn" aria-label={t.accounts.deleteAria} onClick={() => act.mutate({ path: `/accounts/${a.id}`, method: 'DELETE' })}>
                     <IconTrash size={16} />
                   </button>
                   {editing === a.id && (
                     <EditSecret
                       account={a}
-                      label={plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel ?? 'Passwort'}
+                      label={pluginText(plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel, lang) ?? t.common.password}
                       onDone={() => setEditing(null)}
                     />
                   )}
@@ -176,11 +182,11 @@ export function AccountsPage() {
 
         <section className="card" aria-labelledby="plugins-title">
           <div className="toolbar">
-            <h2 id="plugins-title">Plugins</h2>
+            <h2 id="plugins-title">{t.accounts.plugins}</h2>
             <div className="spacer" />
             <button type="button" className="btn small" onClick={() => reload.mutate()} disabled={reload.isPending}>
               <IconRefresh size={16} />
-              Neu laden
+              {t.accounts.reload}
             </button>
           </div>
           <div className="list">
@@ -193,13 +199,13 @@ export function AccountsPage() {
                   <span className="sub mono">{p.matches.map((m) => `/${m.source}/${m.flags}`).join('  ')}</span>
                   <span className="sub mono">{p.file}</span>
                 </div>
-                <span className="pill">{p.builtin ? 'mitgeliefert' : 'eigenes'}</span>
+                <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
                 <span className="subtitle" style={{ fontSize: 13 }}>
-                  {p.accountRequired ? 'Premium nötig' : 'ohne Account'}
+                  {p.accountRequired ? t.accounts.premiumRequired : t.accounts.noAccountNeeded}
                 </span>
               </div>
             ))}
-            {plugins.data?.plugins.length === 0 && <div className="subtitle">Keine Plugins geladen.</div>}
+            {plugins.data?.plugins.length === 0 && <div className="subtitle">{t.accounts.noPlugins}</div>}
           </div>
           {plugins.data?.errors.map((e) => (
             <div className="notice" key={e.file}>

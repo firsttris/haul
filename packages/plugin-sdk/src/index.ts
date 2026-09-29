@@ -124,6 +124,9 @@ export interface AccountInfo {
   message?: string;
 }
 
+/** A text shown in the UI: the same for every language, or one per language (`de`, `en`). */
+export type LocalizedText = string | { de?: string; en?: string };
+
 export interface PluginDefinition {
   id: string;
   name?: string;
@@ -137,8 +140,8 @@ export interface PluginDefinition {
    * for a hoster whose API rate-limits guests (JD: getMaxConcurrentProcessingInstances = 1).
    */
   serial?: boolean;
-  /** Labels and hint for the account form in the UI. */
-  account?: { userLabel?: string; secretLabel?: string; help?: string };
+  /** Labels and hint for the account form in the UI; plain or per UI language. */
+  account?: { userLabel?: LocalizedText; secretLabel?: LocalizedText; help?: LocalizedText };
   check?(link: string, ctx: Ctx): Promise<CheckResult>;
   /**
    * Folder links: expands a link into its files when links are added (like JD's crawler).

@@ -40,9 +40,10 @@ struct Meta {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountForm {
-    pub user_label: Option<String>,
-    pub secret_label: Option<String>,
-    pub help: Option<String>,
+    /// Each a string or `{ "de": …, "en": … }`; the UI picks the language.
+    pub user_label: Option<serde_json::Value>,
+    pub secret_label: Option<serde_json::Value>,
+    pub help: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

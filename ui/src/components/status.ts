@@ -1,5 +1,6 @@
 import type { Download } from '../api';
 import { duration } from '../format';
+import type { Messages } from '../i18n';
 
 export type Tone = 'ok' | 'run' | 'wait' | 'err';
 
@@ -10,28 +11,29 @@ export const toneColor: Record<Tone, { color: string; bar: string }> = {
   err: { color: 'var(--err)', bar: 'var(--err)' },
 };
 
-export function describe(d: Download, now = Date.now()): { label: string; tone: Tone } {
+export function describe(d: Download, t: Messages, now = Date.now()): { label: string; tone: Tone } {
+  const s = t.status;
   switch (d.status) {
     case 'finished':
-      return { label: 'Fertig', tone: 'ok' };
+      return { label: s.finished, tone: 'ok' };
     case 'downloading':
-      return { label: 'Lädt', tone: 'run' };
+      return { label: s.downloading, tone: 'run' };
     case 'resolving':
-      return { label: 'Verbinde …', tone: 'run' };
+      return { label: s.resolving, tone: 'run' };
     case 'paused':
-      return { label: 'Pausiert', tone: 'wait' };
+      return { label: s.paused, tone: 'wait' };
     case 'collected':
       return d.online === 'offline'
-        ? { label: 'Datei offline', tone: 'err' }
-        : { label: d.online === 'online' ? 'Online' : 'Ungeprüft', tone: d.online === 'online' ? 'ok' : 'wait' };
+        ? { label: s.offline, tone: 'err' }
+        : { label: d.online === 'online' ? s.online : s.unchecked, tone: d.online === 'online' ? 'ok' : 'wait' };
     case 'failed':
-      return { label: d.error || 'Fehler', tone: 'err' };
+      return { label: d.error || s.error, tone: 'err' };
     case 'queued':
       if (d.retryAt && d.retryAt > now) {
-        const next = `Neuer Versuch in ${duration((d.retryAt - now) / 1000)}`;
+        const next = s.retryIn(duration((d.retryAt - now) / 1000));
         return { label: d.error ? `${next} · ${d.error}` : next, tone: 'err' };
       }
-      return { label: 'Wartend', tone: 'wait' };
+      return { label: s.waiting, tone: 'wait' };
   }
 }
 

@@ -442,7 +442,14 @@ mod bundled {
         assert_eq!(meta["id"], "ddownload");
         assert_eq!(meta["accountRequired"], true);
         assert_eq!(meta["hasCheckAccount"], true);
-        assert!(meta["account"]["help"].as_str().unwrap().contains("xfss"));
+        assert!(meta["account"]["help"]["de"]
+            .as_str()
+            .unwrap()
+            .contains("xfss"));
+        assert!(meta["account"]["help"]["en"]
+            .as_str()
+            .unwrap()
+            .contains("xfss"));
         let clients = HttpClients {
             follow: Client::new(),
             no_follow: Client::new(),

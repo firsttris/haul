@@ -2,9 +2,12 @@ import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { post } from '../api';
 import { Logo } from '../components/icons';
+import { LanguageSwitch } from '../components/Layout';
+import { useT } from '../i18n';
 
 export function Login({ setup }: { setup: boolean }) {
   const qc = useQueryClient();
+  const t = useT();
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -30,16 +33,17 @@ export function Login({ setup }: { setup: boolean }) {
         <div className="brand" style={{ padding: 0 }}>
           <Logo />
           <div className="brand-name">Haul</div>
+          <LanguageSwitch />
         </div>
         <div className="subtitle">
-          {setup ? 'Erster Start: Lege den Benutzer für die Weboberfläche an.' : 'Anmelden'}
+          {setup ? t.login.setup : t.login.title}
         </div>
         <div className="field">
-          <label htmlFor="user">Benutzername</label>
+          <label htmlFor="user">{t.login.userName}</label>
           <input id="user" className="input" autoComplete="username" value={user} onChange={(e) => setUser(e.target.value)} required />
         </div>
         <div className="field">
-          <label htmlFor="password">Passwort</label>
+          <label htmlFor="password">{t.common.password}</label>
           <input
             id="password"
             className="input"
@@ -50,11 +54,11 @@ export function Login({ setup }: { setup: boolean }) {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          {setup && <span className="help">Mindestens 8 Zeichen.</span>}
+          {setup && <span className="help">{t.login.minLength}</span>}
         </div>
         {error && <div className="notice" role="alert">{error}</div>}
         <button className="btn primary" type="submit" disabled={busy}>
-          {setup ? 'Benutzer anlegen' : 'Anmelden'}
+          {setup ? t.login.createUser : t.login.submit}
         </button>
       </form>
     </div>

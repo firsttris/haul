@@ -6,33 +6,34 @@ import { PageHeader, useStats } from '../components/Layout';
 import { IconArchive, IconChevron, IconFolder, IconPlus, IconTrash } from '../components/icons';
 import { useLive } from '../live';
 import { bytes, date } from '../format';
+import { useT, type Messages } from '../i18n';
 
 type State = { label: string; tone: 'ok' | 'warn' | 'err' | 'muted' };
 
-const archiveCount = (n: number) => `${n} ${n === 1 ? 'Archivdatei' : 'Archivdateien'}`;
-
 /** What the folder's state is, from Haul's point of view. */
-function folderState(e: FileEntry, topLevel: boolean): State | null {
-  if (!e.dir) return e.kind === 'archive' ? { label: 'Archiv', tone: 'muted' } : null;
-  if (e.error) return { label: 'Entpacken fehlgeschlagen', tone: 'err' };
+function folderState(e: FileEntry, topLevel: boolean, t: Messages): State | null {
+  const d = t.done;
+  if (!e.dir) return e.kind === 'archive' ? { label: d.stateArchive, tone: 'muted' } : null;
+  if (e.error) return { label: d.stateFailed, tone: 'err' };
   const p = e.package;
-  if (p?.extract === 'failed') return { label: 'Entpacken fehlgeschlagen', tone: 'err' };
-  if (e.archives > 0 && p?.extract === 'done') return { label: `${archiveCount(e.archives)} übrig`, tone: 'warn' };
-  if (e.archives > 0) return { label: `${archiveCount(e.archives)}, nicht entpackt`, tone: 'warn' };
-  if (p) return { label: p.extract === 'done' ? 'entpackt' : 'fertig', tone: 'ok' };
-  return topLevel ? { label: 'nicht von Haul', tone: 'muted' } : null;
+  if (p?.extract === 'failed') return { label: d.stateFailed, tone: 'err' };
+  if (e.archives > 0 && p?.extract === 'done') return { label: d.stateLeft(d.archives(e.archives)), tone: 'warn' };
+  if (e.archives > 0) return { label: d.stateNotExtracted(d.archives(e.archives)), tone: 'warn' };
+  if (p) return { label: p.extract === 'done' ? d.stateExtracted : d.stateFinished, tone: 'ok' };
+  return topLevel ? { label: d.stateForeign, tone: 'muted' } : null;
 }
 
 const toneColor = { ok: 'var(--ok)', warn: 'var(--accent)', err: 'var(--err)', muted: 'var(--muted-2)' };
 
-const displayPath = (p: string) => (p ? `Fertig / ${p.split('/').join(' / ')}` : 'Fertig');
+const displayPath = (p: string, t: Messages) => (p ? `${t.done.root} / ${p.split('/').join(' / ')}` : t.done.root);
 
 function Breadcrumbs({ path, onOpen }: { path: string; onOpen: (p: string) => void }) {
+  const t = useT();
   const parts = path ? path.split('/') : [];
   return (
-    <nav className="crumbs" aria-label="Ordnerpfad">
+    <nav className="crumbs" aria-label={t.done.pathAria}>
       <button type="button" className="crumb" onClick={() => onOpen('')} aria-current={parts.length === 0 ? 'page' : undefined}>
-        Fertig
+        {t.done.root}
       </button>
       {parts.map((part, i) => {
         const to = parts.slice(0, i + 1).join('/');
@@ -66,6 +67,7 @@ function Modal({ open, onClose, children }: { open: boolean; onClose: () => void
 }
 
 function NewFolderDialog({ open, parent, onClose }: { open: boolean; parent: string; onClose: () => void }) {
+  const t = useT();
   const [name, setName] = useState('');
   const create = useMutation({
     mutationFn: () => post('/files/mkdir', { path: parent, name }),
@@ -81,19 +83,19 @@ function NewFolderDialog({ open, parent, onClose }: { open: boolean; parent: str
   return (
     <Modal open={open} onClose={onClose}>
       <form onSubmit={submit}>
-        <h2>Neuer Ordner</h2>
-        <div className="subtitle">in {displayPath(parent)}</div>
+        <h2>{t.done.newFolder}</h2>
+        <div className="subtitle">{t.done.inFolder(displayPath(parent, t))}</div>
         <div className="field">
-          <label htmlFor="new-folder">Name</label>
+          <label htmlFor="new-folder">{t.common.name}</label>
           <input id="new-folder" className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
         </div>
         {create.error && <div className="notice" role="alert">{create.error.message}</div>}
         <div className="buttons">
           <button type="button" className="btn small" onClick={onClose}>
-            Abbrechen
+            {t.common.cancel}
           </button>
           <button type="submit" className="btn small primary" disabled={create.isPending}>
-            Anlegen
+            {t.done.create}
           </button>
         </div>
       </form>
@@ -114,6 +116,7 @@ function MoveDialog({
   onClose: () => void;
   onMoved: () => void;
 }) {
+  const t = useT();
   const folders = useQuery({ queryKey: ['files', 'folders'], queryFn: () => api<string[]>('/files/folders'), enabled: open });
   const [dest, setDest] = useState('');
   const [filter, setFilter] = useState('');
@@ -152,35 +155,34 @@ function MoveDialog({
   return (
     <Modal open={open} onClose={onClose}>
       <form onSubmit={submit}>
-        <h2>{n === 1 ? `„${selected[0].name}“ verschieben` : `${n} Einträge verschieben`}</h2>
+        <h2>{n === 1 ? t.done.moveOne(selected[0].name) : t.done.moveMany(n)}</h2>
         <div className="field">
-          <label htmlFor="move-filter">Zielordner</label>
-          <input id="move-filter" className="input" type="search" placeholder="Ordner suchen …" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <label htmlFor="move-filter">{t.done.targetFolder}</label>
+          <input id="move-filter" className="input" type="search" placeholder={t.done.searchFolders} value={filter} onChange={(e) => setFilter(e.target.value)} />
         </div>
-        <div className="folder-list" role="radiogroup" aria-label="Zielordner">
+        <div className="folder-list" role="radiogroup" aria-label={t.done.targetFolder}>
           {choices.map((f) => (
             <label key={f || '/'} className={`folder-choice${dest === f ? ' on' : ''}`}>
               <input type="radio" name="dest" value={f} checked={dest === f} onChange={() => setDest(f)} />
               <IconFolder size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-              <span>{f ? f.split('/').join(' / ') : 'Fertig (oberste Ebene)'}</span>
+              <span>{f ? f.split('/').join(' / ') : t.done.topLevel}</span>
             </label>
           ))}
         </div>
         <div className="field">
-          <label htmlFor="move-new">Optional: neuer Ordner darin</label>
-          <input id="move-new" className="input" placeholder="Name des neuen Ordners" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <label htmlFor="move-new">{t.done.optionalNew}</label>
+          <input id="move-new" className="input" placeholder={t.done.newFolderName} value={newName} onChange={(e) => setNewName(e.target.value)} />
           <span className="help">
-            Ziel: {displayPath(dest)}
-            {newName.trim() ? ` / ${newName.trim()}` : ''}
+            {t.done.target(`${displayPath(dest, t)}${newName.trim() ? ` / ${newName.trim()}` : ''}`)}
           </span>
         </div>
         {move.error && <div className="notice" role="alert">{move.error.message}</div>}
         <div className="buttons">
           <button type="button" className="btn small" onClick={onClose}>
-            Abbrechen
+            {t.common.cancel}
           </button>
           <button type="submit" className="btn small primary" disabled={move.isPending || (dest === current && !newName.trim())}>
-            Verschieben
+            {t.done.move}
           </button>
         </div>
       </form>
@@ -189,6 +191,7 @@ function MoveDialog({
 }
 
 export function DonePage() {
+  const t = useT();
   const { path } = useSearch({ from: '/fertig' });
   const navigate = useNavigate();
   const open = (p: string) => navigate({ to: '/fertig', search: { path: p } });
@@ -218,11 +221,12 @@ export function DonePage() {
       if (kind === 'extract') return post('/files/extract', { paths });
       if (kind === 'delete-archives') {
         const folders = chosen.filter((e) => e.dir && e.archives > 0).map((e) => e.path);
-        if (!confirm(`Alle Archivdateien in ${folders.length === 1 ? 'diesem Ordner' : `${folders.length} Ordnern`} löschen?`)) return;
+        if (!confirm(t.done.confirmDeleteArchives(folders.length))) return;
         return post('/files/delete-archives', { paths: folders });
       }
-      const what = chosen.length === 1 ? `„${chosen[0].name}“${chosen[0].dir ? ' mit allem Inhalt' : ''}` : `${chosen.length} Einträge`;
-      if (!confirm(`${what} endgültig löschen?`)) return;
+      const question =
+        chosen.length === 1 ? t.done.confirmDeleteOne(chosen[0].name, chosen[0].dir) : t.done.confirmDeleteMany(chosen.length);
+      if (!confirm(question)) return;
       return post('/files/delete', { paths });
     },
     // Clear the selection after an action, so the next one starts fresh.
@@ -246,51 +250,51 @@ export function DonePage() {
   return (
     <>
       <PageHeader
-        title="Fertig"
+        title={t.done.title}
         subtitle={
           <>
             <span className="mono">{data?.root ?? ''}</span>
-            {data && ` · ${entries.length} Einträge · ${bytes(total)}`}
-            {doneDisk && ` · ${bytes(doneDisk.free)} frei`}
+            {data && ` · ${t.done.entries(entries.length)} · ${bytes(total)}`}
+            {doneDisk && ` · ${t.done.free(bytes(doneDisk.free))}`}
           </>
         }
       />
       <div className="content">
         <Breadcrumbs path={path} onOpen={open} />
 
-        <div className="toolbar files-toolbar" role="toolbar" aria-label="Aktionen für die Auswahl">
+        <div className="toolbar files-toolbar" role="toolbar" aria-label={t.done.actionsAria}>
           {chosen.length === 0 ? (
             <span className="subtitle" style={{ fontSize: 13 }}>
-              Einträge auswählen, um sie zu entpacken, zu verschieben oder zu löschen.
+              {t.done.selectHint}
             </span>
           ) : (
             <>
-              <strong style={{ fontSize: 14 }}>{chosen.length} ausgewählt</strong>
+              <strong style={{ fontSize: 14 }}>{t.done.selected(chosen.length)}</strong>
               <button type="button" className="btn small" disabled={!canExtract || act.isPending} onClick={() => act.mutate('extract')}>
                 <IconArchive size={16} />
-                Entpacken
+                {t.done.extract}
               </button>
               <button type="button" className="btn small" disabled={chosen.some(busy)} onClick={() => setDialog('move')}>
-                Verschieben …
+                {t.done.moveEllipsis}
               </button>
               {canDeleteArchives && (
                 <button type="button" className="btn small" disabled={act.isPending} onClick={() => act.mutate('delete-archives')}>
-                  Archive löschen
+                  {t.done.deleteArchives}
                 </button>
               )}
               <button type="button" className="btn small danger" disabled={chosen.some(busy) || act.isPending} onClick={() => act.mutate('delete')}>
                 <IconTrash size={16} />
-                Löschen
+                {t.done.delete}
               </button>
               <button type="button" className="btn small" onClick={() => setSelected(new Set())}>
-                Auswahl aufheben
+                {t.done.clearSelection}
               </button>
             </>
           )}
           <div className="spacer" />
           <button type="button" className="btn small" onClick={() => setDialog('mkdir')}>
             <IconPlus size={16} />
-            Neuer Ordner
+            {t.done.newFolder}
           </button>
         </div>
 
@@ -298,7 +302,7 @@ export function DonePage() {
         {act.error && <div className="notice" role="alert">{act.error.message}</div>}
         {here !== undefined && (
           <div className="notice info" role="status">
-            In diesem Ordner wird entpackt: {here} %
+            {t.done.extractingHere(here)}
           </div>
         )}
         {data?.error && <div className="notice" role="alert">{data.error}</div>}
@@ -310,7 +314,7 @@ export function DonePage() {
                 <input
                   type="checkbox"
                   className="row-check"
-                  aria-label="Alle auswählen"
+                  aria-label={t.done.selectAll}
                   checked={allSelected}
                   ref={(el) => {
                     if (el) el.indeterminate = chosen.length > 0 && !allSelected;
@@ -319,10 +323,10 @@ export function DonePage() {
                   disabled={entries.length === 0}
                 />
               </div>
-              <div role="columnheader">Name</div>
-              <div role="columnheader">Zustand</div>
-              <div role="columnheader">Größe</div>
-              <div role="columnheader">Geändert</div>
+              <div role="columnheader">{t.common.name}</div>
+              <div role="columnheader">{t.done.colState}</div>
+              <div role="columnheader">{t.common.size}</div>
+              <div role="columnheader">{t.done.colModified}</div>
             </div>
             {path && (
               <div className="frow" role="row">
@@ -336,14 +340,14 @@ export function DonePage() {
               </div>
             )}
             {entries.map((e) => {
-              const state = folderState(e, path === '');
+              const state = folderState(e, path === '', t);
               const progress = live.extractPaths.get(e.path) ?? e.extracting ?? undefined;
               const error = e.error ?? e.package?.extractError ?? null;
               return (
                 <div key={e.path}>
                   <div className={`frow${selected.has(e.path) ? ' selected' : ''}`} role="row">
                     <div role="cell">
-                      <input type="checkbox" className="row-check" aria-label={`${e.name} auswählen`} checked={selected.has(e.path)} onChange={() => toggle(e.path)} />
+                      <input type="checkbox" className="row-check" aria-label={t.done.select(e.name)} checked={selected.has(e.path)} onChange={() => toggle(e.path)} />
                     </div>
                     <div className="fname" role="cell">
                       {e.dir ? (
@@ -360,7 +364,7 @@ export function DonePage() {
                     </div>
                     <div role="cell" className="fstate">
                       {progress !== undefined ? (
-                        <div className="progress" role="progressbar" aria-label={`${e.name} wird entpackt`} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+                        <div className="progress" role="progressbar" aria-label={t.done.beingExtracted(e.name)} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
                           <div className="bar">
                             <div style={{ width: `${progress}%`, background: 'var(--accent)' }} />
                           </div>
@@ -392,8 +396,8 @@ export function DonePage() {
             })}
             {data && entries.length === 0 && (
               <div className="empty">
-                <strong>Leer</strong>
-                {path ? 'Dieser Ordner ist leer.' : 'Fertige Downloads landen hier, ein Ordner pro Paket.'}
+                <strong>{t.done.empty}</strong>
+                {path ? t.done.emptyFolder : t.done.emptyRoot}
               </div>
             )}
           </div>

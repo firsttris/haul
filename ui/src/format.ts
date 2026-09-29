@@ -1,5 +1,19 @@
-const nf1 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-const nf0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+import { currentMessages } from './i18n';
+
+const formats = new Map<string, { nf0: Intl.NumberFormat; nf1: Intl.NumberFormat }>();
+/** Number formats of the current language. */
+function nf() {
+  const locale = currentMessages().locale;
+  let f = formats.get(locale);
+  if (!f) {
+    f = {
+      nf0: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
+      nf1: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, minimumFractionDigits: 1 }),
+    };
+    formats.set(locale, f);
+  }
+  return f;
+}
 
 export function bytes(n: number | null | undefined): string {
   if (n === null || n === undefined || n < 0) return '—';
@@ -10,7 +24,7 @@ export function bytes(n: number | null | undefined): string {
     v /= 1024;
     i++;
   }
-  return `${i === 0 ? nf0.format(v) : nf1.format(v)} ${units[i]}`;
+  return `${i === 0 ? nf().nf0.format(v) : nf().nf1.format(v)} ${units[i]}`;
 }
 
 export function speed(bps: number | undefined): string {
@@ -35,5 +49,10 @@ export function percent(done: number, size: number | null | undefined): number {
 
 export function date(ms: number | null | undefined): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(ms).toLocaleDateString(currentMessages().locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+export function dateTime(ms: number | null | undefined): string {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString(currentMessages().locale);
 }

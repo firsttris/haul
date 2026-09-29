@@ -43,6 +43,6 @@ describe('XFS API-key accounts', () => {
   });
 
   it('mentions the API key in its form hint', () => {
-    expect(plugin.account?.help).toContain('API-Key');
+    expect((plugin.account?.help as { de: string }).de).toContain('API-Key');
   });
 });

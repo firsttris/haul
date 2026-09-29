@@ -44,8 +44,10 @@ describe('ddownload', () => {
   });
 
   it('describes its account form', () => {
-    expect(plugin.account?.secretLabel).toBe('Passwort oder xfss-Cookie');
-    expect(plugin.account?.help).toContain('xfss');
+    expect(plugin.account?.secretLabel).toEqual({ de: 'Passwort oder xfss-Cookie', en: 'Password or xfss cookie' });
+    const help = plugin.account?.help as { de: string; en: string };
+    expect(help.de).toContain('xfss');
+    expect(help.en).toContain('xfss');
   });
 
   it('checks a file page', async () => {

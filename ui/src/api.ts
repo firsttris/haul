@@ -1,3 +1,5 @@
+import type { PluginText } from './i18n';
+
 export type Status = 'collected' | 'queued' | 'resolving' | 'downloading' | 'paused' | 'finished' | 'failed';
 
 export interface Download {
@@ -64,7 +66,8 @@ export interface Plugin {
   version: string;
   matches: { source: string; flags: string }[];
   accountRequired: boolean;
-  account: { userLabel?: string; secretLabel?: string; help?: string } | null;
+  /** Plugin texts: plain or one per language. */
+  account: { userLabel?: PluginText; secretLabel?: PluginText; help?: PluginText } | null;
   hasCheck: boolean;
   hasCheckAccount: boolean;
   builtin: boolean;
