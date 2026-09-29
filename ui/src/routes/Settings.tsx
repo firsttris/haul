@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, post, type Settings } from '../api';
 import { PageHeader, useSettings } from '../components/Layout';
 import { IconLogout } from '../components/icons';
@@ -176,6 +176,63 @@ function Captchas() {
   );
 }
 
+/** The archive password list; saved on its own, so the settings form never overwrites a
+ *  password extraction just added (see db::ARCHIVE_PASSWORDS). */
+function ArchivePasswords() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['settings', 'archive-passwords'],
+    queryFn: () => api<{ passwords: string[] }>('/settings/archive-passwords'),
+  });
+  const [text, setText] = useState<string | null>(null);
+  const saved = data?.passwords.join('\n') ?? '';
+  const save = useMutation({
+    mutationFn: (passwords: string[]) =>
+      api<{ passwords: string[] }>('/settings/archive-passwords', { method: 'PUT', body: { passwords } }),
+    onSuccess: (r) => {
+      qc.setQueryData(['settings', 'archive-passwords'], r);
+      setText(null);
+    },
+  });
+  // Untouched, the field follows the server (a password found while extracting shows up).
+  const value = text ?? saved;
+  const count = value.split('\n').filter((l) => l.trim()).length;
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    save.mutate(value.split('\n'));
+  }
+  return (
+    <form className="card" id="archive-passwords" onSubmit={submit} aria-labelledby="apw-title">
+      <h2 id="apw-title">{t.settings.archivePasswords}</h2>
+      <div className="card-sub">{t.settings.archivePasswordsIntro}</div>
+      <div className="field">
+        <label htmlFor="apw">{t.settings.archivePasswordsLabel}</label>
+        <textarea
+          id="apw"
+          className="textarea mono"
+          style={{ minHeight: 96 }}
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </div>
+      {save.error && <div className="notice" role="alert">{save.error.message}</div>}
+      <div className="toolbar">
+        <span className="subtitle" style={{ fontSize: 13 }}>
+          {t.settings.archivePasswordsCount(count)}
+        </span>
+        <div className="spacer" />
+        {save.isSuccess && text === null && <span className="subtitle" style={{ fontSize: 13 }}>{t.settings.saved}</span>}
+        <button type="submit" className="btn primary small" disabled={save.isPending || text === null}>
+          {t.common.save}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function Language() {
   const t = useT();
   const lang = useLang();
@@ -240,6 +297,10 @@ export function SettingsPage() {
               <input type="checkbox" checked={s.deleteArchives} onChange={(e) => set('deleteArchives', e.target.checked)} />
               {t.settings.deleteArchives}
             </label>
+            <label className="checkbox">
+              <input type="checkbox" checked={s.askArchivePassword} onChange={(e) => set('askArchivePassword', e.target.checked)} />
+              {t.settings.askArchivePassword}
+            </label>
           </div>
           {save.error && <div className="notice" role="alert">{save.error.message}</div>}
           <div className="toolbar">
@@ -270,6 +331,7 @@ export function SettingsPage() {
           </div>
         </section>
 
+        <ArchivePasswords />
         <Language />
         <Captchas />
         <ApiToken isSet={data.apiTokenSet} />

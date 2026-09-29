@@ -135,6 +135,15 @@ eingegebene Passwort bleibt beim Download gespeichert und wird nicht mehr an die
 Nach drei falschen Passwörtern schlägt der Download fehl, *Abbrechen* beendet ihn sofort; unbeantwortet
 fragt Haul nach 30 Minuten erneut. Archiv-Passwörter zum Entpacken sind davon getrennt.
 
+## Passwortgeschützte Archive
+
+Wie JDownloaders Entpacker probiert Haul bei einem geschützten Archiv der Reihe nach: kein
+Passwort, die Archiv-Passwörter des Pakets (Linksammler), den Archivnamen und die Liste unter
+*Einstellungen → Archiv-Passwörter*. Passt keines, fragt Haul oben im Hinweis nach (abschaltbar:
+*Beim Entpacken nach dem Passwort fragen, wenn keines passt*); nach einer falschen Eingabe fragt es erneut, bis zu
+dreimal. Das Passwort, das ein Archiv geöffnet hat, steht danach ganz oben in der Liste und wird so
+beim nächsten Archiv zuerst probiert.
+
 ## Click'n'Load
 
 Die Webseite schickt die Links an `127.0.0.1:9666` **des Rechners mit dem Browser**. Weil Haul auf

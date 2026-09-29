@@ -25,7 +25,7 @@ export function captchaUrl(c: Captcha, lang: string): string {
   return `${c.pageUrl.split('#')[0]}#${hash}`;
 }
 
-/** Answered right here: a download password, or the text of an image captcha. */
+/** Answered right here: a download or archive password, or the text of an image captcha. */
 function AnswerRow({ c, now }: { c: Captcha; now: number }) {
   const t = useT();
   const [value, setValue] = useState('');
@@ -49,7 +49,7 @@ function AnswerRow({ c, now }: { c: Captcha; now: number }) {
         </>
       ) : (
         <span className="mono">
-          {t.captcha.passwordFor(name, c.pluginName, minutes)}
+          {c.kind === 'archive-password' ? t.captcha.archivePasswordFor(name, c.pluginName, minutes) : t.captcha.passwordFor(name, c.pluginName, minutes)}
           {c.wrong && <strong> {t.captcha.passwordWrong}</strong>}
           {c.link && c.link !== name && <span className="subtitle"> {c.link}</span>}
         </span>
@@ -98,7 +98,7 @@ export function CaptchaBanner() {
       seen.current.add(c.id);
       try {
         if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-          const body = c.kind === 'password' ? t.captcha.notifyPassword(c.name ?? c.host) : t.captcha.notify(c.host);
+          const body = c.kind === 'password' || c.kind === 'archive-password' ? t.captcha.notifyPassword(c.name ?? c.host) : t.captcha.notify(c.host);
           new Notification('Haul', { body, tag: `haul-captcha-${c.id}` });
         }
       } catch {
@@ -109,9 +109,10 @@ export function CaptchaBanner() {
 
   if (!data.length) return null;
   const passwords = data.filter((c) => c.kind === 'password');
+  const archives = data.filter((c) => c.kind === 'archive-password');
   const images = data.filter((c) => c.kind === 'image');
   // reCaptcha, hCaptcha, Turnstile: solved on the hoster's page with the userscript.
-  const captchas = data.filter((c) => c.kind !== 'password' && c.kind !== 'image');
+  const captchas = data.filter((c) => !['password', 'archive-password', 'image'].includes(c.kind));
   return (
     <div className="captcha-banner" role="alert">
       {passwords.length > 0 && (
@@ -120,6 +121,15 @@ export function CaptchaBanner() {
         </div>
       )}
       {passwords.map((c) => (
+        <AnswerRow key={c.id} c={c} now={now} />
+      ))}
+      {archives.length > 0 && (
+        <div className="captcha-head">
+          <strong>{t.captcha.archivesWaiting(archives.length)}</strong>
+          <span className="subtitle">{t.captcha.archiveHint}</span>
+        </div>
+      )}
+      {archives.map((c) => (
         <AnswerRow key={c.id} c={c} now={now} />
       ))}
       {images.length > 0 && (

@@ -291,6 +291,11 @@ impl PluginManager {
         let _ = self.captchas.set(captchas);
     }
 
+    /// The user's questions, for the engine's own (archive passwords); `None` in tests.
+    pub fn captchas(&self) -> Option<Arc<crate::captcha::Captchas>> {
+        self.captchas.get().cloned()
+    }
+
     pub async fn reload(&self) {
         let mut by_id: HashMap<String, Arc<Plugin>> = HashMap::new();
         let mut errors = Vec::new();

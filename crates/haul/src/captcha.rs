@@ -9,6 +9,7 @@
 //!
 //! Download passwords are asked the same way (JD's `getUserInput("Password?")`): the plugin calls
 //! `ctx.password.get()`, the UI shows an input field and answers with the challenge's secret.
+//! So are archive passwords that none of the known ones fits (JD's ExtractPasswordDialog).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -21,6 +22,9 @@ use crate::events::{Events, Topic};
 
 /// How long a challenge waits for the user (JD's default dialog timeout is similar).
 pub const TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// The kind of an archive password question.
+pub const ARCHIVE_PASSWORD: &str = "archive-password";
 
 /// What a plugin asks for (`ctx.captcha.solve`).
 #[derive(Debug, Clone, Deserialize)]
@@ -222,6 +226,36 @@ impl Captchas {
         self.wait(&asker.plugin_id, view).await
     }
 
+    /// The password of an archive none of the known passwords opens, like JD's
+    /// ExtractPasswordDialog (ExtractionListenerList, `PASSWORD_NEEDED_TO_CONTINUE`).
+    /// `package`: shown next to the archive; `wrong`: the last answer did not open it.
+    pub async fn ask_archive_password(
+        &self,
+        archive: &str,
+        package: Option<&str>,
+        wrong: bool,
+    ) -> Result<String, String> {
+        let now = now_ms();
+        let view = CaptchaView {
+            id: crate::crypto::random_token()[..16].to_string(),
+            secret: crate::crypto::random_token(),
+            plugin_id: "extract".into(),
+            plugin_name: package.unwrap_or_default().to_string(),
+            kind: ARCHIVE_PASSWORD.into(),
+            site_key: String::new(),
+            page_url: String::new(),
+            host: String::new(),
+            enterprise: false,
+            image: None,
+            link: None,
+            name: Some(archive.to_string()),
+            wrong,
+            created_at: now,
+            expires_at: now + TIMEOUT.as_millis() as i64,
+        };
+        self.wait("extract", view).await
+    }
+
     async fn wait(&self, plugin: &str, view: CaptchaView) -> Result<String, String> {
         let id = view.id.clone();
         let (tx, rx) = oneshot::channel();
@@ -263,7 +297,7 @@ impl Captchas {
             return false;
         };
         // A password is taken as typed; a token never has spaces around it.
-        let answer = if p.view.kind == "password" {
+        let answer = if p.view.kind == "password" || p.view.kind == ARCHIVE_PASSWORD {
             token
         } else {
             token.trim()
@@ -375,6 +409,35 @@ mod tests {
         assert_eq!(view.name.as_deref(), Some("file.rar"));
         assert!(view.wrong);
         assert!(!c.solve(&view.id, &view.secret, ""));
+        assert!(c.solve(&view.id, &view.secret, " pw "));
+        assert_eq!(wait.await.unwrap(), Ok(" pw ".into()));
+    }
+
+    #[tokio::test]
+    async fn archive_password_taken_as_typed() {
+        let c = Arc::new(Captchas::new(Events::new()));
+        let wait = tokio::spawn({
+            let c = c.clone();
+            async move {
+                c.ask_archive_password("x.part1.rar", Some("X"), false)
+                    .await
+            }
+        });
+        let view = loop {
+            if let Some(v) = c.list().pop() {
+                break v;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_eq!(
+            (
+                view.kind.as_str(),
+                view.name.as_deref(),
+                view.plugin_name.as_str()
+            ),
+            (ARCHIVE_PASSWORD, Some("x.part1.rar"), "X")
+        );
+        assert!(!view.wrong);
         assert!(c.solve(&view.id, &view.secret, " pw "));
         assert_eq!(wait.await.unwrap(), Ok(" pw ".into()));
     }

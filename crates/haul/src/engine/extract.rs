@@ -190,9 +190,10 @@ fn causes(run: &Run) -> Causes {
     Causes {
         // A shell reports a signal as 128 + n (139 = segfault).
         crashed: run.signal.is_some() || run.code.is_some_and(|c| c > 128),
-        wrong_password: text.contains("wrong password")
-            || text.contains("incorrect password")
-            || text.contains("encrypted file"),
+        // Any mention of a password, like pyLoad's UnRar extractor (`_RE_BADPWD = "password"`):
+        // unrar says "The specified password is incorrect." or "wrong password", 7-Zip "Wrong
+        // password", unar "requires a password".
+        wrong_password: text.contains("password") || text.contains("encrypted file"),
         unsupported: text.contains("unsupported method") || text.contains("is not supported"),
         no_space: text.contains("no space left") || text.contains("disk full"),
         damaged: text.contains("crc failed")
@@ -339,34 +340,45 @@ fn command(tool: &Tool, archive: &Path, dest: &Path, pw: &str) -> Command {
     cmd
 }
 
+/// Why an archive could not be extracted: the message for the UI, and whether a password
+/// is what is missing (then another one may still open it).
+#[derive(Debug)]
+struct Failed {
+    message: String,
+    wrong_password: bool,
+}
+
+/// Tries `candidates` in order (`""`: no password) with each extractor; the password that
+/// opened the archive.
 async fn extract_one(
     archive: &Path,
     dest: &Path,
-    passwords: &[String],
+    candidates: &[String],
     on_progress: &mut (dyn FnMut(u8) + Send),
-) -> Result<()> {
+) -> Result<String, Failed> {
     // unrar handles RAR best (RAR5, volumes); 7-Zip builds without the RAR codec cannot.
     let tools: Vec<Tool> = available_tools()
         .into_iter()
         .filter(|t| t.kind != Kind::Unrar || is_rar(archive))
         .collect();
     if tools.is_empty() {
-        return Err(anyhow!(crate::tr!(
-            "kein Entpacker gefunden. Empfohlen: 7-Zip und unrar, unter Ubuntu/Debian \
-             „sudo apt install 7zip unrar“; im Docker-Image ist alles enthalten",
-            "no extractor found. Recommended: 7-Zip and unrar, on Ubuntu/Debian \
-             “sudo apt install 7zip unrar”; the Docker image has everything"
-        )));
+        return Err(Failed {
+            message: crate::tr!(
+                "kein Entpacker gefunden. Empfohlen: 7-Zip und unrar, unter Ubuntu/Debian \
+                 „sudo apt install 7zip unrar“; im Docker-Image ist alles enthalten",
+                "no extractor found. Recommended: 7-Zip and unrar, on Ubuntu/Debian \
+                 “sudo apt install 7zip unrar”; the Docker image has everything"
+            ),
+            wrong_password: false,
+        });
     }
-    let mut candidates: Vec<String> = vec![String::new()];
-    candidates.extend(passwords.iter().cloned());
     // Per tool, its first failure (without password) says the most; the others add causes.
     let mut failures: Vec<(Kind, String)> = Vec::new();
     let mut found = Causes::default();
-    for pw in &candidates {
+    for pw in candidates {
         for tool in &tools {
             let line = match run_tool(command(tool, archive, dest, pw), on_progress).await {
-                Ok(run) if run.ok => return Ok(()),
+                Ok(run) if run.ok => return Ok(pw.clone()),
                 Ok(run) => {
                     let c = causes(&run);
                     found.crashed |= c.crashed;
@@ -375,7 +387,7 @@ async fn extract_one(
                     found.no_space |= c.no_space;
                     found.damaged |= c.damaged;
                     let tail: String = format!("{}\n{}", run.stdout, run.stderr);
-                    let tail = &tail[tail.len().saturating_sub(4000)..];
+                    let tail = &tail[tail.floor_char_boundary(tail.len().saturating_sub(4000))..];
                     tracing::warn!(
                         archive = %archive.display(),
                         tool = %tool.describe(),
@@ -394,12 +406,45 @@ async fn extract_one(
     }
     let has_unrar = tools.iter().any(|t| t.kind == Kind::Unrar);
     let lines = failures.into_iter().map(|(_, l)| l).collect();
-    Err(anyhow!(failure_message(
-        is_rar(archive),
-        has_unrar,
-        found,
-        lines
-    )))
+    Err(Failed {
+        message: failure_message(is_rar(archive), has_unrar, found, lines),
+        wrong_password: found.wrong_password && !found.no_space,
+    })
+}
+
+/// The archive's name without volume and type (`x.part01.rar`, `x.7z.001` → `x`), which JD
+/// tries as a password too (ExtractionController: `passwordList.add(archive.getName())`).
+fn archive_name(file: &str) -> String {
+    let re = Regex::new(r"(?i)(?:\.part0*\d+)?\.(?:rar|zip|7z)(?:\.\d+)?$").unwrap();
+    re.replace(file, "").to_string()
+}
+
+/// The passwords to try, in JD's order (ExtractionController): none, the package's, the
+/// archive's name, the archive password list. Each also trimmed if that differs (JD: "try
+/// trimmed password"); no duplicates.
+fn candidates(package: &[String], archive_file: &str, list: &[String]) -> Vec<String> {
+    let name = archive_name(archive_file);
+    let mut out: Vec<String> = vec![String::new()];
+    for pw in package.iter().chain([&name]).chain(list) {
+        for p in [pw.as_str(), pw.trim()] {
+            if !p.is_empty() && !out.iter().any(|o| o == p) {
+                out.push(p.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// A list as the user typed it: without empty lines and duplicates, order kept.
+fn clean_passwords(list: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for p in list {
+        let p = p.trim_end_matches(['\r', '\n']).to_string();
+        if !p.trim().is_empty() && !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
 }
 
 /// The error for the UI: what to do about it (most likely cause first), then what each
@@ -412,8 +457,8 @@ fn failure_message(rar: bool, has_unrar: bool, found: Causes, failures: Vec<Stri
         ))
     } else if found.wrong_password {
         Some(crate::tr!(
-            "Passwort fehlt oder ist falsch: am Paket unter „Archiv-Passwörter“ eintragen und erneut entpacken",
-            "password missing or wrong: add it to the package's archive passwords and extract again"
+            "Passwort fehlt oder ist falsch: unter Einstellungen → Archiv-Passwörter eintragen oder beim erneuten Entpacken eingeben",
+            "password missing or wrong: add it under Settings → Archive passwords or enter it when extracting again"
         ))
     } else if rar && !has_unrar && (found.crashed || found.unsupported) {
         Some(crate::tr!(
@@ -556,7 +601,10 @@ impl Engine {
                     Some(((i as u32 * 100 + p as u32) / n) as u8),
                 );
             };
-            if let Err(e) = extract_one(&dir.join(a), dir, passwords, &mut report).await {
+            if let Err(e) = self
+                .extract_archive(dir, a, package_id, passwords, &mut report)
+                .await
+            {
                 result = Err(anyhow!("{a}: {e:#}"));
                 break;
             }
@@ -568,6 +616,115 @@ impl Engine {
             }
         }
         result
+    }
+
+    /// One archive set in `dir`: the known passwords first, then, if none opens it and asking
+    /// is on, the user (JD: ExtractionController `PASSWORD_NEEDED_TO_CONTINUE`, answered by
+    /// ExtractPasswordDialog in ExtractionListenerList). JD asks once; Haul asks again after a
+    /// wrong answer, up to three times like for download passwords. The password that opened
+    /// it goes to the front of the archive password list (JD ExtractionExtension.addPassword).
+    async fn extract_archive(
+        &self,
+        dir: &Path,
+        file: &str,
+        package_id: Option<i64>,
+        package_passwords: &[String],
+        on_progress: &mut (dyn FnMut(u8) + Send),
+    ) -> Result<()> {
+        let archive = dir.join(file);
+        let known = candidates(package_passwords, file, &self.archive_passwords().await);
+        let mut failed = match extract_one(&archive, dir, &known, on_progress).await {
+            Ok(pw) => {
+                self.remember_archive_password(&pw).await;
+                return Ok(());
+            }
+            Err(f) => f,
+        };
+        let asker = self.plugins.captchas();
+        if !failed.wrong_password || !self.settings().ask_archive_password || asker.is_none() {
+            return Err(anyhow!(failed.message));
+        }
+        let asker = asker.unwrap();
+        let package = match package_id {
+            Some(id) => db::get_package(&self.db, id)
+                .await
+                .ok()
+                .flatten()
+                .map(|p| p.name),
+            None => None,
+        };
+        for attempt in 0..3 {
+            let pw = match asker
+                .ask_archive_password(file, package.as_deref(), attempt > 0)
+                .await
+            {
+                Ok(pw) => pw,
+                // Cancelled or no answer in time: the failure as it was.
+                Err(_) => break,
+            };
+            match extract_one(&archive, dir, std::slice::from_ref(&pw), on_progress).await {
+                Ok(pw) => {
+                    self.remember_archive_password(&pw).await;
+                    return Ok(());
+                }
+                Err(f) => {
+                    let again = f.wrong_password;
+                    failed = f;
+                    if !again {
+                        break;
+                    }
+                }
+            }
+        }
+        Err(anyhow!(failed.message))
+    }
+
+    /// The archive password list (Settings → Archive passwords).
+    pub async fn archive_passwords(&self) -> Vec<String> {
+        db::get_setting(&self.db, db::ARCHIVE_PASSWORDS)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
+    }
+
+    /// Replaces the archive password list; empty lines and duplicates are dropped.
+    pub async fn set_archive_passwords(&self, list: Vec<String>) -> Result<Vec<String>> {
+        let _lock = self.archive_passwords.lock().await;
+        let list = clean_passwords(list);
+        db::set_setting(
+            &self.db,
+            db::ARCHIVE_PASSWORDS,
+            &serde_json::to_string(&list)?,
+        )
+        .await?;
+        self.events.changed(Topic::Settings);
+        Ok(list)
+    }
+
+    /// A password that opened an archive: first in the list from now on (JD addPassword:
+    /// "avoid duplicates", `add(0, pw)`).
+    async fn remember_archive_password(&self, pw: &str) {
+        if pw.is_empty() {
+            return;
+        }
+        let _lock = self.archive_passwords.lock().await;
+        let mut list = self.archive_passwords().await;
+        if list.first().is_some_and(|p| p == pw) {
+            return;
+        }
+        list.retain(|p| p != pw);
+        list.insert(0, pw.to_string());
+        match serde_json::to_string(&list) {
+            Ok(json) => {
+                if let Err(e) = db::set_setting(&self.db, db::ARCHIVE_PASSWORDS, &json).await {
+                    tracing::warn!("saving the archive password: {e:#}");
+                }
+                self.events.changed(Topic::Settings);
+            }
+            Err(e) => tracing::warn!("saving the archive password: {e:#}"),
+        }
     }
 
     /// "Entpacken" in the Fertig view for the selected entries. A folder: all archive sets in it
@@ -725,6 +882,31 @@ mod tests {
         assert!(archive_set(&names[1..3], "X.part2.rar").is_none());
     }
 
+    /// JD's order: none, the package's, the archive's name, the list; trimmed variants, no
+    /// duplicates.
+    #[test]
+    fn password_candidates() {
+        assert_eq!(archive_name("Film.part01.rar"), "Film");
+        assert_eq!(archive_name("a.7z.001"), "a");
+        assert_eq!(archive_name("x.ZIP"), "x");
+        let got = candidates(
+            &["pkg ".into(), "".into()],
+            "Film.part1.rar",
+            &["list".into(), "pkg".into(), "Film".into()],
+        );
+        assert_eq!(got, ["", "pkg ", "pkg", "Film", "list"]);
+        assert_eq!(
+            clean_passwords(vec![
+                " a".into(),
+                "".into(),
+                "  ".into(),
+                " a".into(),
+                "b\r".into()
+            ]),
+            [" a", "b"]
+        );
+    }
+
     #[test]
     fn archive_sets() {
         let names: Vec<String> = [
@@ -751,6 +933,10 @@ mod tests {
     }
 }
 
+/// Held by tests that change `PATH` or need the real extractors on it.
+#[cfg(test)]
+pub(crate) static PATH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[cfg(test)]
 mod tool_tests {
     use super::*;
@@ -760,6 +946,8 @@ mod tool_tests {
     /// (One test, because it changes the process-wide PATH.)
     #[tokio::test]
     async fn discovery_and_missing_tools() {
+        let _path = PATH_LOCK.lock().await;
+        let saved_path = std::env::var_os("PATH");
         std::env::remove_var("HAUL_7Z");
         std::env::remove_var("HAUL_UNRAR");
         let dir = tempfile::tempdir().unwrap();
@@ -776,10 +964,11 @@ mod tool_tests {
 
         std::env::set_var("PATH", &bin);
         assert!(available_tools().is_empty());
-        let err = extract_one(&archive, &out, &[], &mut |_| {})
+        let none = [String::new()];
+        let err = extract_one(&archive, &out, &none, &mut |_| {})
             .await
             .unwrap_err()
-            .to_string();
+            .message;
         assert!(err.contains("kein Entpacker gefunden"), "{err}");
         assert!(err.contains("apt install 7zip unrar"), "{err}");
 
@@ -799,9 +988,12 @@ mod tool_tests {
         assert_eq!(tools.len(), 1);
         assert!(tools[0].describe().ends_with("/7zz"));
         let mut seen = Vec::new();
-        extract_one(&archive, &out, &[], &mut |p| seen.push(p))
-            .await
-            .unwrap();
+        assert_eq!(
+            extract_one(&archive, &out, &none, &mut |p| seen.push(p))
+                .await
+                .unwrap(),
+            ""
+        );
         assert_eq!(seen.last(), Some(&80), "{seen:?}");
         assert_eq!(
             std::fs::read_to_string(out.join("hello.txt")).unwrap(),
@@ -819,13 +1011,17 @@ mod tool_tests {
         .unwrap();
         let rar = dir.path().join("a.rar");
         std::fs::write(&rar, b"Rar!").unwrap();
-        let err = extract_one(&rar, &out, &[], &mut |_| {})
+        let err = extract_one(&rar, &out, &none, &mut |_| {})
             .await
-            .unwrap_err()
-            .to_string();
-        let de = crate::i18n::pick(&err, false);
+            .unwrap_err();
+        assert!(!err.wrong_password);
+        let de = crate::i18n::pick(&err.message, false);
         assert!(de.contains("Signal 11"), "{de}");
         assert!(de.contains("unrar installieren"), "{de}");
+        match saved_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
     }
 }
 
@@ -900,5 +1096,16 @@ mod message_tests {
         );
         let msg = crate::i18n::pick(&failure_message(false, false, c, vec![]), false);
         assert!(msg.contains("Archiv-Passwörter"), "{msg}");
+        // unrar's wordings.
+        for out in [
+            "The specified password is incorrect.",
+            "CRC failed in the encrypted file x.mkv. Corrupt file or wrong password.",
+        ] {
+            assert!(
+                causes(&run(Some(11), None, "", out)).wrong_password,
+                "{out}"
+            );
+        }
+        assert!(!causes(&run(Some(2), None, "", "Unexpected end of archive")).wrong_password);
     }
 }

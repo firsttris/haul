@@ -72,7 +72,14 @@ function AddLinksForm() {
       </div>
       <div className="field">
         <label htmlFor="pw">{t.collector.passwords}</label>
-        <textarea id="pw" className="textarea" style={{ minHeight: 64 }} value={passwords} onChange={(e) => setPasswords(e.target.value)} />
+        <textarea
+          id="pw"
+          className="textarea"
+          style={{ minHeight: 64 }}
+          placeholder={t.collector.passwordsPlaceholder}
+          value={passwords}
+          onChange={(e) => setPasswords(e.target.value)}
+        />
       </div>
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
       <div className="toolbar">

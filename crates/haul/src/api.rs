@@ -108,6 +108,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/plugins/reload", post(reload_plugins))
         .route("/settings", get(get_settings).put(put_settings))
         .route("/settings/api-token", post(auth::rotate_token))
+        .route(
+            "/settings/archive-passwords",
+            get(get_archive_passwords).put(put_archive_passwords),
+        )
         .route("/auth/password", post(auth::change_password))
         .route("/captchas", get(list_captchas))
         .route("/captchas/{id}/cancel", post(cancel_captcha))
@@ -985,6 +989,27 @@ async fn put_settings(
     Json(s): Json<Settings>,
 ) -> ApiResult<Json<Settings>> {
     Ok(Json(app.engine.update_settings(s).await?))
+}
+
+/// The archive password list, apart from the settings form (see `db::ARCHIVE_PASSWORDS`).
+#[derive(Serialize, Deserialize)]
+struct ArchivePasswords {
+    passwords: Vec<String>,
+}
+
+async fn get_archive_passwords(State(app): State<Arc<App>>) -> Json<ArchivePasswords> {
+    Json(ArchivePasswords {
+        passwords: app.engine.archive_passwords().await,
+    })
+}
+
+async fn put_archive_passwords(
+    State(app): State<Arc<App>>,
+    Json(body): Json<ArchivePasswords>,
+) -> ApiResult<Json<ArchivePasswords>> {
+    Ok(Json(ArchivePasswords {
+        passwords: app.engine.set_archive_passwords(body.passwords).await?,
+    }))
 }
 
 // ---- captchas ----------------------------------------------------------------------

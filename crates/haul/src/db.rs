@@ -173,7 +173,16 @@ pub struct Settings {
     pub max_retries: u32,
     pub auto_extract: bool,
     pub delete_archives: bool,
+    /// Ask for the password when none of the known ones fits (JD ExtractionConfig
+    /// `isAskForUnknownPasswordsEnabled`, default on). The known ones are the package's and
+    /// the archive password list (`ARCHIVE_PASSWORDS`).
+    pub ask_archive_password: bool,
 }
+
+/// Settings key of the archive password list (JD ExtractionConfig `getPasswordList`): tried on
+/// every protected archive, most recently found first. Stored apart from `Settings`, so saving
+/// the settings form never overwrites a password that extraction just added.
+pub const ARCHIVE_PASSWORDS: &str = "archive_passwords";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -184,6 +193,7 @@ impl Default for Settings {
             max_retries: 5,
             auto_extract: true,
             delete_archives: false,
+            ask_archive_password: true,
         }
     }
 }

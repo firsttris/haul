@@ -60,6 +60,8 @@ pub struct Engine {
     /// Hosters whose limit holds for all their downloads (`HosterLimitError`, JD:
     /// ERROR_IP_BLOCKED): until when, and the hoster's message.
     hoster_waits: Mutex<HashMap<String, (i64, String)>>,
+    /// Serializes changes to the archive password list (JD: `PWLOCK`).
+    archive_passwords: tokio::sync::Mutex<()>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -113,6 +115,7 @@ impl Engine {
             extracting: Mutex::new(HashMap::new()),
             folder_errors: Mutex::new(HashMap::new()),
             hoster_waits: Mutex::new(HashMap::new()),
+            archive_passwords: tokio::sync::Mutex::new(()),
         }))
     }
 
@@ -1722,6 +1725,129 @@ mod engine_tests {
         e.wake();
         wait_for(&e, id, status::FINISHED).await;
         assert!(captchas.list().is_empty());
+        e.shutdown().await;
+    }
+
+    /// A protected archive, JD's way: the package's passwords and the list are tried, then the
+    /// user is asked (again after a wrong answer); the password that opened it goes first in
+    /// the list and opens the next archive without asking. With asking off it just fails.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn archive_password_asked_then_remembered() {
+        let _path = extract::PATH_LOCK.lock().await;
+        let Some(seven) = extract::available_tools()
+            .into_iter()
+            .map(|t| t.describe())
+            .find(|p| p.ends_with("7z") || p.ends_with("7zz") || p.ends_with("7za"))
+        else {
+            eprintln!("skipped: 7-Zip is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = PluginManager::new(vec![], None);
+        let captchas = Arc::new(crate::captcha::Captchas::new(Events::new()));
+        plugins.set_captchas(captchas.clone());
+        let e = engine_with(dir.path(), plugins).await;
+        let package = |name: &'static str, passwords: Option<&'static str>| {
+            let e = e.clone();
+            let seven = seven.clone();
+            async move {
+                let folder = e.cfg.done_dir.join(name);
+                std::fs::create_dir_all(&folder).unwrap();
+                let src = dir_of(&folder).join(format!("{name}.txt"));
+                std::fs::write(&src, name).unwrap();
+                let ok = std::process::Command::new(&seven)
+                    .arg("a")
+                    .arg("-psecret")
+                    .arg(folder.join(format!("{name}.7z")))
+                    .arg(&src)
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success();
+                assert!(ok);
+                std::fs::remove_file(&src).unwrap();
+                sqlx::query(
+                    "INSERT INTO packages(name, target_dir, passwords, collector, created_at)
+                     VALUES (?, ?, ?, 0, 0)",
+                )
+                .bind(name.to_uppercase())
+                .bind(name)
+                .bind(passwords)
+                .execute(&e.db)
+                .await
+                .unwrap()
+                .last_insert_rowid()
+            }
+        };
+        fn dir_of(p: &std::path::Path) -> std::path::PathBuf {
+            p.parent().unwrap().to_path_buf()
+        }
+        async fn next_question(c: &crate::captcha::Captchas) -> crate::captcha::CaptchaView {
+            for _ in 0..1500 {
+                if let Some(q) = c.list().pop() {
+                    return q;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("no question");
+        }
+        assert_eq!(
+            e.set_archive_passwords(vec!["other".into(), "".into(), "other".into()])
+                .await
+                .unwrap(),
+            ["other"]
+        );
+
+        let a = package("a", Some("nope")).await;
+        let job = tokio::spawn({
+            let e = e.clone();
+            async move { e.extract_package(a).await }
+        });
+        let q = next_question(&captchas).await;
+        assert_eq!(q.kind, crate::captcha::ARCHIVE_PASSWORD);
+        assert_eq!(
+            (q.name.as_deref(), q.plugin_name.as_str(), q.wrong),
+            (Some("a.7z"), "A", false)
+        );
+        assert!(captchas.solve(&q.id, &q.secret, "bad"));
+        let q2 = loop {
+            let q2 = next_question(&captchas).await;
+            if q2.id != q.id {
+                break q2;
+            }
+        };
+        assert!(q2.wrong);
+        assert!(captchas.solve(&q2.id, &q2.secret, "secret"));
+        job.await.unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(e.cfg.done_dir.join("a/a.txt")).unwrap(),
+            "a"
+        );
+        assert_eq!(e.archive_passwords().await, ["secret", "other"]);
+
+        // The next archive with that password opens without a question.
+        let b = package("b", None).await;
+        e.extract_package(b).await.unwrap();
+        assert!(e.cfg.done_dir.join("b/b.txt").is_file());
+        assert!(captchas.list().is_empty());
+
+        // Asking off, no known password fits: the error points to the list.
+        e.set_archive_passwords(vec![]).await.unwrap();
+        e.update_settings(Settings {
+            ask_archive_password: false,
+            ..e.settings()
+        })
+        .await
+        .unwrap();
+        let c = package("c", None).await;
+        let err = e.extract_package(c).await.unwrap_err().to_string();
+        assert!(
+            crate::i18n::pick(&err, false).contains("Archiv-Passwörter"),
+            "{err}"
+        );
+        assert!(captchas.list().is_empty());
+        let pkg = db::get_package(&e.db, c).await.unwrap().unwrap();
+        assert_eq!(pkg.extract.as_deref(), Some("failed"));
         e.shutdown().await;
     }
 

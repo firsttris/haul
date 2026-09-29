@@ -113,6 +113,8 @@ export interface Settings {
   maxRetries: number;
   autoExtract: boolean;
   deleteArchives: boolean;
+  /** Ask for the password when none of the known ones opens an archive. */
+  askArchivePassword: boolean;
 }
 
 export interface SettingsView extends Settings {
@@ -130,7 +132,7 @@ export interface Captcha {
   secret: string;
   pluginId: string;
   pluginName: string;
-  kind: 'recaptcha' | 'hcaptcha' | 'turnstile' | 'image' | 'password';
+  kind: 'recaptcha' | 'hcaptcha' | 'turnstile' | 'image' | 'password' | 'archive-password';
   siteKey: string;
   pageUrl: string;
   host: string;
@@ -138,7 +140,7 @@ export interface Captcha {
   /** Image captchas: the picture as a data: URL. */
   image: string | null;
   link: string | null;
-  /** Password questions: the download's name, and whether the last password was wrong. */
+  /** Password questions: the download's (or archive's) name, and whether the last password was wrong. */
   name: string | null;
   wrong: boolean;
   createdAt: number;
