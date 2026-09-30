@@ -161,7 +161,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
         </div>
       </div>
       <div className="subtitle" style={{ fontSize: 13 }}>
-        {pkg.source === 'cnl' ? "Click'n'Load" : t.collector.manual}
+        {pkg.source === 'cnl' ? "Click'n'Load" : pkg.source === 'extension' ? t.collector.extension : t.collector.manual}
         {pkg.sourcePage && (
           <>
             {' '}

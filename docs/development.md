@@ -69,6 +69,7 @@ crates/haul-cnl      Click'n'Load forwarder for the desktop
 packages/plugin-sdk  types, helpers, XFileSharing base, test context for plugins
 plugins/*            hoster plugins, one folder each, with tests
 ui                   web UI
+extension            browser extension for Chrome and Firefox (pnpm build:extension)
 docker               Compose file and Podman Quadlet units
 docs                 this documentation
 ```

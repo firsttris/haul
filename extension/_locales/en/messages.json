@@ -1,0 +1,101 @@
+{
+  "extName": {
+    "message": "Haul"
+  },
+  "extDescription": {
+    "message": "Send links to your Haul download server: right-click menu and Click'n'Load."
+  },
+  "menuLink": {
+    "message": "Send link to Haul"
+  },
+  "menuSelection": {
+    "message": "Send links in selection to Haul"
+  },
+  "menuPage": {
+    "message": "Send page to Haul"
+  },
+  "sentOne": {
+    "message": "Link sent to Haul"
+  },
+  "sentMany": {
+    "message": "$1 links sent to Haul"
+  },
+  "cnlSent": {
+    "message": "Click'n'Load sent to Haul"
+  },
+  "notConfigured": {
+    "message": "Set up Haul's address and API token first."
+  },
+  "unauthorized": {
+    "message": "Haul rejected the API token."
+  },
+  "unreachable": {
+    "message": "Haul is not reachable at this address."
+  },
+  "serverError": {
+    "message": "Haul answered with an error."
+  },
+  "noLinks": {
+    "message": "No links found."
+  },
+  "noPermission": {
+    "message": "The extension needs permission to reach Haul."
+  },
+  "badServer": {
+    "message": "That is not a valid address."
+  },
+  "optionsTitle": {
+    "message": "Haul settings"
+  },
+  "connection": {
+    "message": "Connection"
+  },
+  "serverLabel": {
+    "message": "Haul address"
+  },
+  "tokenLabel": {
+    "message": "API token"
+  },
+  "tokenHint": {
+    "message": "Create it in Haul under Settings → Click'n'Load from the desktop. haul-cnl uses the same token."
+  },
+  "behaviour": {
+    "message": "Behaviour"
+  },
+  "cnlLabel": {
+    "message": "Handle Click'n'Load buttons"
+  },
+  "cnlHint": {
+    "message": "Links sent by Click'n'Load buttons go to Haul. Turn it off if JDownloader or haul-cnl runs on this computer."
+  },
+  "startLabel": {
+    "message": "Start sent links right away instead of keeping them in the link grabber"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "test": {
+    "message": "Test connection"
+  },
+  "connected": {
+    "message": "Connected: $1 active, $2 queued."
+  },
+  "statsLine": {
+    "message": "$1 active · $2 queued"
+  },
+  "pastePlaceholder": {
+    "message": "Paste links, one or many …"
+  },
+  "sendLinks": {
+    "message": "Send links"
+  },
+  "sendPage": {
+    "message": "Send this page"
+  },
+  "openHaul": {
+    "message": "Open Haul"
+  },
+  "settings": {
+    "message": "Settings"
+  }
+}

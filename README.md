@@ -48,7 +48,8 @@ puts it into one small container built for a home server:
   Turnstile solved in your own browser through a userscript
 - **Link grabber**: online check, package name, target folder and password before you start; pick
   single files with checkboxes
-- **Click'n'Load** 1 and 2 from your desktop through the tiny `haul-cnl` forwarder
+- **Browser extension** for Chrome and Firefox: Click'n'Load 1 and 2 without anything running on your
+  desktop, and *Send to Haul* in the right-click menu
 - **Auto-extract** of RAR, 7z and ZIP with progress, a password list that learns, and incomplete
   multi-part sets left alone until they are complete
 - **Checksums** verified where the hoster publishes them (MD5, SHA-256, MEGA MAC)
@@ -130,7 +131,8 @@ Everything else, from environment variables to a reverse proxy setup, is in the
 | [Hosters](docs/hosters.md) | accounts, passwords, checksums, waits and limits |
 | [Captchas](docs/captchas.md) | the userscript for reCaptcha, hCaptcha and Turnstile |
 | [Extraction](docs/extraction.md) | archives, passwords, incomplete sets, the Done view |
-| [Click'n'Load](docs/click-n-load.md) | sending links from your desktop to the server |
+| [Browser extension](docs/browser-extension.md) | Click'n'Load and *Send to Haul* in Chrome and Firefox |
+| [Click'n'Load](docs/click-n-load.md) | how links from link sites reach the server, `haul-cnl` |
 | [Plugins](docs/plugins.md) | writing and debugging hoster plugins |
 | [Development](docs/development.md) | building, checks, architecture, API, releases |
 

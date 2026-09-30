@@ -1,0 +1,101 @@
+{
+  "extName": {
+    "message": "Haul"
+  },
+  "extDescription": {
+    "message": "Links an deinen Haul-Download-Server schicken: Rechtsklick-Menü und Click'n'Load."
+  },
+  "menuLink": {
+    "message": "Link an Haul senden"
+  },
+  "menuSelection": {
+    "message": "Links der Auswahl an Haul senden"
+  },
+  "menuPage": {
+    "message": "Seite an Haul senden"
+  },
+  "sentOne": {
+    "message": "Link an Haul gesendet"
+  },
+  "sentMany": {
+    "message": "$1 Links an Haul gesendet"
+  },
+  "cnlSent": {
+    "message": "Click'n'Load an Haul gesendet"
+  },
+  "notConfigured": {
+    "message": "Zuerst Adresse und API-Token von Haul eintragen."
+  },
+  "unauthorized": {
+    "message": "Haul hat das API-Token abgelehnt."
+  },
+  "unreachable": {
+    "message": "Haul ist unter dieser Adresse nicht erreichbar."
+  },
+  "serverError": {
+    "message": "Haul hat mit einem Fehler geantwortet."
+  },
+  "noLinks": {
+    "message": "Keine Links gefunden."
+  },
+  "noPermission": {
+    "message": "Die Erweiterung braucht die Berechtigung, Haul zu erreichen."
+  },
+  "badServer": {
+    "message": "Das ist keine gültige Adresse."
+  },
+  "optionsTitle": {
+    "message": "Haul-Einstellungen"
+  },
+  "connection": {
+    "message": "Verbindung"
+  },
+  "serverLabel": {
+    "message": "Adresse von Haul"
+  },
+  "tokenLabel": {
+    "message": "API-Token"
+  },
+  "tokenHint": {
+    "message": "In Haul unter Einstellungen → Click'n'Load vom Desktop erstellen. haul-cnl nutzt dasselbe Token."
+  },
+  "behaviour": {
+    "message": "Verhalten"
+  },
+  "cnlLabel": {
+    "message": "Click'n'Load-Knöpfe übernehmen"
+  },
+  "cnlHint": {
+    "message": "Links von Click'n'Load-Knöpfen gehen an Haul. Ausschalten, wenn auf diesem Rechner JDownloader oder haul-cnl läuft."
+  },
+  "startLabel": {
+    "message": "Gesendete Links sofort starten statt sie im Linksammler zu lassen"
+  },
+  "save": {
+    "message": "Speichern"
+  },
+  "test": {
+    "message": "Verbindung testen"
+  },
+  "connected": {
+    "message": "Verbunden: $1 aktiv, $2 in der Warteschlange."
+  },
+  "statsLine": {
+    "message": "$1 aktiv · $2 wartend"
+  },
+  "pastePlaceholder": {
+    "message": "Links einfügen, einer oder viele …"
+  },
+  "sendLinks": {
+    "message": "Links senden"
+  },
+  "sendPage": {
+    "message": "Diese Seite senden"
+  },
+  "openHaul": {
+    "message": "Haul öffnen"
+  },
+  "settings": {
+    "message": "Einstellungen"
+  }
+}
