@@ -50,7 +50,7 @@ describe('datanodes', () => {
       method_premium: '',
     });
     expect(ctx.waits[0]).toBeGreaterThan(6);
-    expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 16 });
+    expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 1 });
   });
 
   it('adds g_captch__a to a normal download2 form', async () => {

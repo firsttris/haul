@@ -10,7 +10,8 @@
  * - a simple referer protection: every request says it comes from https://datanodes.to/users;
  * - "Not allowed from domain you're coming from", and "/premium" without any download form
  *   means premium only;
- * - no connection limit (JD getMaxChunks 0);
+ * - no plugin connection limit (JD getMaxChunks 0; JD's default is one per file, so one for
+ *   free downloads here);
  * - captchas (JD handleCaptcha): `g-recaptcha-response` in the page means reCaptcha v2, which the
  *   user solves in the browser; its key may also come from a script (`grecaptcha.render`), which
  *   the XFS base searches then. Anything else goes the XFS default way.
@@ -29,12 +30,14 @@ export default definePlugin(
   createXfsPlugin({
     id: 'datanodes',
     name: 'Datanodes',
-    version: 8,
+    version: 9,
     domains: ['datanodes.to'],
     fileIdLength: 12,
     accountRequired: false,
     free: true,
-    freeMaxConnections: 16,
+    // JD getMaxChunks 0: no plugin limit, JD's own default is one connection per file
+    // (GeneralSettings.getMaxChunksPerFile = 1); free servers often refuse a second (503).
+    freeMaxConnections: 1,
     maxConnections: 16,
     headers: { Referer: `${SITE}/users` },
     // JD scanInfo 2026-04-20, then the XFS defaults.

@@ -1300,6 +1300,99 @@ mod engine_tests {
         e.shutdown().await;
     }
 
+    /// A free download server that allows one connection at a time and answers every other one
+    /// with 503 (fileq.net, 2026-09): the download plans 4 segments, but the refused ones wait
+    /// for a free slot instead of failing the download (whose link may have cost a captcha).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_connections_wait_for_a_free_one() {
+        struct Slot(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Slot {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        let data: Arc<Vec<u8>> =
+            Arc::new((0..17 * 1024 * 1024u32).map(|i| (i % 253) as u8).collect());
+        let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let refused = Arc::new(AtomicU64::new(0));
+        let app = axum::Router::new().route(
+            "/file.bin",
+            get({
+                let (data, active, refused) = (data.clone(), active.clone(), refused.clone());
+                move |headers: HeaderMap| {
+                    let (data, active, refused) = (data.clone(), active.clone(), refused.clone());
+                    async move {
+                        if active.fetch_add(1, Ordering::SeqCst) > 0 {
+                            active.fetch_sub(1, Ordering::SeqCst);
+                            refused.fetch_add(1, Ordering::SeqCst);
+                            return Response::builder().status(503).body(Body::empty()).unwrap();
+                        }
+                        let slot = Slot(active.clone());
+                        let len = data.len();
+                        let (start, end) = headers
+                            .get(header::RANGE)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.strip_prefix("bytes="))
+                            .and_then(|v| v.split_once('-'))
+                            .map(|(a, b)| (a.parse().unwrap_or(0), b.parse().unwrap_or(len - 1)))
+                            .unwrap_or((0, len - 1));
+                        let chunks: Vec<Vec<u8>> = data[start..=end]
+                            .chunks(64 * 1024)
+                            .map(|c| c.to_vec())
+                            .collect();
+                        // The slot is free again when the body ends or the client goes away.
+                        let stream = futures::stream::iter(chunks).then(move |c| {
+                            let _hold = &slot;
+                            async move {
+                                tokio::time::sleep(Duration::from_millis(5)).await;
+                                Ok::<_, std::io::Error>(c)
+                            }
+                        });
+                        Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"))
+                            .header(header::CONTENT_LENGTH, end - start + 1)
+                            .header(
+                                header::CONTENT_DISPOSITION,
+                                "attachment; filename=\"file.bin\"",
+                            )
+                            .body(Body::from_stream(stream))
+                            .unwrap()
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        assert_eq!(e.settings().connections_per_file, 4);
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin"),
+                package_name: Some("Busy".into()),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        let d = wait_for(&e, id, status::FINISHED).await;
+        assert_eq!(
+            d.attempts, 0,
+            "the download itself was retried: {:?}",
+            d.error
+        );
+        assert!(
+            refused.load(Ordering::SeqCst) > 0,
+            "the server never refused a connection"
+        );
+        assert!(std::fs::read(dir.path().join("done/Busy/file.bin")).unwrap() == *data);
+        e.shutdown().await;
+    }
+
     /// Hosters like ddownload allow one connection per file: then the probe request itself
     /// must carry the whole download, without a second request.
     #[tokio::test(flavor = "multi_thread")]

@@ -7,7 +7,8 @@
  *   builds it with JavaScript (`'op': 'download2'`), and JD posts `op=download2`, the id from
  *   `data-code="…"`, empty `rand` and `referer`, `method_free=Free download`, `down_direct=1`;
  * - the name from `link="https://…/<12-char id>/<name>"` beats the defaults (JD scanInfo);
- * - no connection limit (JD getMaxChunks 0), any number of downloads at once, resumable.
+ * - no plugin connection limit (JD getMaxChunks 0; JD's default is one per file, so one for
+ *   free downloads here), any number of downloads at once, resumable.
  *
  * Since 2026-01 free downloads show a reCaptcha: solved in the browser with the userscript.
  * pyLoad has no plugin for the site.
@@ -20,13 +21,16 @@ export default definePlugin(
   createXfsPlugin({
     id: 'filekeeper',
     name: 'Filekeeper',
-    version: 3,
+    version: 4,
     domains: ['filekeeper.net'],
     fileIdLength: 12,
     accountRequired: false,
     free: true,
-    // JD: getMaxChunks() = 0 (no limit) for all account types.
-    freeMaxConnections: 16,
+    // JD: getMaxChunks() = 0, i.e. no limit from the plugin; JD then takes its own default of
+    // one connection per file (GeneralSettings.getMaxChunksPerFile = 1), and that is what free
+    // downloads get there. free XFS servers often answer a second connection with 503 (fileq.net
+    // 2026-09), so one without an account; with premium the plugin's "no limit".
+    freeMaxConnections: 1,
     maxConnections: 16,
     // JD scanInfo: the name in the `link` attribute wins, then the defaults.
     namePatterns: [/link="https?:\/\/[^/]+\/[a-z0-9]{12}\/([^"/]+)"/i, ...DEFAULT_NAMES],

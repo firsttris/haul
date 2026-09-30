@@ -51,7 +51,7 @@ describe('fileq', () => {
     expect((await plugin.check!(LINK, ctx)).name).toBe('Other.Name.mkv');
   });
 
-  it('downloads the XFS free way, reading the plain-text captcha, without a connection limit', async () => {
+  it('downloads the XFS free way, reading the plain-text captcha, with one connection', async () => {
     const posts: HttpRequest[] = [];
     const ctx = fakeCtx({
       [`GET ${PAGE}`]: { body: PAGE1 },
@@ -64,6 +64,6 @@ describe('fileq', () => {
     expect(posts[0].form).toMatchObject({ op: 'download1', id: 'abcdefghijkl', method_free: 'Free Download' });
     expect(posts[1].form).toMatchObject({ op: 'download2', id: 'abcdefghijkl', rand: 'r4nd', code: '4183' });
     expect(ctx.waits[0]).toBeGreaterThan(4);
-    expect(r).toMatchObject({ url: CDN, maxConnections: 16 });
+    expect(r).toMatchObject({ url: CDN, maxConnections: 1 });
   });
 });

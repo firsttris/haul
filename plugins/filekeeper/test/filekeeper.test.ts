@@ -45,7 +45,7 @@ describe('filekeeper', () => {
     });
     expect(ctx.captchas[0]).toMatchObject({ kind: 'recaptcha', siteKey: '6LfKeeper', pageUrl: LINK });
     expect(ctx.waits[0]).toBeGreaterThan(5);
-    expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 16 });
+    expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 1 });
   });
 
   it('keeps a real download2 form when the page has one', async () => {

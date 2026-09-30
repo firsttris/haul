@@ -3,7 +3,7 @@
 
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -548,8 +548,12 @@ async fn execute(
     let mut first = if !ranges || fresh_single {
         Some(resp)
     } else {
+        // Closed before the segments connect: kept open, it would be one connection more than
+        // the hoster allows (free servers often allow one).
+        drop(resp);
         None
     };
+    let transferring = Arc::new(AtomicUsize::new(0));
     let seg_cancel = cancel.child_token();
     let mut set = JoinSet::new();
     for seg in &segs {
@@ -568,6 +572,7 @@ async fn execute(
             cancel: seg_cancel.clone(),
             ranges,
             decrypt: decrypt.clone(),
+            transferring: transferring.clone(),
         };
         let first = first.take();
         set.spawn(async move { run_segment(ctx, first).await });
@@ -756,7 +761,28 @@ struct SegCtx {
     ranges: bool,
     /// Encrypted by the hoster (mega.nz): decrypted at each byte's position in the file.
     decrypt: Option<Arc<super::crypt::Decrypt>>,
+    /// Segments of this download receiving bytes right now.
+    transferring: Arc<AtomicUsize>,
 }
+
+/// Counts a segment as transferring while it lives.
+struct Transferring(Arc<AtomicUsize>);
+
+impl Transferring {
+    fn new(n: &Arc<AtomicUsize>) -> Self {
+        n.fetch_add(1, Ordering::SeqCst);
+        Self(n.clone())
+    }
+}
+
+impl Drop for Transferring {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How long a segment the server refused waits before asking again, while another one loads.
+const BUSY_WAIT: Duration = Duration::from_secs(3);
 
 async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Failure> {
     let seg = &ctx.seg;
@@ -771,37 +797,68 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
             return Ok(());
         }
         let resp = match first.take() {
-            Some(r) => r,
+            Some(r) => Ok(r),
             None => {
                 let r = cancellable(&ctx.cancel, ctx.source.get(pos, seg.end).send())
                     .await?
                     .map_err(net_failure);
                 match r {
                     Ok(r) if r.status() == StatusCode::PARTIAL_CONTENT => Ok(r),
+                    // Too many connections (429/503) while another segment loads: the server
+                    // allows fewer than planned (free downloads often one). Wait for a free
+                    // slot instead of failing the download, whose direct link may have cost a
+                    // captcha; the segments then load one after the other.
+                    Ok(r)
+                        if matches!(r.status().as_u16(), 429 | 503)
+                            && ctx.transferring.load(Ordering::SeqCst) > 0 =>
+                    {
+                        drop(r);
+                        tracing::debug!(
+                            seg = seg.idx,
+                            "server refused another connection, waiting for a free one"
+                        );
+                        cancellable(&ctx.cancel, tokio::time::sleep(BUSY_WAIT)).await?;
+                        continue;
+                    }
                     Ok(r) if r.status().is_success() => Err(Failure::Retry(crate::tr!(
                         "Server ignoriert Range-Anfrage",
                         "Server ignores the range request"
                     ))),
-                    Ok(r) => Err(http_failure(r.status())),
+                    // Refused (the other segments may not have connected yet) or a network
+                    // error: the segment retry below. Anything else (403: link expired, 404)
+                    // ends the download now.
+                    Ok(r) if matches!(r.status().as_u16(), 429 | 503) => {
+                        Err(http_failure(r.status()))
+                    }
+                    Ok(r) => return Err(http_failure(r.status())),
                     Err(e) => Err(e),
-                }?
+                }
             }
         };
-        file.seek(SeekFrom::Start(pos)).await?;
-        let result = pump(&ctx, resp, &mut file).await;
-        file.flush().await?;
-        seg.safe
-            .store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
-        let err = match result {
-            Ok(()) => match seg.end {
-                None => return Ok(()),
-                Some(e) if seg.start + seg.done.load(Ordering::Relaxed) >= e => return Ok(()),
-                Some(_) => Failure::Retry(crate::tr!(
-                    "Verbindung vorzeitig geschlossen",
-                    "Connection closed early"
-                )),
-            },
+        let err = match resp {
             Err(e) => e,
+            Ok(resp) => {
+                file.seek(SeekFrom::Start(pos)).await?;
+                let busy = Transferring::new(&ctx.transferring);
+                let result = pump(&ctx, resp, &mut file).await;
+                drop(busy);
+                file.flush().await?;
+                seg.safe
+                    .store(seg.done.load(Ordering::Relaxed), Ordering::Relaxed);
+                match result {
+                    Ok(()) => match seg.end {
+                        None => return Ok(()),
+                        Some(e) if seg.start + seg.done.load(Ordering::Relaxed) >= e => {
+                            return Ok(())
+                        }
+                        Some(_) => Failure::Retry(crate::tr!(
+                            "Verbindung vorzeitig geschlossen",
+                            "Connection closed early"
+                        )),
+                    },
+                    Err(e) => e,
+                }
+            }
         };
         match err {
             Failure::Retry(msg) if ctx.ranges && attempt < SEGMENT_RETRIES => {
