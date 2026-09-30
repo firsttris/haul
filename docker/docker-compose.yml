@@ -1,0 +1,28 @@
+services:
+  haul:
+    image: tristanteu/haul:latest
+    # To build from source instead: docker compose -f docker/docker-compose.yml up --build
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: haul
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      # Click'n'Load, only on the host's loopback: haul-cnl or an SSH tunnel forwards to it.
+      - "127.0.0.1:9666:9666"
+    volumes:
+      # Database and own plugins
+      - ./config:/config
+      # Downloads in progress; a fast disk or cache drive is a good place
+      - ./downloads/tmp:/downloads/tmp
+      # Finished downloads, one folder per package
+      - ./downloads/done:/downloads/done
+    environment:
+      # Encrypts stored account passwords. Keep it stable and secret: openssl rand -hex 32
+      - APP_SECRET=change-me
+      # Optional: create the web login on the first start instead of in the UI
+      # - HAUL_USER=admin
+      # - HAUL_PASSWORD=change-me-too
+      # Optional: keep the hoster pages of failed downloads in downloads/tmp
+      # - RUST_LOG=info,haul=debug

@@ -5,3 +5,5 @@ ui/dist
 plugins/dist
 .git
 *.db
+.data
+.env

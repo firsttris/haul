@@ -1,0 +1,42 @@
+# Podman Quadlet unit for Haul.
+# Copy this file and haul.network to ~/.config/containers/systemd/ (or /etc/containers/systemd/),
+# then: systemctl --user daemon-reload && systemctl --user start haul
+
+[Unit]
+Description=Haul download server
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/tristanteu/haul:latest
+ContainerName=haul
+AutoUpdate=registry
+Network=haul.network
+
+PublishPort=8080:8080
+# Click'n'Load, only on the host's loopback: haul-cnl or an SSH tunnel forwards to it.
+PublishPort=127.0.0.1:9666:9666
+
+# Database and own plugins
+Volume=%h/haul/config:/config:Z
+# Downloads in progress, and finished downloads (one folder per package)
+Volume=%h/haul/downloads/tmp:/downloads/tmp:Z
+Volume=%h/haul/downloads/done:/downloads/done:Z
+# On an existing data disk, leave out :Z (it relabels every file) and turn labels off instead:
+# Volume=/mnt/disk1/downloads:/downloads/done
+# SecurityLabelDisable=true
+
+# Encrypts stored account passwords. Keep it stable and secret: openssl rand -hex 32
+Environment=APP_SECRET=change-me
+# Optional: create the web login on the first start instead of in the UI
+# Environment=HAUL_USER=admin
+# Environment=HAUL_PASSWORD=change-me-too
+# Optional: keep the hoster pages of failed downloads in downloads/tmp
+# Environment=RUST_LOG=info,haul=debug
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

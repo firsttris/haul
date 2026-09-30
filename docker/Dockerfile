@@ -5,15 +5,13 @@ FROM node:22-bookworm-slim AS web
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY packages/plugin-sdk/package.json packages/plugin-sdk/
-COPY plugins/ddownload/package.json plugins/ddownload/
-COPY ui/package.json ui/
-RUN pnpm install --frozen-lockfile
+# Every workspace package has to be there for the install, or pnpm does not link
+# @haul/plugin-sdk into the plugins that the build then bundles.
 COPY scripts scripts
 COPY packages packages
 COPY plugins plugins
 COPY ui ui
-RUN pnpm build
+RUN pnpm install --frozen-lockfile && pnpm build
 
 # ---- 2. Server binary (UI embedded via rust-embed) ------------------------------------
 FROM rust:1-bookworm AS server

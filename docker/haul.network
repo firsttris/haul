@@ -1,0 +1,5 @@
+# Podman Quadlet network for Haul, and for helper containers next to it later.
+# Copy it together with haul.container.
+
+[Network]
+NetworkName=haul
