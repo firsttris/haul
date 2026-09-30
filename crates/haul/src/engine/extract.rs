@@ -348,8 +348,53 @@ struct Failed {
     wrong_password: bool,
 }
 
+/// Where one attempt extracts to: a hidden folder next to the archive, one per archive (two
+/// packages may extract into the same folder at once).
+fn staging_dir(archive: &Path, dest: &Path) -> PathBuf {
+    let name = archive
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    dest.join(format!(".haul-extract-{name}"))
+}
+
+/// Moves everything from `from` into `to`, replacing files of the same name and merging
+/// folders, then removes `from`. A file where `to` has a folder (or the other way round) is an
+/// error: a folder of the user's is never replaced.
+fn merge_into(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        let is_dir = entry.file_type()?.is_dir();
+        match std::fs::symlink_metadata(&dst) {
+            Ok(m) if m.is_dir() && is_dir => merge_into(&src, &dst)?,
+            Ok(m) if m.is_dir() || is_dir => {
+                return Err(std::io::Error::other(crate::tr!(
+                    "{} gibt es schon als Datei oder Ordner",
+                    "{} already exists as a file or folder",
+                    dst.display()
+                )))
+            }
+            _ => std::fs::rename(&src, &dst)?,
+        }
+    }
+    std::fs::remove_dir_all(from).or_else(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Ok(())
+        } else {
+            Err(e)
+        }
+    })
+}
+
 /// Tries `candidates` in order (`""`: no password) with each extractor; the password that
 /// opened the archive.
+///
+/// Every attempt extracts into `staging_dir` first, and only a successful one is moved into
+/// `dest`. 7-Zip with a wrong password leaves empty files behind (ZIP), and with `-y` it would
+/// empty files an earlier extraction put there; a damaged archive leaves half files. None of
+/// that reaches the folder now.
 async fn extract_one(
     archive: &Path,
     dest: &Path,
@@ -375,10 +420,41 @@ async fn extract_one(
     // Per tool, its first failure (without password) says the most; the others add causes.
     let mut failures: Vec<(Kind, String)> = Vec::new();
     let mut found = Causes::default();
+    let staging = staging_dir(archive, dest);
+    let reset = |dir: &Path| {
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir)
+    };
     for pw in candidates {
         for tool in &tools {
-            let line = match run_tool(command(tool, archive, dest, pw), on_progress).await {
-                Ok(run) if run.ok => return Ok(pw.clone()),
+            if let Err(e) = reset(&staging) {
+                return Err(Failed {
+                    message: format!("{}: {e}", staging.display()),
+                    wrong_password: false,
+                });
+            }
+            let run = run_tool(command(tool, archive, &staging, pw), on_progress).await;
+            if matches!(&run, Ok(r) if r.ok) {
+                let (from, to) = (staging.clone(), dest.to_path_buf());
+                let moved = tokio::task::spawn_blocking(move || merge_into(&from, &to))
+                    .await
+                    .map_err(std::io::Error::other)
+                    .and_then(|r| r);
+                let _ = std::fs::remove_dir_all(&staging);
+                return match moved {
+                    Ok(()) => Ok(pw.clone()),
+                    Err(e) => Err(Failed {
+                        message: crate::tr!(
+                            "Entpackt, aber nicht verschoben: {}",
+                            "Extracted, but not moved: {}",
+                            e
+                        ),
+                        wrong_password: false,
+                    }),
+                };
+            }
+            let _ = std::fs::remove_dir_all(&staging);
+            let line = match run {
                 Ok(run) => {
                     let c = causes(&run);
                     found.crashed |= c.crashed;
@@ -1133,5 +1209,101 @@ mod message_tests {
             );
         }
         assert!(!causes(&run(Some(2), None, "", "Unexpected end of archive")).wrong_password);
+    }
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    /// 7-Zip with a wrong password leaves empty files (ZIP) and, with `-y`, empties the files an
+    /// earlier extraction put there. Attempts go through a staging folder, so neither happens.
+    #[tokio::test]
+    async fn wrong_password_leaves_the_folder_as_it_was() {
+        let _path = PATH_LOCK.lock().await;
+        let Some(seven) = available_tools()
+            .into_iter()
+            .find(|t| t.kind == Kind::SevenZip)
+        else {
+            eprintln!("skipped: 7-Zip is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let dest = dir.path().join("Film");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(src.join("a.txt"), "new a").unwrap();
+        std::fs::write(src.join("sub/b.txt"), "new b").unwrap();
+        let archive = dest.join("Film.zip");
+        let ok = std::process::Command::new(&seven.path)
+            .current_dir(&src)
+            .args(["a", "-tzip", "-psecret"])
+            .arg(&archive)
+            .args(["a.txt", "sub"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        // An earlier extraction, and a folder of the user's.
+        std::fs::write(dest.join("a.txt"), "old a").unwrap();
+        std::fs::create_dir_all(dest.join("sub")).unwrap();
+        std::fs::write(dest.join("sub/mine.txt"), "mine").unwrap();
+
+        let err = extract_one(&archive, &dest, &["".into(), "wrong".into()], &mut |_| {})
+            .await
+            .unwrap_err();
+        assert!(err.wrong_password, "{}", err.message);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("a.txt")).unwrap(),
+            "old a"
+        );
+        assert!(!dest.join("sub/b.txt").exists());
+        let mut names: Vec<String> = std::fs::read_dir(&dest)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["Film.zip", "a.txt", "sub"]);
+
+        // The right password: files replaced, folders merged, the staging folder gone.
+        let pw = extract_one(
+            &archive,
+            &dest,
+            &["wrong".into(), "secret".into()],
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(pw, "secret");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("a.txt")).unwrap(),
+            "new a"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("sub/b.txt")).unwrap(),
+            "new b"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("sub/mine.txt")).unwrap(),
+            "mine"
+        );
+        assert!(!staging_dir(&archive, &dest).exists());
+    }
+
+    #[test]
+    fn merge_never_replaces_a_folder_with_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("from"), dir.path().join("to"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(to.join("x")).unwrap();
+        std::fs::write(to.join("x/keep.txt"), "keep").unwrap();
+        std::fs::write(from.join("x"), "file").unwrap();
+        assert!(merge_into(&from, &to).is_err());
+        assert_eq!(
+            std::fs::read_to_string(to.join("x/keep.txt")).unwrap(),
+            "keep"
+        );
     }
 }

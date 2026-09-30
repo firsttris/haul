@@ -121,6 +121,10 @@ pub fn list(root: &Path, dir: &Path) -> Result<Vec<Entry>> {
         };
         let name = e.file_name().to_string_lossy().to_string();
         let is_dir = meta.is_dir();
+        // Where an extraction is running (engine::extract::staging_dir): not the user's.
+        if is_dir && name.starts_with(".haul-extract-") {
+            continue;
+        }
         entries.push(Entry {
             path: relative(root, &path),
             dir: is_dir,
