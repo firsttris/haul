@@ -162,6 +162,7 @@
       matches: (p.matches || []).map(function (r) {
         return typeof r === 'string' ? { source: r, flags: '' } : { source: r.source, flags: r.flags };
       }),
+      domains: Array.isArray(p.domains) ? p.domains.map(String) : [],
       accountRequired: !!p.accountRequired,
       serial: !!p.serial,
       crawlWithAccount: !!p.crawlWithAccount,

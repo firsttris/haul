@@ -233,8 +233,10 @@ const de = {
     builtin: 'In Haul enthalten',
     custom: 'Eigene Datei',
     patterns: (n: number) => (n === 1 ? 'Linkmuster anzeigen' : `${n} Linkmuster anzeigen`),
-    premiumRequired: 'Premium nötig',
-    noAccountNeeded: 'ohne Account',
+    premiumRequired: 'Nur mit Premium-Account',
+    noAccountNeeded: 'Geht ohne Account',
+    accountPossible: 'Account möglich',
+    supports: (domains: string) => `Unterstützt: ${domains}`,
     noPlugins: 'Keine Plugins geladen.',
     replacesNewer: (builtin: string, own: string) =>
       `Veraltet: Diese eigene Datei (v${own}) verdeckt das in Haul enthaltene Plugin v${builtin}. ` +
@@ -561,8 +563,10 @@ const en: Messages = {
     builtin: 'Included in Haul',
     custom: 'Custom file',
     patterns: (n) => (n === 1 ? 'Show link pattern' : `Show ${n} link patterns`),
-    premiumRequired: 'Premium required',
-    noAccountNeeded: 'no account needed',
+    premiumRequired: 'Premium account only',
+    noAccountNeeded: 'Works without an account',
+    accountPossible: 'account possible',
+    supports: (domains) => `Supports: ${domains}`,
     noPlugins: 'No plugins loaded.',
     replacesNewer: (builtin, own) =>
       `Outdated: this custom file (v${own}) hides the plugin v${builtin} included in Haul. ` +

@@ -474,7 +474,8 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 6,
+  version: 7,
+  domains: ['drive.google.com', 'docs.google.com'],
   matches: [LINK, FOLDER],
   accountRequired: false,
   // JD GoogleDriveCrawler logs in too: private folders of the account.

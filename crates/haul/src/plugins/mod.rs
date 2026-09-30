@@ -26,6 +26,8 @@ struct Meta {
     name: String,
     version: serde_json::Value,
     matches: Vec<MatchSpec>,
+    #[serde(default)]
+    domains: Vec<String>,
     account_required: bool,
     #[serde(default)]
     account: Option<AccountForm>,
@@ -65,6 +67,8 @@ pub struct Plugin {
     pub name: String,
     pub version: String,
     pub matches: Vec<MatchSpec>,
+    /// The hoster's domains, for the UI.
+    pub domains: Vec<String>,
     pub account_required: bool,
     pub account: Option<AccountForm>,
     pub has_check: bool,
@@ -581,6 +585,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
             v => v.to_string(),
         },
         matches: meta.matches,
+        domains: meta.domains,
         account_required: meta.account_required,
         account: meta.account,
         has_check: meta.has_check,
@@ -742,6 +747,13 @@ mod replace_tests {
         }
         let one = pm.find_for("https://1fichier.com/?abc123def456").unwrap();
         assert!(one.serial && one.has_crawl && !one.account_required);
+        // Domains for the plugin list, also through the XFS base.
+        assert!(one.domains.iter().any(|d| d == "alterupload.com"));
+        let send = pm.find_for("https://send.now/abcdefghijkl").unwrap();
+        assert_eq!(send.domains.first().map(String::as_str), Some("send.now"));
+        for p in pm.list() {
+            assert!(!p.domains.is_empty(), "{} names no domains", p.id);
+        }
         assert_eq!(
             pm.find_for("https://send.cm/d/abcdefghijkl").unwrap().id,
             "send"

@@ -228,6 +228,7 @@ export function AccountsPage() {
                   <span className="title">
                     {p.name} <span className="pill">v{p.version}</span>
                   </span>
+                  {p.domains && p.domains.length > 0 && <span className="sub wrap-any">{t.accounts.supports(p.domains.join(', '))}</span>}
                   <span className="sub mono wrap-any">{p.file}</span>
                   {p.replaces && (
                     <span className="sub" style={{ color: p.replaces.newer ? 'var(--err)' : undefined }} role={p.replaces.newer ? 'alert' : undefined}>
@@ -246,7 +247,11 @@ export function AccountsPage() {
                 <div className="plugin-meta">
                   <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
                   <span className="subtitle" style={{ fontSize: 13 }}>
-                    {p.accountRequired ? t.accounts.premiumRequired : t.accounts.noAccountNeeded}
+                    {p.accountRequired
+                      ? t.accounts.premiumRequired
+                      : p.hasCheckAccount
+                        ? `${t.accounts.noAccountNeeded} · ${t.accounts.accountPossible}`
+                        : t.accounts.noAccountNeeded}
                   </span>
                 </div>
               </div>

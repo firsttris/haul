@@ -361,7 +361,8 @@ async function accountInfo(ctx: Ctx): Promise<AccountInfo> {
 export default definePlugin({
   id: 'gofile',
   name: 'Gofile',
-  version: 5,
+  version: 6,
+  domains: ['gofile.io'],
   matches: [LINK],
   accountRequired: false,
   // JD: getMaxConcurrentProcessingInstances() = 1 "to prevent running into rate-limit".

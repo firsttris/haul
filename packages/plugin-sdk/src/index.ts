@@ -284,6 +284,8 @@ export interface PluginDefinition {
   version: number | string;
   /** The first plugin with a matching pattern handles a link. */
   matches: RegExp[];
+  /** The hoster's domains, for the plugin list in the UI ("Unterstützt: …"). */
+  domains?: string[];
   /** Without an account the link is not even tried. */
   accountRequired?: boolean;
   /**

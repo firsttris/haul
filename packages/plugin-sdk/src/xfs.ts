@@ -819,6 +819,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     id: cfg.id,
     name: cfg.name,
     version: cfg.version,
+    domains: cfg.domains,
     matches: [linkRe, shortRe],
     accountRequired: cfg.accountRequired ?? true,
     account: {

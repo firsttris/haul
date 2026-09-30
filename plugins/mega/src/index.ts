@@ -501,7 +501,8 @@ async function crawlFolder(ctx: Ctx, link: string) {
 export default definePlugin({
   id: 'mega',
   name: 'MEGA',
-  version: 3,
+  version: 4,
+  domains: ['mega.nz', 'mega.co.nz'],
   matches: [FILE, FOLDER],
   accountRequired: false,
   account: {

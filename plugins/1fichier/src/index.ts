@@ -343,7 +343,8 @@ export function downloadLink(html: string): string | undefined {
 export default definePlugin({
   id: '1fichier',
   name: '1fichier',
-  version: 3,
+  version: 4,
+  domains: DOMAINS,
   matches: [FILE, OLD_FILE, FOLDER],
   accountRequired: false,
   // Free: one download at a time and requests spaced (JD); calls run one after another.

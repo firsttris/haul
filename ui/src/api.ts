@@ -69,6 +69,8 @@ export interface Plugin {
   name: string;
   version: string;
   matches: { source: string; flags: string }[];
+  /** The hoster's domains, if the plugin names them. */
+  domains?: string[];
   accountRequired: boolean;
   /** Plugin texts: plain or one per language. */
   /** `secretMultiline`: the secret is several lines, e.g. exported browser cookies. */
