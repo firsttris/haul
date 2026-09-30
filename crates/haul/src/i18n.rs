@@ -9,13 +9,15 @@ pub const START: char = '\u{2}';
 pub const SEP: char = '\u{1f}';
 pub const END: char = '\u{3}';
 
-/// A message in German and English.
+/// A message in German and English. An argument that is itself a message in both languages
+/// (e.g. a tool's line inside an extraction error) gives its German part to the German text and
+/// its English part to the English one; stray markers are dropped, so the frame stays intact.
 pub fn tr(de: impl AsRef<str>, en: impl AsRef<str>) -> String {
-    let clean = |s: &str| s.replace([START, SEP, END], "");
+    let clean = |s: String| s.replace([START, SEP, END], "");
     format!(
         "{START}{}{SEP}{}{END}",
-        clean(de.as_ref()),
-        clean(en.as_ref())
+        clean(pick(de.as_ref(), false)),
+        clean(pick(en.as_ref(), true))
     )
 }
 
@@ -71,5 +73,11 @@ mod tests {
         assert_eq!(pick(&m[..m.len() - 3], true), "File a.rar offli");
         // Markers inside arguments cannot break the frame.
         assert_eq!(pick(&tr(format!("x{END}y"), "z"), false), "xy");
+        // A message in both languages as argument: each language gets its own part (before,
+        // the extraction error read "7-Zip (Code 2code 2)").
+        let code = tr!("Code {}", "code {}", 2);
+        let line = tr!("7-Zip ({}): kaputt", "7-Zip ({}): broken", code);
+        assert_eq!(pick(&line, false), "7-Zip (Code 2): kaputt");
+        assert_eq!(pick(&line, true), "7-Zip (code 2): broken");
     }
 }
