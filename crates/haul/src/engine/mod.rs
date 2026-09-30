@@ -608,7 +608,21 @@ impl Engine {
                 password: &password,
             };
             let result = match self.plugins.find_for(&d.url).filter(|p| p.has_crawl) {
-                Some(plugin) => self.plugins.crawl(&plugin, &d.url, &job).await,
+                Some(plugin) => {
+                    let acc = if plugin.crawl_with_account {
+                        self.pick_account(&plugin.id).await.ok().flatten()
+                    } else {
+                        None
+                    };
+                    let r = self
+                        .plugins
+                        .crawl(&plugin, &d.url, acc.as_ref(), &job)
+                        .await;
+                    if let Some(a) = &acc {
+                        self.save_session(&plugin.id, a.id).await;
+                    }
+                    r
+                }
                 // The plugin is gone (reloaded without it): keep the link as it is.
                 None => Ok(crate::plugins::CrawlResult {
                     package_name: None,

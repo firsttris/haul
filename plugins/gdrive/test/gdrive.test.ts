@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fakeCtx } from '@haul/plugin-sdk/testing';
+import { sha1Hex } from '@haul/plugin-sdk';
 import type { HttpRequest } from '@haul/plugin-sdk';
 import plugin, { confirmUrl, parseLink } from '../src/index';
 
@@ -163,5 +164,92 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
     await expect(plugin.crawl!(link, at({ url: 'https://accounts.google.com/ServiceLogin' }))).rejects.toMatchObject({ haulKind: 'fatal' });
     await expect(plugin.crawl!(link, at({ body: '<html>nothing</html>' }))).rejects.toMatchObject({ haulKind: 'temporary' });
     await expect(plugin.resolve(link, at({}))).rejects.toThrow(/Ordner-Link/);
+  });
+});
+
+describe('google drive with a Google account (JD cookie login)', () => {
+  const SECRET = `User-Agent: Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0
+[{"domain":".google.com","name":"SAPISID","value":"sap/123","path":"/","secure":true},
+ {"domain":".google.com","name":"SID","value":"sid1","path":"/"},
+ {"domain":".google.com","name":"ST-1abc","value":"junk","path":"/"}]`;
+  const account = (secret = SECRET) => ({ id: 7, user: '', secret });
+  const UA = 'Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0';
+
+  it('checks the cookies like JD: my-drive, not the login page, and SAPISID', async () => {
+    const ok = fakeCtx(
+      {
+        'GET https://drive.google.com/drive/my-drive': (req) => {
+          expect(req.headers?.['User-Agent']).toBe(UA);
+          expect(req.headers?.Cookie).toContain('SAPISID=sap/123');
+          return { body: '<html>My Drive</html>' };
+        },
+      },
+      account(),
+    );
+    expect(await plugin.checkAccount!(ok)).toMatchObject({ valid: true, premium: false });
+    // JD loadUserCookies: the ST-… cookies stay out.
+    expect([...ok.jar.keys()]).toEqual(['SAPISID', 'SID']);
+
+    const expired = fakeCtx({ 'GET https://drive.google.com/drive/my-drive': { url: 'https://accounts.google.com/ServiceLogin?continue=x' } }, account());
+    await expect(plugin.checkAccount!(expired)).rejects.toMatchObject({ haulKind: 'account', message: expect.stringContaining('abgelaufen') });
+
+    const incomplete = fakeCtx({ 'GET https://drive.google.com/drive/my-drive': { body: 'ok' } }, account('SID=sid1; HSID=h1'));
+    await expect(plugin.checkAccount!(incomplete)).rejects.toThrow(/SAPISID/);
+
+    const nothing = fakeCtx({}, account('this is not a cookie export'));
+    await expect(plugin.checkAccount!(nothing)).rejects.toMatchObject({ haulKind: 'account' });
+  });
+
+  it('downloads with the cookies and the browser User-Agent, falling back to /u/0/uc', async () => {
+    const ctx = fakeCtx(
+      {
+        [QUICK]: (req) => {
+          expect(req.headers?.['User-Agent']).toBe(UA);
+          return { body: `)]}'\n${JSON.stringify({ fileName: 'Privat.mkv', sizeBytes: 42, scanResult: 'CLEAN_FILE' })}` };
+        },
+        [`GET https://drive.google.com/u/0/uc?id=${ID}&export=download`]: { file: true },
+      },
+      account(),
+    );
+    const r = await plugin.resolve(LINK, ctx);
+    expect(r).toMatchObject({ url: `https://drive.google.com/u/0/uc?id=${ID}&export=download`, name: 'Privat.mkv' });
+    expect(r.headers?.['User-Agent']).toBe(UA);
+  });
+
+  it('says that the account has no access to a private file', async () => {
+    const ctx = fakeCtx({ [QUICK]: { status: 403, body: '' } }, account());
+    await expect(plugin.resolve(LINK, ctx)).rejects.toThrow(/dieses Google-Konto hat keinen Zugriff/);
+  });
+
+  it('lists a private folder with SAPISIDHASH and X-Goog-Authuser (JD prepBrowserWebAPI)', async () => {
+    const folder = '1PrivateFolderId';
+    const page = `<title>Privat - Google Drive</title> "AIzaSyAbcdefghijklmnopqrstuvwxyz0123","AIzaSyAbcdefghijk",null`;
+    const before = Math.floor(Date.now() / 1000);
+    const ctx = fakeCtx(
+      {
+        [`GET https://drive.google.com/drive/folders/${folder}`]: { body: page },
+        'GET https://clients6.google.com/drive/v2beta/files?': (req) => {
+          const m = /^SAPISIDHASH (\d+)_([0-9a-f]{40})$/.exec(req.headers?.Authorization ?? '');
+          expect(m).not.toBeNull();
+          const ts = Number(m![1]);
+          expect(ts).toBeGreaterThanOrEqual(before);
+          expect(m![2]).toBe(sha1Hex(`${ts} sap/123 https://drive.google.com`));
+          expect(req.headers?.['X-Goog-Authuser']).toBe('0');
+          return { body: JSON.stringify({ items: [{ kind: 'drive#file', id: 'p1', title: 'geheim.zip', fileSize: '9' }] }) };
+        },
+      },
+      account(),
+    );
+    const r = await plugin.crawl!(`https://drive.google.com/drive/folders/${folder}`, ctx);
+    expect(r.files).toEqual([{ url: 'https://drive.google.com/file/d/p1', name: 'geheim.zip', size: 9 }]);
+    // Without an account: no Authorization header.
+    const anon = fakeCtx({
+      [`GET https://drive.google.com/drive/folders/${folder}`]: { body: page },
+      'GET https://clients6.google.com/drive/v2beta/files?': (req) => {
+        expect(req.headers?.Authorization).toBeUndefined();
+        return { body: JSON.stringify({ items: [] }) };
+      },
+    });
+    await plugin.crawl!(`https://drive.google.com/drive/folders/${folder}`, anon);
   });
 });

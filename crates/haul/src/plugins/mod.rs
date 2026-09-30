@@ -35,6 +35,8 @@ struct Meta {
     has_crawl: bool,
     #[serde(default)]
     serial: bool,
+    #[serde(default)]
+    crawl_with_account: bool,
 }
 
 /// Labels and hint for the account form, provided by the plugin.
@@ -45,6 +47,9 @@ pub struct AccountForm {
     pub user_label: Option<serde_json::Value>,
     pub secret_label: Option<serde_json::Value>,
     pub help: Option<serde_json::Value>,
+    /// The secret is several lines (e.g. exported browser cookies): a text area in the UI.
+    #[serde(default)]
+    pub secret_multiline: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -67,6 +72,8 @@ pub struct Plugin {
     pub has_crawl: bool,
     /// Calls without an account run one at a time as well.
     pub serial: bool,
+    /// `crawl` gets the account too, e.g. to list private folders (JD's crawlers log in).
+    pub crawl_with_account: bool,
     pub builtin: bool,
     pub file: PathBuf,
     /// A custom plugin that hides the built-in one with the same id.
@@ -491,14 +498,23 @@ impl PluginManager {
     }
 
     /// Expands a folder link into its files; runs without an account.
+    /// `account`: only for plugins with `crawl_with_account`.
     pub async fn crawl(
         &self,
         plugin: &Plugin,
         link: &str,
+        account: Option<&AccountCreds>,
         job: &Job<'_>,
     ) -> std::result::Result<CrawlResult, PluginError> {
-        self.call(plugin, "crawl", serde_json::json!([link]), None, Some(job))
-            .await
+        let account = account.filter(|_| plugin.crawl_with_account);
+        self.call(
+            plugin,
+            "crawl",
+            serde_json::json!([link]),
+            account,
+            Some(job),
+        )
+        .await
     }
 
     pub async fn resolve(
@@ -571,6 +587,7 @@ async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
         has_check_account: meta.has_check_account,
         has_crawl: meta.has_crawl,
         serial: meta.serial,
+        crawl_with_account: meta.crawl_with_account,
         builtin,
         file: file.to_path_buf(),
         replaces: None,
@@ -752,5 +769,71 @@ mod replace_tests {
                 "{link}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cookie_login_tests {
+    use super::*;
+
+    /// Exported browser cookies go into the account's jar through `ctx.cookies.set` (the SDK's
+    /// importCookies), as Set-Cookie lines with Domain, Path, Secure and the `__Host-` rules; the
+    /// real jar must then send them where a browser would. `crawlWithAccount` hands the account
+    /// to `crawl`.
+    #[tokio::test]
+    async fn imported_cookies_reach_the_right_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let code = r#"var __plugin = { default: { id: "ck", version: 1, matches: [/https?:\/\/ck\.test\//],
+            crawlWithAccount: true,
+            async crawl(link, ctx) {
+                const acc = ctx.account.get();
+                return { files: [{ url: link, name: acc ? acc.secret : "none" }] };
+            },
+            async resolve(link, ctx) {
+                ctx.cookies.set("https://google.com/", "SAPISID=sap/1; Domain=.google.com; Path=/; Secure");
+                ctx.cookies.set("https://drive.google.com/", "OSID=o1; Path=/; Secure");
+                ctx.cookies.set("https://accounts.google.com/", "__Host-GAPS=g1; Path=/; Secure");
+                ctx.cookies.set("https://google.com/", "NID=n1; Domain=.google.com; Path=/");
+                const at = (u) => ctx.cookies.get(u);
+                return { url: "https://x.test/f", name: JSON.stringify({
+                    drive: at("https://drive.google.com/uc"),
+                    clients6: at("https://clients6.google.com/drive/v2beta/files"),
+                    accounts: at("https://accounts.google.com/"),
+                    plain: at("http://drive.google.com/"),
+                }) };
+            },
+        }};"#;
+        std::fs::write(dir.path().join("ck.js"), code).unwrap();
+        let pm = PluginManager::new(vec![(dir.path().to_path_buf(), true)], None);
+        pm.reload().await;
+        let plugin = pm.find_for("https://ck.test/a").unwrap();
+        assert!(plugin.crawl_with_account);
+        let acc = AccountCreds {
+            id: 3,
+            user: String::new(),
+            secret: "COOKIES".into(),
+        };
+        let password = crate::captcha::Password::new(None);
+        let job = Job {
+            name: None,
+            password: &password,
+        };
+        let crawled = pm
+            .crawl(&plugin, "https://ck.test/a", Some(&acc), &job)
+            .await
+            .unwrap();
+        assert_eq!(crawled.files[0].name.as_deref(), Some("COOKIES"));
+
+        let r = pm
+            .resolve(&plugin, "https://ck.test/a", Some(&acc), &job)
+            .await
+            .unwrap();
+        let seen: serde_json::Value = serde_json::from_str(r.name.as_deref().unwrap()).unwrap();
+        let has = |host: &str, cookie: &str| seen[host].as_str().unwrap().contains(cookie);
+        // Domain=.google.com: every Google host; host-only: only its host; Secure: https only.
+        assert!(has("drive", "SAPISID=sap/1") && has("drive", "OSID=o1") && has("drive", "NID=n1"));
+        assert!(has("clients6", "SAPISID=sap/1") && !has("clients6", "OSID"));
+        assert!(has("accounts", "__Host-GAPS=g1") && !has("drive", "__Host-GAPS"));
+        assert!(has("plain", "NID=n1") && !has("plain", "SAPISID"));
     }
 }

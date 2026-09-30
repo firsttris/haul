@@ -17,8 +17,11 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   | Gofile | API-Token aus dem Profil | Links mit dem Account-Token |
   | Mediafire | E-Mail und Passwort | Direktlink über die API |
   | MEGA | E-Mail und Passwort (ohne Zwei-Faktor) | Transfer-Kontingent des Pro-Accounts |
+  | Google Drive | Cookies aus dem Browser (JSON-Export, cookies.txt oder `Cookie: …`), optional eine Zeile `User-Agent: …` | kein Premium; private Dateien und Ordner des Kontos, weniger Kontingent-Probleme |
 
-  Google Drive kennt kein Premium; ein Google-Login (nur per Browser-Cookies) fehlt noch.
+  Google erlaubt Programmen kein Passwort-Login; wie bei JDownloader meldet sich Haul mit den
+  exportierten Cookies an (im Browser bei drive.google.com angemeldet, z. B. mit der Erweiterung
+  Cookie-Editor als JSON exportieren).
 - Gofile ohne Account: Ordner-Links werden beim Hinzufügen in ihre Dateien aufgelöst (mit
   Unterordnern, Paketname = Ordnername), Download mit Gast-Token; der Direktlink aus dem Ordner wird
   wiederverwendet und API-Anfragen laufen nacheinander (Rate-Limit für Gäste)

@@ -291,12 +291,18 @@ export interface PluginDefinition {
    * for a hoster whose API rate-limits guests (JD: getMaxConcurrentProcessingInstances = 1).
    */
   serial?: boolean;
-  /** Labels and hint for the account form in the UI; plain or per UI language. */
-  account?: { userLabel?: LocalizedText; secretLabel?: LocalizedText; help?: LocalizedText };
+  /** `crawl` gets the account too (`ctx.account`), e.g. to list private folders. */
+  crawlWithAccount?: boolean;
+  /**
+   * Labels and hint for the account form in the UI; plain or per UI language.
+   * `secretMultiline`: the secret is several lines (exported browser cookies), a text area.
+   */
+  account?: { userLabel?: LocalizedText; secretLabel?: LocalizedText; help?: LocalizedText; secretMultiline?: boolean };
   check?(link: string, ctx: Ctx): Promise<CheckResult>;
   /**
    * Folder links: expands a link into its files when links are added (like JD's crawler).
-   * Runs without an account. Links the plugin does not expand return `[link]` unchanged.
+   * Runs without an account unless `crawlWithAccount`. Links the plugin does not expand
+   * return `[link]` unchanged.
    */
   crawl?(link: string, ctx: Ctx): Promise<CrawlResult>;
   resolve(link: string, ctx: Ctx): Promise<Resolved>;
@@ -572,4 +578,142 @@ export async function spaceRequests(ctx: Ctx, site: string, ms: number): Promise
   const wait = last + ms - Date.now();
   if (wait > 0) await ctx.wait(Math.min(wait, ms) / 1000);
   memo.set(ctx, site, 'last', String(Date.now()), Math.ceil(ms / 1000) + 60);
+}
+
+/** UTF-8 bytes of a string (QuickJS has no TextEncoder). */
+function utf8(text: string): number[] {
+  const out: number[] = [];
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+/** Lower-case hex SHA-1 of the UTF-8 text (e.g. Google's SAPISIDHASH; not for security). */
+export function sha1Hex(text: string): string {
+  const bytes = utf8(text);
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  for (let i = 7; i >= 0; i--) bytes.push(i >= 4 ? 0 : (bitLen >>> (i * 8)) & 255);
+  let [h0, h1, h2, h3, h4] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+  const w = new Array<number>(80);
+  const rotl = (x: number, n: number) => (x << n) | (x >>> (32 - n));
+  for (let off = 0; off < bytes.length; off += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = (bytes[off + 4 * i] << 24) | (bytes[off + 4 * i + 1] << 16) | (bytes[off + 4 * i + 2] << 8) | bytes[off + 4 * i + 3];
+    }
+    for (let i = 16; i < 80; i++) w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    let [a, b, c, d, e] = [h0, h1, h2, h3, h4];
+    for (let i = 0; i < 80; i++) {
+      const [f, k] =
+        i < 20 ? [(b & c) | (~b & d), 0x5a827999] : i < 40 ? [b ^ c ^ d, 0x6ed9eba1] : i < 60 ? [(b & c) | (b & d) | (c & d), 0x8f1bbcdc] : [b ^ c ^ d, 0xca62c1d6];
+      const t = (rotl(a, 5) + f + e + k + w[i]) | 0;
+      [e, d, c, b, a] = [d, c, rotl(b, 30), a, t];
+    }
+    [h0, h1, h2, h3, h4] = [(h0 + a) | 0, (h1 + b) | 0, (h2 + c) | 0, (h3 + d) | 0, (h4 + e) | 0];
+  }
+  return [h0, h1, h2, h3, h4].map((h) => (h >>> 0).toString(16).padStart(8, '0')).join('');
+}
+
+/** A cookie copied out of the browser. `domain` with a leading dot or `hostOnly: false` covers subdomains. */
+export interface ExportedCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  hostOnly?: boolean;
+}
+
+/**
+ * Cookies a user copied out of the browser, the way JD's cookie login takes them: the JSON of
+ * cookie extensions (Cookie-Editor, EditThisCookie: `[{ name, value, domain, path, … }]`), a
+ * Netscape `cookies.txt`, or a `Cookie:` header line (`a=1; b=2`). A line `User-Agent: …` (JD
+ * prefers the browser's User-Agent the cookies came from) is returned as `userAgent`.
+ */
+export function parseCookieExport(text: string): { cookies: ExportedCookie[]; userAgent?: string } {
+  let rest = text.trim();
+  let userAgent: string | undefined;
+  rest = rest.replace(/^\s*User-Agent\s*:\s*(.+)$/gim, (_, ua: string) => {
+    userAgent = ua.trim();
+    return '';
+  }).trim();
+  const cookies: ExportedCookie[] = [];
+  if (rest.startsWith('[') || rest.startsWith('{')) {
+    let data: unknown;
+    try {
+      data = JSON.parse(rest);
+    } catch {
+      return { cookies, userAgent };
+    }
+    const obj = data as { cookies?: unknown; userAgent?: unknown };
+    const list = Array.isArray(data) ? data : Array.isArray(obj.cookies) ? obj.cookies : [];
+    if (!userAgent && typeof obj.userAgent === 'string') userAgent = obj.userAgent;
+    for (const c of list as Array<Record<string, unknown>>) {
+      const name = typeof c.name === 'string' ? c.name : typeof c.key === 'string' ? c.key : undefined;
+      if (!name || typeof c.value !== 'string') continue;
+      cookies.push({
+        name,
+        value: c.value,
+        domain: typeof c.domain === 'string' ? c.domain : typeof c.host === 'string' ? c.host : undefined,
+        path: typeof c.path === 'string' ? c.path : undefined,
+        secure: c.secure === true,
+        hostOnly: c.hostOnly === true,
+      });
+    }
+    return { cookies, userAgent };
+  }
+  const lines = rest.split(/\r?\n/);
+  if (lines.some((l) => l.split('\t').length >= 7)) {
+    for (const raw of lines) {
+      // `#HttpOnly_` marks HttpOnly cookies; other `#` lines are comments.
+      const line = raw.replace(/^#HttpOnly_/, '');
+      if (!line.trim() || line.startsWith('#')) continue;
+      const f = line.split('\t');
+      if (f.length < 7) continue;
+      cookies.push({
+        domain: f[0],
+        hostOnly: f[1].toUpperCase() !== 'TRUE',
+        path: f[2],
+        secure: f[3].toUpperCase() === 'TRUE',
+        name: f[5],
+        value: f[6].trim(),
+      });
+    }
+    return { cookies, userAgent };
+  }
+  for (const part of rest.replace(/^\s*Cookie\s*:\s*/i, '').split(/;\s*|\r?\n/)) {
+    const i = part.indexOf('=');
+    if (i > 0) cookies.push({ name: part.slice(0, i).trim(), value: part.slice(i + 1).trim() });
+  }
+  return { cookies, userAgent };
+}
+
+/**
+ * Puts exported cookies into the account's jar, for `defaultDomain` where the export names
+ * none (a `Cookie:` line). `skip`: names to leave out (JD drops Google's many `ST-…` cookies).
+ * Returns how many went in.
+ */
+export function importCookies(ctx: Ctx, cookies: ExportedCookie[], defaultDomain: string, skip?: RegExp): number {
+  let n = 0;
+  for (const c of cookies) {
+    if (skip?.test(c.name) || /[;\r\n]/.test(c.name + c.value)) continue;
+    const host = (c.domain ?? defaultDomain).replace(/^\./, '');
+    const hostOnly = c.name.startsWith('__Host-') || (c.hostOnly && !(c.domain ?? '').startsWith('.'));
+    const secure = c.secure || c.name.startsWith('__Secure-') || c.name.startsWith('__Host-');
+    const attrs = [
+      `${c.name}=${c.value}`,
+      ...(hostOnly ? [] : [`Domain=.${host}`]),
+      `Path=${c.name.startsWith('__Host-') ? '/' : c.path || '/'}`,
+      ...(secure ? ['Secure'] : []),
+    ];
+    ctx.cookies.set(`https://${host}/`, attrs.join('; '));
+    n++;
+  }
+  return n;
 }

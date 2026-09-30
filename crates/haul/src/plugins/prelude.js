@@ -164,6 +164,7 @@
       }),
       accountRequired: !!p.accountRequired,
       serial: !!p.serial,
+      crawlWithAccount: !!p.crawlWithAccount,
       account: p.account || null,
       hasCheck: typeof p.check === 'function',
       hasCheckAccount: typeof p.checkAccount === 'function',

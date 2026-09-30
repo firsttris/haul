@@ -1002,6 +1002,16 @@ pre.code {
   flex-shrink: 0;
   text-align: right;
 }
+.secret-area {
+  min-height: 120px;
+  font-size: 12px;
+  /* A secret on screen: blurred until the field has focus. */
+  filter: blur(3px);
+}
+.secret-area:focus,
+.secret-area:placeholder-shown {
+  filter: none;
+}
 .wrap-any {
   overflow-wrap: anywhere;
 }

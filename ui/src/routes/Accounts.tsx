@@ -42,7 +42,7 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
         {pluginText(form.help, lang) ?? t.accounts.defaultHelp} {t.accounts.encrypted}{' '}
         <span className="mono">APP_SECRET</span>.
       </div>
-      <div className="grid-4" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) auto', alignItems: 'end' }}>
+      <div className="grid-4" style={{ gridTemplateColumns: `repeat(${form.secretMultiline ? 2 : 3}, minmax(0, 1fr)) auto`, alignItems: 'end' }}>
         <div className="field">
           <label htmlFor="acc-plugin">{t.accounts.hoster}</label>
           <select id="acc-plugin" className="select" value={pluginId || withAccounts[0]?.id} onChange={(e) => setPluginId(e.target.value)}>
@@ -57,20 +57,37 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
           <label htmlFor="acc-user">{pluginText(form.userLabel, lang) ?? t.common.user}</label>
           <input id="acc-user" className="input" autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} />
         </div>
-        <div className="field">
-          <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
-          <input id="acc-secret" className="input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} required />
-        </div>
+        {!form.secretMultiline && (
+          <div className="field">
+            <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
+            <input id="acc-secret" className="input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} required />
+          </div>
+        )}
         <button type="submit" className="btn primary" disabled={add.isPending}>
           {t.common.add}
         </button>
       </div>
+      {form.secretMultiline && (
+        <div className="field">
+          <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
+          <textarea
+            id="acc-secret"
+            className="textarea mono secret-area"
+            placeholder="…"
+            autoComplete="off"
+            spellCheck={false}
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            required
+          />
+        </div>
+      )}
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
     </form>
   );
 }
 
-function EditSecret({ account, label, onDone }: { account: Account; label: string; onDone: () => void }) {
+function EditSecret({ account, label, multiline, onDone }: { account: Account; label: string; multiline?: boolean; onDone: () => void }) {
   const t = useT();
   const [secret, setSecret] = useState('');
   const save = useMutation({
@@ -89,16 +106,30 @@ function EditSecret({ account, label, onDone }: { account: Account; label: strin
       <label htmlFor={`secret-${account.id}`} className="subtitle" style={{ fontSize: 13 }}>
         {t.accounts.newSecret(label)}
       </label>
-      <input
-        id={`secret-${account.id}`}
-        className="input"
-        style={{ flex: 1, minWidth: 200 }}
-        type="password"
-        autoComplete="new-password"
-        value={secret}
-        onChange={(e) => setSecret(e.target.value)}
-        required
-      />
+      {multiline ? (
+        <textarea
+          id={`secret-${account.id}`}
+          className="textarea mono secret-area"
+            placeholder="…"
+          style={{ flex: '1 1 100%' }}
+          autoComplete="off"
+          spellCheck={false}
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          required
+        />
+      ) : (
+        <input
+          id={`secret-${account.id}`}
+          className="input"
+          style={{ flex: 1, minWidth: 200 }}
+          type="password"
+          autoComplete="new-password"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          required
+        />
+      )}
       <button type="submit" className="btn small primary" disabled={save.isPending}>
         {t.accounts.saveAndCheck}
       </button>
@@ -170,6 +201,7 @@ export function AccountsPage() {
                     <EditSecret
                       account={a}
                       label={pluginText(plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel, lang) ?? t.common.password}
+                      multiline={plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretMultiline}
                       onDone={() => setEditing(null)}
                     />
                   )}

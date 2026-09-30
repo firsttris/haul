@@ -71,7 +71,8 @@ export interface Plugin {
   matches: { source: string; flags: string }[];
   accountRequired: boolean;
   /** Plugin texts: plain or one per language. */
-  account: { userLabel?: PluginText; secretLabel?: PluginText; help?: PluginText } | null;
+  /** `secretMultiline`: the secret is several lines, e.g. exported browser cookies. */
+  account: { userLabel?: PluginText; secretLabel?: PluginText; help?: PluginText; secretMultiline?: boolean } | null;
   hasCheck: boolean;
   hasCheckAccount: boolean;
   builtin: boolean;

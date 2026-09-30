@@ -18,9 +18,32 @@
  *   `clients6.google.com/drive/v2beta/files` (50 per page, `pageToken`), with the headers of
  *   GoogleHelper.prepBrowserWebAPI. Shortcuts point to their target, subfolders are listed too
  *   (their files join the package), `open?id=` links are file or folder depending on the redirect.
- * - Not yet: Google Docs exports, video streams, Google accounts.
+ * - Google account (JD COOKIE_LOGIN_ONLY, GoogleHelper.login): Google has no password login
+ *   for programs, so the account is the browser's exported cookies (Cookie-Editor JSON,
+ *   cookies.txt or a `Cookie:` line), without the many `ST-…` cookies (JD loadUserCookies), with
+ *   the browser's User-Agent if the export has a `User-Agent:` line (JD prefers it). The check
+ *   (JD validateCookiesGoogleDrive): `drive.google.com/drive/my-drive` must not end up at
+ *   accounts.google.com, and the cookie `SAPISID` must be there (JD errorIncompleteLogin).
+ *   Logged in, every request carries the cookies (the jar keeps what Google renews), the folder
+ *   API gets `Authorization: SAPISIDHASH <time>_<sha1(time SAPISID origin)>` and
+ *   `X-Goog-Authuser: 0` (JD prepBrowserWebAPI), the fallback download URL is `/u/0/uc`
+ *   (JD constructFileDirectDownloadUrl). Folders are listed with the account too.
+ * - Not yet: Google Docs exports, video streams.
  */
-import { decodeHtml, definePlugin, HosterLimitError, OfflineError, parseForms, PluginError, resolveUrl, TemporaryError } from '@haul/plugin-sdk';
+import {
+  AccountError,
+  decodeHtml,
+  definePlugin,
+  HosterLimitError,
+  importCookies,
+  OfflineError,
+  parseCookieExport,
+  parseForms,
+  PluginError,
+  resolveUrl,
+  sha1Hex,
+  TemporaryError,
+} from '@haul/plugin-sdk';
 import type { CrawledFile, Ctx, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const HOSTS = '(?:drive|docs|drive\\.usercontent)\\.google\\.com';
@@ -42,6 +65,54 @@ const CONNECTIONS = 6;
 /** JD getWaitOnQuotaReachedMinutes default and getRateLimitWaittime. */
 const QUOTA_WAIT = 60 * 60;
 const RATE_WAIT = 5 * 60;
+
+const DRIVE = 'https://drive.google.com';
+/** JD GoogleHelper.loadUserCookies: "not required but there can be MANY of them". */
+const SKIP_COOKIES = /^ST-/;
+
+/**
+ * The Google account's cookies into the jar, unless it has them already (it keeps what Google
+ * renews; new account data drop the jar). The headers for this call: the browser's User-Agent
+ * from the export, if any. Without an account: the plain headers.
+ */
+function login(ctx: Ctx): Record<string, string> {
+  const acc = ctx.account.get();
+  if (!acc) return HEADERS;
+  const { cookies, userAgent } = parseCookieExport(acc.secret);
+  if (!sapisid(ctx)) {
+    if (!cookies.length) {
+      throw new AccountError({
+        de: 'Google Drive: in den Account-Daten keine Cookies erkannt (JSON-Export, cookies.txt oder „Cookie: …“)',
+        en: 'Google Drive: no cookies found in the account data (JSON export, cookies.txt or “Cookie: …”)',
+      });
+    }
+    importCookies(ctx, cookies, 'google.com', SKIP_COOKIES);
+  }
+  return userAgent ? { ...HEADERS, 'User-Agent': userAgent } : HEADERS;
+}
+
+function sapisid(ctx: Ctx): string | undefined {
+  return /(?:^|;\s*)SAPISID=([^;]+)/.exec(ctx.cookies.get(`${DRIVE}/`))?.[1];
+}
+
+/** JD GoogleHelper.prepBrowserWebAPI for logged-in users. */
+export function authHeaders(ctx: Ctx, now = Date.now()): Record<string, string> {
+  const sid = ctx.account.get() ? sapisid(ctx) : undefined;
+  if (!sid) return {};
+  const ts = Math.floor(now / 1000);
+  return { Authorization: `SAPISIDHASH ${ts}_${sha1Hex(`${ts} ${sid} ${DRIVE}`)}`, 'X-Goog-Authuser': '0' };
+}
+
+/** JD errorAccountRequiredOrPrivateFile: without an account "add one", with one "no access". */
+function privateError(ctx: Ctx, what: 'file' | 'folder'): PluginError {
+  const [de, en] = what === 'file' ? ['private Datei', 'private file'] : ['privater Ordner', 'private folder'];
+  return new PluginError(
+    'fatal',
+    ctx.account.get()
+      ? { de: `Google Drive: ${de}, dieses Google-Konto hat keinen Zugriff`, en: `Google Drive: ${en}, this Google account has no access` }
+      : { de: `Google Drive: ${de}, nur mit Google-Account mit Berechtigung`, en: `Google Drive: ${en}, only with a Google account that has access` },
+  );
+}
 
 /** File id and resource key (JD getFID / getFileResourceKey). */
 export function parseLink(link: string): { id: string; resourceKey?: string } | undefined {
@@ -71,7 +142,7 @@ function target(link: string) {
 }
 
 /** JD handleErrorsWebsite and checkErrorBlockedByGoogle, for pages instead of the file. */
-export function pageErrors(res: HttpResponse): void {
+export function pageErrors(ctx: Ctx, res: HttpResponse): void {
   const html = res.body;
   if (res.status === 429) {
     throw new TemporaryError({ de: 'Google Drive: Rate-Limit', en: 'Google Drive: rate limited' }, RATE_WAIT);
@@ -95,10 +166,7 @@ export function pageErrors(res: HttpResponse): void {
     );
   }
   if (/^https?:\/\/accounts\.google\.com\//i.test(res.url) || res.status === 401 || res.status === 403) {
-    throw new PluginError('fatal', {
-      de: 'Google Drive: private Datei, nur mit Google-Account mit Berechtigung',
-      en: 'Google Drive: private file, only with a Google account that has access',
-    });
+    throw privateError(ctx, 'file');
   }
 }
 
@@ -175,14 +243,11 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const MAX_DEPTH = 5;
 
 /** JD crawlWebsite: the folder page (errors, title, key), then the items of all pages. */
-async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }) {
-  const page = await ctx.http.get(folderUrl(start.id, start.resourceKey), { headers: HEADERS });
+async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }, base: Record<string, string>) {
+  const page = await ctx.http.get(folderUrl(start.id, start.resourceKey), { headers: base });
   if (page.status === 404) throw new OfflineError({ de: 'Google Drive: Ordner nicht gefunden', en: 'Google Drive: folder not found' });
   if (/^https?:\/\/accounts\.google\.com\//i.test(page.url) || page.status === 403) {
-    throw new PluginError('fatal', {
-      de: 'Google Drive: privater Ordner, nur mit Google-Account mit Berechtigung',
-      en: 'Google Drive: private folder, only with a Google account that has access',
-    });
+    throw privateError(ctx, 'folder');
   }
   if (page.status === 429) {
     throw new HosterLimitError({ de: 'Google Drive: Rate-Limit', en: 'Google Drive: rate limited' }, RATE_WAIT);
@@ -214,7 +279,8 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
       ...(teamDriveId ? ['includeTeamDriveItems=true', `teamDriveId=${teamDriveId}`, 'corpora=teamDrive'] : []),
     ];
     const headers: Record<string, string> = {
-      ...HEADERS,
+      ...base,
+      ...authHeaders(ctx),
       Accept: '*/*',
       Origin: 'https://drive.google.com',
       Referer: 'https://drive.google.com/',
@@ -270,10 +336,10 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
 }
 
 /** JD PATTERN_REDIRECT: follows `open?id=` until it is a file or a folder link. */
-async function openTarget(ctx: Ctx, link: string): Promise<string> {
+async function openTarget(ctx: Ctx, link: string, headers: Record<string, string>): Promise<string> {
   let url = link.replace(/^http:/i, 'https:');
   for (let i = 0; i <= 3; i++) {
-    const res = await ctx.http.get(url, { headers: HEADERS, followRedirects: false });
+    const res = await ctx.http.get(url, { headers, followRedirects: false });
     const location = res.status >= 300 && res.status < 400 ? res.header('location') : null;
     // JD: no redirect on the first request → offline.
     if (!location) throw new OfflineError({ de: 'Google Drive: Link nicht gefunden', en: 'Google Drive: link not found' });
@@ -284,21 +350,17 @@ async function openTarget(ctx: Ctx, link: string): Promise<string> {
 }
 
 /** JD handleLinkcheckQuick. */
-async function quickCheck(ctx: Ctx, id: string, resourceKey?: string): Promise<Quick> {
+async function quickCheck(ctx: Ctx, id: string, resourceKey: string | undefined, headers: Record<string, string>): Promise<Quick> {
   const q = [`id=${encodeURIComponent(id)}`];
   if (resourceKey) q.push(`resourcekey=${encodeURIComponent(resourceKey)}`);
+  // JD: "authuser=0 also for logged-in users!"
   q.push('authuser=0', 'export=download');
   const res = await ctx.http.post(`https://drive.google.com/uc?${q.join('&')}`, '', {
-    headers: { ...HEADERS, 'X-Drive-First-Party': 'DriveViewer' },
+    headers: { ...headers, 'X-Drive-First-Party': 'DriveViewer' },
   });
   if (res.status === 404) throw new OfflineError({ de: 'Google Drive: Datei nicht gefunden', en: 'Google Drive: file not found' });
-  if (res.status === 403) {
-    throw new PluginError('fatal', {
-      de: 'Google Drive: private Datei, nur mit Google-Account mit Berechtigung',
-      en: 'Google Drive: private file, only with a Google account that has access',
-    });
-  }
-  pageErrors(res);
+  if (res.status === 403) throw privateError(ctx, 'file');
+  pageErrors(ctx, res);
   const json = /(\{[\s\S]+\})\s*$/.exec(res.body)?.[1];
   if (!json) throw new TemporaryError({ de: `Google Drive: unerwartete Antwort (HTTP ${res.status})`, en: `Google Drive: unexpected answer (HTTP ${res.status})` });
   return JSON.parse(json) as Quick;
@@ -325,21 +387,39 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 4,
+  version: 5,
   matches: [LINK, FOLDER],
   accountRequired: false,
+  // JD GoogleDriveCrawler logs in too: private folders of the account.
+  crawlWithAccount: true,
+  account: {
+    userLabel: { de: 'Name (optional)', en: 'Name (optional)' },
+    secretLabel: { de: 'Cookies aus dem Browser', en: 'Cookies from the browser' },
+    secretMultiline: true,
+    help: {
+      de:
+        'Google erlaubt Programmen kein Login mit Passwort; wie bei JDownloader meldet sich Haul mit den Cookies deines Browsers an. ' +
+        'Im Browser bei drive.google.com anmelden, mit einer Cookie-Erweiterung (z. B. Cookie-Editor) die Cookies als JSON exportieren und hier einfügen ' +
+        '(cookies.txt oder eine Zeile „Cookie: …“ gehen auch). Am besten dazu eine Zeile „User-Agent: …“ mit dem User-Agent dieses Browsers.',
+      en:
+        'Google does not let programs log in with a password; like JDownloader, Haul logs in with your browser’s cookies. ' +
+        'Log in at drive.google.com, export the cookies as JSON with a cookie extension (e.g. Cookie-Editor) and paste them here ' +
+        '(cookies.txt or a “Cookie: …” line work too). Best add a line “User-Agent: …” with that browser’s User-Agent.',
+    },
+  },
 
   // Folder links become their files; file links stay as they are (checked later).
   async crawl(link, ctx) {
-    const target = OPEN.test(link) ? await openTarget(ctx, link) : link;
+    const headers = login(ctx);
+    const target = OPEN.test(link) ? await openTarget(ctx, link, headers) : link;
     const folder = folderOf(target);
-    if (folder) return crawlFolder(ctx, folder);
+    if (folder) return crawlFolder(ctx, folder, headers);
     return { files: [{ url: target }] };
   },
 
   async check(link, ctx) {
     const t = target(link);
-    const q = await quickCheck(ctx, t.id, t.resourceKey);
+    const q = await quickCheck(ctx, t.id, t.resourceKey, login(ctx));
     // sizeBytes 0: a Google document; its name has no extension (JD does not trust it).
     const size = q.sizeBytes && q.sizeBytes > 0 ? q.sizeBytes : undefined;
     return { online: true, name: size ? q.fileName : undefined, size };
@@ -347,7 +427,8 @@ export default definePlugin({
 
   async resolve(link, ctx) {
     const t = target(link);
-    const q = await quickCheck(ctx, t.id, t.resourceKey);
+    const headers = login(ctx);
+    const q = await quickCheck(ctx, t.id, t.resourceKey, headers);
     if ((q.scanResult ?? '').toUpperCase() === 'ERROR') {
       const d = (q.disposition ?? '').toUpperCase();
       if (d === 'QUOTA_EXCEEDED') {
@@ -375,17 +456,44 @@ export default definePlugin({
     }
     const name = q.fileName;
     const size = q.sizeBytes && q.sizeBytes > 0 ? q.sizeBytes : undefined;
-    const done = (url: string) => ({ url, name, size, headers: HEADERS, maxConnections: CONNECTIONS });
-    let url = q.downloadUrl || `https://drive.google.com/uc?id=${encodeURIComponent(t.id)}&export=download`;
+    const done = (url: string) => ({ url, name, size, headers, maxConnections: CONNECTIONS });
+    // JD constructFileDirectDownloadUrl: `/u/0/uc` when logged in, "mimic browser behavior".
+    const uc = ctx.account.get() ? `${DRIVE}/u/0/uc` : `${DRIVE}/uc`;
+    let url = q.downloadUrl || `${uc}?id=${encodeURIComponent(t.id)}&export=download${t.resourceKey ? `&resourcekey=${encodeURIComponent(t.resourceKey)}` : ''}`;
     // Big files: a warning page ("too big for Google to virus-scan") links to the confirmed download.
     for (let step = 0; step < 2; step++) {
-      const res = await ctx.http.get(url, { headers: HEADERS });
+      const res = await ctx.http.get(url, { headers });
       if (res.file) return done(res.url);
-      pageErrors(res);
+      pageErrors(ctx, res);
       const next = confirmUrl(res.body, res.url);
       if (!next) break;
       url = next;
     }
     throw new TemporaryError({ de: 'Google Drive: Download-Link nicht gefunden', en: 'Google Drive: download link not found' });
+  },
+
+  // JD fetchAccountInfo: login(forceLoginValidation), a free account without traffic limit.
+  async checkAccount(ctx) {
+    const headers = login(ctx);
+    const res = await ctx.http.get(`${DRIVE}/drive/my-drive`, { headers });
+    if (res.status === 429) {
+      throw new TemporaryError({ de: 'Google Drive: Rate-Limit', en: 'Google Drive: rate limited' }, RATE_WAIT);
+    }
+    // JD validateCookiesGoogleDrive: "Some URLs will redirect to accounts.google.com when not
+    // logged in or login cookies expired".
+    if (/^https?:\/\/accounts\.google\.com\//i.test(res.url)) {
+      throw new AccountError({
+        de: 'Google Drive: Cookies abgelaufen oder ungültig, bitte neu aus dem Browser exportieren',
+        en: 'Google Drive: cookies expired or invalid, please export them from the browser again',
+      });
+    }
+    if (!sapisid(ctx)) {
+      // JD errorIncompleteLogin.
+      throw new AccountError({
+        de: 'Google Drive: Login unvollständig, das Cookie „SAPISID“ fehlt. Im Browser einmal das Google-Konto öffnen (Kontomenü → „Google-Konto“), dann Drive neu laden und die Cookies erneut exportieren',
+        en: 'Google Drive: login incomplete, the cookie “SAPISID” is missing. Open the Google account once in the browser (account menu → “Google Account”), reload Drive and export the cookies again',
+      });
+    }
+    return { valid: true, premium: false, message: 'Google' };
   },
 });
