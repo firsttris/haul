@@ -95,7 +95,9 @@ const de = {
     intro:
       'reCaptcha, hCaptcha und Turnstile gelten nur auf der Seite des Hosters. Haul öffnet sie deshalb in deinem Browser, ' +
       'wo ein kleines Userscript das Captcha anzeigt und die Lösung an Haul zurückschickt (wie die Browser-Erweiterung von JDownloader).',
-    step1: 'Tampermonkey oder Violentmonkey im Browser installieren (Brave: Chrome Web Store).',
+    step1:
+      'Tampermonkey oder Violentmonkey im Browser installieren (Brave: Chrome Web Store). ' +
+      'In Chrome, Edge und Brave danach unter chrome://extensions → Details „Nutzerscripts zulassen“ einschalten, sonst läuft das Userscript nicht.',
     step2: 'Das Userscript installieren:',
     install: 'haul-captcha.user.js installieren',
     step3: 'Wartet ein Captcha, erscheint oben ein Hinweis; „Lösen“ öffnet es. Nach dem Lösen lädt Haul weiter, der Tab kann zu.',
@@ -430,7 +432,9 @@ const en: Messages = {
     intro:
       'reCaptcha, hCaptcha and Turnstile are only valid on the hoster’s own page. So Haul opens them in your browser, ' +
       'where a small userscript shows the captcha and sends the answer back to Haul (like JDownloader’s browser extension).',
-    step1: 'Install Tampermonkey or Violentmonkey in the browser (Brave: Chrome Web Store).',
+    step1:
+      'Install Tampermonkey or Violentmonkey in the browser (Brave: Chrome Web Store). ' +
+      'In Chrome, Edge and Brave, then turn on “Allow user scripts” under chrome://extensions → Details, or the userscript does not run.',
     step2: 'Install the userscript:',
     install: 'Install haul-captcha.user.js',
     step3: 'When a captcha waits, a notice shows at the top; “Solve” opens it. Once solved, Haul continues and the tab can be closed.',
