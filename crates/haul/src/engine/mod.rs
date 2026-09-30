@@ -2223,6 +2223,106 @@ mod engine_tests {
         e.shutdown().await;
     }
 
+    /// After a successful extraction the archive volumes' downloads leave the list when asked
+    /// (JD ExtractionConfig `isDeleteArchiveDownloadlinksAfterExtraction`, default off); the
+    /// package's other files stay, an emptied package goes; the files on disk stay.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extracted_archive_downloads_leave_the_list_when_asked() {
+        let _path = extract::PATH_LOCK.lock().await;
+        let Some(seven) = extract::available_tools()
+            .into_iter()
+            .map(|t| t.describe())
+            .find(|p| p.ends_with("7z") || p.ends_with("7zz") || p.ends_with("7za"))
+        else {
+            eprintln!("skipped: 7-Zip is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("film.txt"), "film").unwrap();
+        let package = |name: &'static str, files: &'static [&'static str]| {
+            let e = e.clone();
+            let seven = seven.clone();
+            let src = src.clone();
+            async move {
+                let folder = e.cfg.done_dir.join(name);
+                std::fs::create_dir_all(&folder).unwrap();
+                let ok = std::process::Command::new(&seven)
+                    .current_dir(&src)
+                    .arg("a")
+                    .arg(folder.join(format!("{name}.7z")))
+                    .arg("film.txt")
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success();
+                assert!(ok);
+                let id = sqlx::query(
+                    "INSERT INTO packages(name, target_dir, collector, created_at) VALUES (?, ?, 0, 0)",
+                )
+                .bind(name)
+                .bind(name)
+                .execute(&e.db)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+                for file in files {
+                    if !file.ends_with(".7z") {
+                        std::fs::write(folder.join(file), "info").unwrap();
+                    }
+                    sqlx::query(
+                        "INSERT INTO downloads(package_id, url, status, name, created_at) VALUES (?, ?, ?, ?, 0)",
+                    )
+                    .bind(id)
+                    .bind(format!("https://x.test/{name}/{file}"))
+                    .bind(status::FINISHED)
+                    .bind(file)
+                    .execute(&e.db)
+                    .await
+                    .unwrap();
+                }
+                id
+            }
+        };
+        let names = |id: i64| {
+            let e = e.clone();
+            async move {
+                db::package_downloads(&e.db, id)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|d| d.name)
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        // Off (the default): everything stays.
+        let a = package("A", &["A.7z"]).await;
+        e.extract_package(a).await.unwrap();
+        assert_eq!(names(a).await, ["A.7z"]);
+
+        e.update_settings(Settings {
+            remove_archive_downloads: true,
+            ..e.settings()
+        })
+        .await
+        .unwrap();
+        // On: the archive's entry goes, the .nfo stays, the files on disk too.
+        let b = package("B", &["B.7z", "B.nfo"]).await;
+        e.extract_package(b).await.unwrap();
+        assert_eq!(names(b).await, ["B.nfo"]);
+        assert!(e.cfg.done_dir.join("B/film.txt").is_file());
+        assert!(e.cfg.done_dir.join("B/B.7z").is_file());
+        // Only archives: the package goes with them.
+        let c = package("C", &["C.7z"]).await;
+        e.extract_package(c).await.unwrap();
+        assert!(db::get_package(&e.db, c).await.unwrap().is_none());
+        assert!(e.cfg.done_dir.join("C/film.txt").is_file());
+        e.shutdown().await;
+    }
+
     /// An incomplete archive is not extracted (JD ExtractionExtension: "Incomplete Archive"):
     /// a part still loading in another package of the folder makes the automatic start wait;
     /// a lone first RAR part whose end block says another follows fails with the missing name,

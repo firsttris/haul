@@ -116,6 +116,8 @@ export interface Settings {
   maxRetries: number;
   autoExtract: boolean;
   deleteArchives: boolean;
+  /** Remove the extracted archives' downloads from the list after a successful extraction. */
+  removeArchiveDownloads: boolean;
   /** Ask for the password when none of the known ones opens an archive. */
   askArchivePassword: boolean;
   /** Verify a checksum the hoster published after the download. */

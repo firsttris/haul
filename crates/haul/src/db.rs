@@ -173,6 +173,10 @@ pub struct Settings {
     pub max_retries: u32,
     pub auto_extract: bool,
     pub delete_archives: bool,
+    /// Remove the downloads of the extracted archive volumes from the list after a successful
+    /// extraction (JD ExtractionConfig `isDeleteArchiveDownloadlinksAfterExtraction`, default
+    /// off), apart from deleting the archives themselves.
+    pub remove_archive_downloads: bool,
     /// Ask for the password when none of the known ones fits (JD ExtractionConfig
     /// `isAskForUnknownPasswordsEnabled`, default on). The known ones are the package's and
     /// the archive password list (`ARCHIVE_PASSWORDS`).
@@ -196,6 +200,7 @@ impl Default for Settings {
             max_retries: 5,
             auto_extract: true,
             delete_archives: false,
+            remove_archive_downloads: false,
             ask_archive_password: true,
             verify_checksums: true,
         }

@@ -919,6 +919,20 @@ impl Engine {
                 let _ = tokio::fs::remove_file(dir.join(a)).await;
             }
         }
+        // JD `isDeleteArchiveDownloadlinksAfterExtraction`: the extracted volumes' entries go
+        // from the list (an emptied package with them); the package's other files stay.
+        if result.is_ok() && !all.is_empty() && self.settings().remove_archive_downloads {
+            let ids: Vec<i64> = self
+                .downloads_in_dir(dir)
+                .await
+                .into_iter()
+                .filter(|d| d.status == status::FINISHED && all.contains(&d.name))
+                .map(|d| d.id)
+                .collect();
+            if let Err(e) = self.delete(&ids).await {
+                tracing::warn!("extract: removing the archive downloads: {e:#}");
+            }
+        }
         // The complete sets are extracted; the incomplete ones are the error (JD leaves an
         // incomplete archive alone and says so).
         if result.is_ok() && !incomplete.is_empty() {
@@ -927,8 +941,8 @@ impl Engine {
         result
     }
 
-    /// Names of the downloads not finished yet that go into `dir` (any package there).
-    async fn loading_names(&self, dir: &Path) -> Vec<String> {
+    /// The downloads that go into `dir`, of any package there.
+    async fn downloads_in_dir(&self, dir: &Path) -> Vec<db::Download> {
         let Ok(dir) = dir.canonicalize() else {
             return Vec::new();
         };
@@ -936,21 +950,27 @@ impl Engine {
             .fetch_all(&self.db)
             .await
             .unwrap_or_default();
-        let mut names = Vec::new();
+        let mut downloads = Vec::new();
         for p in packages {
-            if !self.package_dir(&p).canonicalize().is_ok_and(|d| d == dir) {
-                continue;
-            }
-            for d in db::package_downloads(&self.db, p.id)
-                .await
-                .unwrap_or_default()
-            {
-                if d.status != status::FINISHED {
-                    names.push(d.name);
-                }
+            if self.package_dir(&p).canonicalize().is_ok_and(|d| d == dir) {
+                downloads.extend(
+                    db::package_downloads(&self.db, p.id)
+                        .await
+                        .unwrap_or_default(),
+                );
             }
         }
-        names
+        downloads
+    }
+
+    /// Names of the downloads not finished yet that go into `dir` (any package there).
+    async fn loading_names(&self, dir: &Path) -> Vec<String> {
+        self.downloads_in_dir(dir)
+            .await
+            .into_iter()
+            .filter(|d| d.status != status::FINISHED)
+            .map(|d| d.name)
+            .collect()
     }
 
     /// The downloads among `loading` that belong to the set of `members` (JD: an archive with

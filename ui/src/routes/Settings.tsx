@@ -298,6 +298,14 @@ export function SettingsPage() {
               {t.settings.deleteArchives}
             </label>
             <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={s.removeArchiveDownloads}
+                onChange={(e) => set('removeArchiveDownloads', e.target.checked)}
+              />
+              {t.settings.removeArchiveDownloads}
+            </label>
+            <label className="checkbox">
               <input type="checkbox" checked={s.askArchivePassword} onChange={(e) => set('askArchivePassword', e.target.checked)} />
               {t.settings.askArchivePassword}
             </label>
