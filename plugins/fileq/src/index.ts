@@ -21,7 +21,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'fileq',
     name: 'FileQ',
-    version: 4,
+    version: 5,
     domains: ['fileq.net'],
     fileIdLength: 12,
     accountRequired: false,

@@ -776,7 +776,9 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const wait = countdownOf(res.body);
       if (wait) await ctx.wait(wait);
       steps.push('download1');
-      ({ link: dl, page: res } = await found(await post(download1.action ? resolveUrl(url, download1.action) : url, fields)));
+      // A form goes where it stands, like in a browser (JD: an empty action is the current URL):
+      // datanodes.to redirects the file link to /download (2026-09) and only takes it there.
+      ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download1.action || res.url || url), fields)));
       if (dl) return direct(dl);
       assertOnline(res);
       freeErrors(res);
@@ -802,7 +804,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
       if (left > 0) await ctx.wait(left);
       steps.push(fields.op ?? 'download2');
-      ({ link: dl, page: res } = await found(await post(download2.action ? resolveUrl(url, download2.action) : url, fields)));
+      ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download2.action || res.url || url), fields)));
       if (dl) return direct(dl);
       assertOnline(res);
       // The page shows the form again: another round with the next password (at most 3).
@@ -964,7 +966,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
         fields.method_premium = 'Premium Download';
         if (needsPassword(visible(res.body), form.html)) await fillPassword(ctx, pw, fields);
         steps.push(fields.op ?? '?');
-        res = await http.post(form.action ? resolveUrl(url, form.action) : url, fields, { followRedirects: false });
+        res = await http.post(resolveUrl(res.url || url, form.action || res.url || url), fields, { followRedirects: false });
       }
       lastResort(res, steps, redirects);
     },

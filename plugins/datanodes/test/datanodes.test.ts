@@ -119,6 +119,42 @@ describe('datanodes', () => {
     expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
   });
 
+  it('posts the form to /download, where the file link redirects to (2026-09)', async () => {
+    // The real page, shortened: the decoy fname outside every form, the form with action='' and
+    // a disabled submit button that the page's script enables after its "scan".
+    const page1 = `<input type="hidden" name="fname" value="Download">
+      <file-actions link="https://datanodes.to/abcdefghijkl/OG19952-COREDEA.part01.rar" code="abcdefghijkl"></file-actions>
+      <form method="POST" action='' id="downloadForm" class="m-0 w-full">
+        <input type="hidden" name="op" value="download1">
+        <input type="hidden" name="usr_login" value="">
+        <input type="hidden" name="id" value="abcdefghijkl">
+        <input type="hidden" name="fname" value="OG19952-COREDEA.part01.rar">
+        <input type="hidden" name="referer" value="https://datanodes.to/users">
+        <button type="submit" id="method_free" name="method_free" disabled value="Free Download >>">Continue to Download</button>
+      </form>`;
+    const posts: HttpRequest[] = [];
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { url: 'https://datanodes.to/download', body: page1 },
+      'POST https://datanodes.to/download': (req) => {
+        posts.push(req);
+        if (req.form?.op === 'download1') return { body: PAGE2_JS };
+        return { body: JSON.stringify({ url: CDN }) };
+      },
+    });
+    const r = await plugin.resolve(LINK, ctx);
+    expect(posts.map((p) => p.form?.op)).toEqual(['download1', 'download2']);
+    // JD findFormDownload1Free: the disabled button's value is not taken, "Free Download" is.
+    expect(posts[0].form).toEqual({
+      op: 'download1',
+      usr_login: '',
+      id: 'abcdefghijkl',
+      fname: 'OG19952-COREDEA.part01.rar',
+      referer: 'https://datanodes.to/users',
+      method_free: 'Free Download',
+    });
+    expect(r).toMatchObject({ url: CDN, name: 'OG19952-COREDEA.part01.rar' });
+  });
+
   it('knows its own errors', async () => {
     const domain = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: "<p> Not allowed from domain you're coming from</p>" } });
     await expect(plugin.resolve(LINK, domain)).rejects.toMatchObject({ haulKind: 'fatal' });
