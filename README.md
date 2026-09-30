@@ -51,7 +51,7 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   beim IP-Limit wird wie bei JDownloader ein anderer User-Agent probiert
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
-- Linksammler mit Online-Check, Paketname, Zielordner, Download-Passwort und Archiv-Passwörtern;
+- Linksammler mit Online-Check, Paketname, Zielordner und einem Passwort (gilt als Download- und Archiv-Passwort);
   jede Datei hat ein Häkchen (anfangs alle an, Shift-Klick für Bereiche; der Browser merkt sie sich
   auch über ein Neuladen), gestartet werden nur die angehakten, der Rest bleibt im Linksammler. Teilweise angehakte mehrteilige Archive meldet Haul
 - passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
@@ -141,8 +141,10 @@ abschalten lässt sie sich unter *Einstellungen → Downloads* (`HashCheckEnable
 
 ## Passwortgeschützte Dateien
 
-Wie bei JDownloader: Ein Download-Passwort kann schon beim Hinzufügen im Linksammler stehen
-(*Download-Passwort*, gilt für alle Links des Pakets; Ordner geben es an ihre Dateien weiter).
+Ein Download-Passwort kann schon beim Hinzufügen im Linksammler stehen (*Passwort*, gilt für alle
+Links des Pakets; Ordner geben es an ihre Dateien weiter). JDownloader hat dafür zwei Felder, Haul
+eines: meist gilt ein Passwort für Download und Archiv, deshalb probiert Haul es auch als erstes
+Archiv-Passwort (die API nimmt `password`, oder getrennt `downloadPassword` und `passwords`).
 Fehlt es oder ist es falsch, fragt Haul oben im selben Hinweis wie bei Captchas nach; das
 eingegebene Passwort bleibt beim Download gespeichert und wird nicht mehr an die UI geschickt.
 Nach drei falschen Passwörtern schlägt der Download fehl, *Abbrechen* beendet ihn sofort; unbeantwortet
@@ -151,7 +153,7 @@ fragt Haul nach 30 Minuten erneut. Archiv-Passwörter zum Entpacken sind davon g
 ## Passwortgeschützte Archive
 
 Wie JDownloaders Entpacker probiert Haul bei einem geschützten Archiv der Reihe nach: kein
-Passwort, die Archiv-Passwörter des Pakets (Linksammler), den Archivnamen und die Liste unter
+Passwort, das Passwort des Pakets (Linksammler, Click'n'Load), den Archivnamen und die Liste unter
 *Einstellungen → Archiv-Passwörter*. Passt keines, fragt Haul oben im Hinweis nach (abschaltbar:
 *Beim Entpacken nach dem Passwort fragen, wenn keines passt*); nach einer falschen Eingabe fragt es erneut, bis zu
 dreimal. Das Passwort, das ein Archiv geöffnet hat, steht danach ganz oben in der Liste und wird so
@@ -337,7 +339,7 @@ Alle Endpunkte unter `/api`, JSON. Authentifizierung per Session-Cookie (Web-UI)
 
 | Methode | Pfad | |
 | --- | --- | --- |
-| `POST` | `/links` | `{ links, packageName?, targetDir?, passwords?, start }` |
+| `POST` | `/links` | `{ links, packageName?, targetDir?, password?, start }` (`password`: Download- und erstes Archiv-Passwort; getrennt `downloadPassword?`, `passwords?`) |
 | `GET` | `/packages?view=queue\|collector` | Pakete mit Downloads |
 | `PATCH`/`DELETE` | `/packages/{id}` | umbenennen, Zielordner, Passwörter / löschen |
 | `POST` | `/packages/{id}/start\|pause\|resume\|check\|extract` | `start` optional mit `{ downloadIds }`: nur diese Dateien, der Rest bleibt im Linksammler |

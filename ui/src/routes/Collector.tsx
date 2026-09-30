@@ -16,17 +16,16 @@ function AddLinksForm() {
   const [links, setLinks] = useState('');
   const [packageName, setPackageName] = useState('');
   const [targetDir, setTargetDir] = useState('');
-  const [passwords, setPasswords] = useState('');
-  const [downloadPassword, setDownloadPassword] = useState('');
+  // One password for the protected download and the archive; the server uses it as both.
+  const [password, setPassword] = useState('');
   const [start, setStart] = useState(false);
   const add = useMutation({
-    mutationFn: () => post<{ packageId: number }>('/links', { links, packageName, targetDir, passwords, downloadPassword, start }),
+    mutationFn: () => post<{ packageId: number }>('/links', { links, packageName, targetDir, password, start }),
     onSuccess: () => {
       setLinks('');
       setPackageName('');
       setTargetDir('');
-      setPasswords('');
-      setDownloadPassword('');
+      setPassword('');
       if (start) navigate({ to: '/' });
     },
   });
@@ -62,26 +61,16 @@ function AddLinksForm() {
         </div>
       </div>
       <div className="field">
-        <label htmlFor="dlpw">{t.collector.downloadPassword}</label>
+        <label htmlFor="pw">{t.collector.password}</label>
         <input
-          id="dlpw"
+          id="pw"
           className="input"
           autoComplete="off"
-          placeholder={t.collector.downloadPasswordPlaceholder}
-          value={downloadPassword}
-          onChange={(e) => setDownloadPassword(e.target.value)}
+          placeholder={t.collector.passwordPlaceholder}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
-      </div>
-      <div className="field">
-        <label htmlFor="pw">{t.collector.passwords}</label>
-        <textarea
-          id="pw"
-          className="textarea"
-          style={{ minHeight: 64 }}
-          placeholder={t.collector.passwordsPlaceholder}
-          value={passwords}
-          onChange={(e) => setPasswords(e.target.value)}
-        />
+        <span className="help">{t.collector.passwordHelp}</span>
       </div>
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
       <div className="toolbar">

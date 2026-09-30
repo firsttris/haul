@@ -105,6 +105,12 @@ async fn submit(
         start: false,
         source: Some("cnl".into()),
         source_page: source,
+        // JD's Click'n'Load "passwords" are for the archives; like the Linksammler's field, the
+        // first one also serves as download password.
+        password: form
+            .get("passwords")
+            .and_then(|p| p.lines().map(str::trim).find(|l| !l.is_empty()))
+            .map(str::to_string),
         passwords: form.get("passwords").cloned(),
         download_password: None,
     };

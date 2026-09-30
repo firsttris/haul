@@ -100,6 +100,10 @@ pub struct AddLinks {
     /// Password of protected files or folders (JD's Linkgrabber "Download password"); plugins
     /// get it through `ctx.password`.
     pub download_password: Option<String>,
+    /// The Linksammler's one password field: usually one password covers the protected
+    /// download and the archive, so it serves as both (download password and the first archive
+    /// password) wherever those are not given on their own.
+    pub password: Option<String>,
 }
 
 impl Engine {
@@ -500,7 +504,24 @@ impl Engine {
     /// Stores the links right away and returns. Folder links (plugins with `crawl`) are
     /// expanded afterwards in the background, so a slow crawl never holds up the request:
     /// Click'n'Load forwarders give up after a while, and a dropped request would lose the links.
-    pub async fn add_links(self: &Arc<Self>, req: AddLinks) -> Result<i64> {
+    pub async fn add_links(self: &Arc<Self>, mut req: AddLinks) -> Result<i64> {
+        if let Some(pw) = req.password.take().filter(|p| !p.trim().is_empty()) {
+            let pw = pw.trim().to_string();
+            if req
+                .download_password
+                .as_deref()
+                .is_none_or(|p| p.is_empty())
+            {
+                req.download_password = Some(pw.clone());
+            }
+            req.passwords = Some(
+                match req.passwords.take().filter(|p| !p.trim().is_empty()) {
+                    Some(list) if list.lines().any(|l| l.trim() == pw) => list,
+                    Some(list) => format!("{pw}\n{list}"),
+                    None => pw,
+                },
+            );
+        }
         let links = parse_links(&req.links);
         if links.is_empty() {
             return Err(anyhow!(crate::tr!(
@@ -1360,6 +1381,52 @@ mod engine_tests {
 
     /// Only the checked files of a Linksammler package start: they move into a new package
     /// with the same name, folder and archive passwords; the others stay in the Linksammler.
+    /// The Linksammler's one password field is the download password and the first archive
+    /// password; given lists and download passwords stay as they are.
+    #[tokio::test]
+    async fn one_password_serves_download_and_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let add = |password: Option<&str>, passwords: Option<&str>, download: Option<&str>| {
+            let e = e.clone();
+            let (password, passwords, download) = (
+                password.map(str::to_string),
+                passwords.map(str::to_string),
+                download.map(str::to_string),
+            );
+            async move {
+                let pkg = e
+                    .add_links(AddLinks {
+                        links: "http://127.0.0.1:9/a.rar".into(),
+                        password,
+                        passwords,
+                        download_password: download,
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                let p = db::get_package(&e.db, pkg).await.unwrap().unwrap();
+                let id = e.package_ids(pkg).await.unwrap()[0];
+                let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+                (p.passwords, d.password)
+            }
+        };
+        assert_eq!(
+            add(Some(" geheim "), None, None).await,
+            (Some("geheim".into()), Some("geheim".into()))
+        );
+        assert_eq!(
+            add(Some("geheim"), Some("alt\ngeheim"), Some("dl")).await,
+            (Some("alt\ngeheim".into()), Some("dl".into()))
+        );
+        assert_eq!(
+            add(Some("neu"), Some("alt"), None).await,
+            (Some("neu\nalt".into()), Some("neu".into()))
+        );
+        assert_eq!(add(Some("  "), None, None).await, (None, None));
+        e.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn checked_files_start_the_rest_stays_collected() {
         let base = range_server(Arc::new(b"DATA".to_vec()), Arc::default()).await;
