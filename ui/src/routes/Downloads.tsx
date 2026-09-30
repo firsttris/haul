@@ -425,28 +425,31 @@ function PackageRow({
           </div>
         </div>
       )}
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label={t.pkg.extractName(pkg.name)}
-        title={t.pkg.extract}
-        disabled={pkg.extract === 'running' || !pkg.downloads.every((d) => d.status === 'finished')}
-        onClick={() => onAction(`/packages/${pkg.id}/extract`)}
-      >
-        <IconArchive size={16} />
-      </button>
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label={running ? t.common.pause(pkg.name) : t.common.resume(pkg.name)}
-        disabled={!running && !resumable}
-        onClick={() => onAction(`/packages/${pkg.id}/${running ? 'pause' : 'resume'}`)}
-      >
-        {running ? <IconPause size={16} /> : <IconPlay size={16} />}
-      </button>
-      <button type="button" className="icon-btn" aria-label={t.common.remove(pkg.name)} onClick={onDelete}>
-        <IconTrash size={16} />
-      </button>
+      {/* Same group and spacing as a file row's actions, so pause/play and delete line up. */}
+      <div className="actions">
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={t.pkg.extractName(pkg.name)}
+          title={t.pkg.extract}
+          disabled={pkg.extract === 'running' || !pkg.downloads.every((d) => d.status === 'finished')}
+          onClick={() => onAction(`/packages/${pkg.id}/extract`)}
+        >
+          <IconArchive size={16} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={running ? t.common.pause(pkg.name) : t.common.resume(pkg.name)}
+          disabled={!running && !resumable}
+          onClick={() => onAction(`/packages/${pkg.id}/${running ? 'pause' : 'resume'}`)}
+        >
+          {running ? <IconPause size={16} /> : <IconPlay size={16} />}
+        </button>
+        <button type="button" className="icon-btn" aria-label={t.common.remove(pkg.name)} onClick={onDelete}>
+          <IconTrash size={16} />
+        </button>
+      </div>
     </div>
     {pkg.extract === 'failed' && (
       <div className="pkg-error" role="row">

@@ -549,6 +549,14 @@ textarea {
 }
 .table-scroll {
   overflow-x: auto;
+  /* One column as wide as the widest row: package rows and file rows keep the same width when
+     the table is wider than the window, so their action buttons stay in line. */
+  display: grid;
+}
+/* The download list's rows: at least as wide as the file row's columns, 7 gaps and its padding
+   (50px + 20px), so no column spills over the row's edge and all rows end at the same place. */
+.table-scroll {
+  --dl-row-min: calc(220px + 110px + 90px + 220px + 100px + 70px + 150px + 92px + 7 * 16px + 70px);
 }
 .trow {
   display: grid;
@@ -558,7 +566,7 @@ textarea {
   padding: 0 20px 0 50px;
   min-height: 52px;
   border-top: 1px solid var(--line-soft);
-  min-width: 1100px;
+  min-width: var(--dl-row-min);
 }
 .trow.head {
   min-height: 40px;
@@ -576,10 +584,11 @@ textarea {
   align-items: center;
   gap: 12px;
   min-height: 48px;
-  padding: 0 12px 0 8px;
+  /* Right like .trow, so the action buttons line up with the file rows'. */
+  padding: 0 20px 0 8px;
   border-top: 1px solid var(--line);
   background: var(--pkg-row);
-  min-width: 1100px;
+  min-width: var(--dl-row-min);
 }
 .table > .table-scroll > div:nth-child(2) {
   border-top: 0;
@@ -899,7 +908,7 @@ pre.code {
   background: #1c1414;
   color: #f5b3a8;
   font-size: 13px;
-  min-width: 1100px;
+  min-width: var(--dl-row-min);
 }
 .pkg-error span {
   flex: 1;
