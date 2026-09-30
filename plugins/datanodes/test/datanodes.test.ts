@@ -32,7 +32,8 @@ describe('datanodes', () => {
       },
       'POST https://datanodes.to/abcdefghijkl': (req) => {
         posts.push(req);
-        expect(req.headers?.Referer).toBe('https://datanodes.to/users');
+        // download1 as a plain form; download2 as the page's script sends it (2026-09-30).
+        expect(req.headers?.Referer).toBe(req.form?.op === 'download1' ? 'https://datanodes.to/users' : 'https://datanodes.to/download');
         if (req.form?.op === 'download1') return { body: PAGE2_JS };
         return { body: JSON.stringify({ url: encodeURIComponent(CDN) + '\n' }) };
       },
@@ -172,18 +173,28 @@ describe('datanodes', () => {
       'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
       'POST https://datanodes.to/abcdefghijkl': (req) => {
         posts.push(req);
-        return req.form?.op === 'download1' ? { body: page2 } : { body: JSON.stringify({ url: CDN }) };
+        // The answer in the browser (2026-09-30): the link URL-encoded in JSON.
+        return req.form?.op === 'download1' ? { body: page2 } : { body: JSON.stringify({ url: encodeURIComponent(CDN) }) };
       },
     });
     expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
     expect(ctx.captchas[0]).toMatchObject({ kind: 'turnstile', siteKey: '0x4AAAAAAD8U9nktqncPIkBM' });
-    expect(posts[1].form).toMatchObject({
+    // The fields of the browser's request (2026-09-30), method_free aside (the browser's is in its language).
+    expect(posts[1].form).toEqual({
       op: 'download2',
+      g_captch__a: '1',
+      id: 'abcdefghijkl',
       rand: '22dau',
       dl_token: '1790746876.10.aa4f191644faccf7d125c31f',
+      referer: 'https://datanodes.to/users',
+      method_free: 'Free Download >>',
+      method_premium: '',
       'cf-turnstile-response': 'CAPTCHA-TOKEN',
-      'g-recaptcha-response': 'CAPTCHA-TOKEN',
     });
+    // The headers the page's script sends; download1 goes like a plain form.
+    expect(posts[1].headers).toMatchObject({ 'x-dn-dl': '1', Origin: 'https://datanodes.to', Referer: 'https://datanodes.to/download', Accept: '*/*' });
+    expect(posts[0].headers?.['x-dn-dl']).toBeUndefined();
+    expect(posts[0].headers?.Referer).toBe('https://datanodes.to/users');
     expect(ctx.waits[0]).toBeGreaterThan(9);
   });
 
@@ -195,6 +206,18 @@ describe('datanodes', () => {
       'POST https://datanodes.to/abcdefghijkl': (req) => (req.form?.op === 'download1' ? { body: page2 } : { body: answer }),
     });
     await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+  });
+
+  it('stops when the site takes free downloads only from a browser (2026-09)', async () => {
+    const page2 = `<download-countdown countdown="1" rand="r" dl-token="t"></download-countdown>`;
+    const answer = JSON.stringify({
+      error: 'Free downloads are only available through your web browser. Please open this link in a browser, or upgrade to Premium for direct and download-manager support.',
+    });
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) => (req.form?.op === 'download1' ? { body: page2 } : { body: answer }),
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'fatal' });
   });
 
   it('knows its own errors', async () => {

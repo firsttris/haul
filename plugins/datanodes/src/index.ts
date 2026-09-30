@@ -17,6 +17,11 @@
  *   the XFS base searches then. Anything else goes the XFS default way.
  * - download1 without a `method_free` value gets "Free Download" (JD findFormDownload1Free);
  *   the XFS base does that for every site.
+ * Beyond JD (browser request of 2026-09-30, the page's own script): the last post goes with
+ * `x-dn-dl: 1`, `Origin`, `Referer: …/download` and an Accept of any type; Haul got "Free downloads
+ * are only available through your web browser" while sending none of them. Its `referer` field is
+ * the page's `referer="…"` (JD: the page URL), and it has no `g-recaptcha-response` next to the
+ * Turnstile token (JD sends both).
  * Not taken over: JD gives Datanodes a random User-Agent (`UserAgents.generate()`, no reason in
  * the source; the only JD plugin that does so).
  */
@@ -30,7 +35,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'datanodes',
     name: 'Datanodes',
-    version: 11,
+    version: 12,
     domains: ['datanodes.to'],
     fileIdLength: 12,
     accountRequired: false,
@@ -49,6 +54,12 @@ export default definePlugin(
       /<title>\s*Download\s+([^<]+?)\s*<\/title>/i,
     ],
     checkErrors(html) {
+      if (/Free downloads are only available through your web browser/i.test(html)) {
+        throw new PluginError('fatal', {
+          de: 'Datanodes: Free-Downloads nur im Browser („only available through your web browser“)',
+          en: 'Datanodes: free downloads only in the browser (“only available through your web browser”)',
+        });
+      }
       if (/>\s*Not allowed from domain you/i.test(html)) {
         throw new PluginError('fatal', {
           de: 'Datanodes: „Not allowed from domain you’re coming from“',
@@ -77,17 +88,25 @@ export default definePlugin(
         // JD `captcha-html="(.*?)"`; the attribute spans several lines (2026-09: Turnstile script
         // and widget), so read up to the closing quote instead of to the end of the line.
         const captcha = /captcha-html="([^"]*)"/i.exec(page.body)?.[1];
+        const referer = /\sreferer="([^"]*)"/i.exec(page.body)?.[1];
         const fields: Record<string, string> = {
           op: 'download2',
           g_captch__a: '1',
           id: fileId,
           rand,
           ...(token ? { dl_token: token } : {}),
-          referer: page.url,
+          referer: referer !== undefined ? decodeHtml(referer) : page.url,
           method_free: 'Free Download >>',
           method_premium: '',
         };
-        return { fields, html: captcha ? decodeHtml(captcha) : '' };
+        const html = captcha ? decodeHtml(captcha) : '';
+        return {
+          fields,
+          html,
+          headers: { 'x-dn-dl': '1', Origin: SITE, Referer: `${SITE}/download`, Accept: '*/*' },
+          // Only the copy of a Turnstile token; with a reCaptcha, it is the answer itself.
+          omit: /cf-turnstile/i.test(html) ? ['g-recaptcha-response'] : undefined,
+        };
       },
       countdown: (html) => {
         const n = /countdown="(\d+)"/i.exec(html)?.[1];

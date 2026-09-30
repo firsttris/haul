@@ -86,6 +86,10 @@ export interface FreeStep {
   fields: Record<string, string>;
   action?: string;
   html: string;
+  /** Headers for this post on top of the site's, e.g. what the site's own script sends. */
+  headers?: Record<string, string>;
+  /** Fields left out of this post, e.g. a captcha field the browser does not send. */
+  omit?: string[];
 }
 
 export interface FreeHooks {
@@ -730,8 +734,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     /** A file, a redirect to it or a link to it on the page; follows redirects within the site. */
     const hooks = cfg.freeHooks ?? {};
     const get = (u: string) => ctx.http.get(u, { followRedirects: false, headers: cfg.headers });
-    const post = (u: string, fields: Record<string, string>) =>
-      ctx.http.post(u, fields, { followRedirects: false, headers: cfg.headers });
+    const post = (u: string, fields: Record<string, string>, headers?: Record<string, string>) =>
+      ctx.http.post(u, fields, { followRedirects: false, headers: headers ? { ...cfg.headers, ...headers } : cfg.headers });
     const countdownOf = (html: string) => hooks.countdown?.(html) ?? countdown(html);
     const found = async (res: HttpResponse): Promise<{ link?: string; page: HttpResponse }> => {
       for (let hop = 0; hop < 5; hop++) {
@@ -804,7 +808,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
       if (left > 0) await ctx.wait(left);
       steps.push(fields.op ?? 'download2');
-      ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download2.action || res.url || url), fields)));
+      for (const name of download2.omit ?? []) delete fields[name];
+      ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download2.action || res.url || url), fields, download2.headers)));
       if (dl) return direct(dl);
       // JD checks only checkErrors after download2, so "Wrong captcha" wins over an error text
       // next to it (datanodes.to 2026-09: "No such file" + "Wrong captcha" is not offline).
