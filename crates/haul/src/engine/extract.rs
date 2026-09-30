@@ -54,6 +54,156 @@ pub fn archive_set(names: &[String], name: &str) -> Option<(String, Vec<String>)
     Some((first, members))
 }
 
+/// How the volumes of a set are numbered: `x.part01.rar`, `x.7z.001`, or `x.rar`, `x.r00`, ….
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Numbering {
+    Part,
+    Split,
+    OldRar,
+}
+
+/// A volume's place in its set: `base`, numbering, index (`x.rar` is 0 and `x.r00` 1 in the
+/// old RAR naming) and the width of its number.
+fn volume(name: &str) -> Option<(String, Numbering, u32, usize)> {
+    let part = Regex::new(r"(?i)^(.*)\.part(\d+)\.rar$").unwrap();
+    let split = Regex::new(r"(?i)^(.*\.(?:7z|zip|rar))\.(\d+)$").unwrap();
+    let rar_old = Regex::new(r"(?i)^(.*)\.r(\d{2})$").unwrap();
+    let rar = Regex::new(r"(?i)^(.*)\.rar$").unwrap();
+    let num = |s: &str| s.parse::<u32>().ok();
+    if let Some(c) = part.captures(name) {
+        return Some((c[1].to_string(), Numbering::Part, num(&c[2])?, c[2].len()));
+    }
+    if let Some(c) = split.captures(name) {
+        return Some((c[1].to_string(), Numbering::Split, num(&c[2])?, c[2].len()));
+    }
+    if let Some(c) = rar_old.captures(name) {
+        return Some((c[1].to_string(), Numbering::OldRar, num(&c[2])? + 1, 2));
+    }
+    rar.captures(name)
+        .map(|c| (c[1].to_string(), Numbering::OldRar, 0, 2))
+}
+
+fn volume_name(base: &str, numbering: Numbering, index: u32, width: usize) -> String {
+    match numbering {
+        Numbering::Part => format!("{base}.part{index:0width$}.rar"),
+        Numbering::Split => format!("{base}.{index:0width$}"),
+        Numbering::OldRar if index == 0 => format!("{base}.rar"),
+        Numbering::OldRar => format!("{base}.r{:02}", index - 1),
+    }
+}
+
+/// A RAR variable-length integer (RAR5 "vint") at `b[at..]`: its value and length.
+fn vint(b: &[u8], at: usize) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    for (i, byte) in b.get(at..)?.iter().take(10).enumerate() {
+        value |= u64::from(byte & 0x7f) << (7 * i);
+        if byte & 0x80 == 0 {
+            return Some((value, i + 1));
+        }
+    }
+    None
+}
+
+/// Whether the RAR file says another volume follows: its end-of-archive block, the last block of
+/// every volume, has the flag "not last volume" (RAR5: end of archive flag 0x0001; RAR 2.9–4:
+/// ENDARC_HEAD flag 0x0001, "archive continues in next volume"; rarlab technote). `None` when it
+/// is no RAR or the block is not found with a matching checksum, so nothing is assumed then.
+fn rar_continues(path: &Path) -> Option<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut sig = [0u8; 8];
+    f.read_exact(&mut sig).ok()?;
+    let rar5 = sig == *b"Rar!\x1a\x07\x01\x00";
+    if !rar5 && sig[..7] != *b"Rar!\x1a\x07\x00" {
+        return None;
+    }
+    let len = f.metadata().ok()?.len();
+    let n = len.min(64);
+    f.seek(SeekFrom::Start(len - n)).ok()?;
+    let mut tail = vec![0u8; n as usize];
+    f.read_exact(&mut tail).ok()?;
+    let end = tail.len();
+    if rar5 {
+        // CRC32 (4 bytes), header size (vint), then type 5, header flags, end of archive flags;
+        // the CRC covers everything from the header size on.
+        for p in (0..end.saturating_sub(7)).rev() {
+            let Some((size, size_len)) = vint(&tail, p + 4) else {
+                continue;
+            };
+            let body = p + 4 + size_len;
+            if body as u64 + size != end as u64 {
+                continue;
+            }
+            let crc = u32::from_le_bytes(tail[p..p + 4].try_into().ok()?);
+            if crc32fast::hash(&tail[p + 4..]) != crc {
+                continue;
+            }
+            let (kind, l1) = vint(&tail, body)?;
+            if kind != 5 {
+                return None;
+            }
+            let (flags, l2) = vint(&tail, body + l1)?;
+            let mut at = body + l1 + l2;
+            if flags & 0x0001 != 0 {
+                at += vint(&tail, at)?.1; // extra area size
+            }
+            if flags & 0x0002 != 0 {
+                at += vint(&tail, at)?.1; // data size
+            }
+            return Some(vint(&tail, at)?.0 & 0x0001 != 0);
+        }
+        None
+    } else {
+        // HEAD_CRC (2), HEAD_TYPE 0x7b, HEAD_FLAGS (2), HEAD_SIZE (2) and optional fields; the
+        // CRC is the low half of the CRC32 from HEAD_TYPE on.
+        for size in 7..=end.min(13) {
+            let p = end - size;
+            if tail[p + 2] != 0x7b
+                || u16::from_le_bytes([tail[p + 5], tail[p + 6]]) as usize != size
+            {
+                continue;
+            }
+            let crc = u16::from_le_bytes([tail[p], tail[p + 1]]);
+            if crc32fast::hash(&tail[p + 2..]) as u16 != crc {
+                continue;
+            }
+            return Some(u16::from_le_bytes([tail[p + 3], tail[p + 4]]) & 0x0001 != 0);
+        }
+        None
+    }
+}
+
+/// The volumes a set in `dir` lacks, like JD before it extracts (ExtractionExtension: an
+/// incomplete archive is not extracted; ArchiveType.getMissingArchiveFiles: gaps in the
+/// numbering). Beyond the numbering: the last RAR volume there says whether another follows,
+/// so a lone `part01.rar` of a larger set counts as incomplete.
+fn missing_volumes(dir: &Path, members: &[String]) -> Vec<String> {
+    let vols: Vec<(String, Numbering, u32, usize)> =
+        members.iter().filter_map(|m| volume(m)).collect();
+    let Some((base, numbering, _, _)) = vols.first().cloned() else {
+        return Vec::new();
+    };
+    let width = vols.iter().map(|v| v.3).max().unwrap_or(1);
+    let present: std::collections::BTreeSet<u32> = vols.iter().map(|v| v.2).collect();
+    let start = if numbering == Numbering::OldRar { 0 } else { 1 };
+    let max = present.iter().max().copied().unwrap_or(start);
+    let mut missing: Vec<String> = (start..=max)
+        .filter(|i| !present.contains(i))
+        .map(|i| volume_name(&base, numbering, i, width))
+        .collect();
+    if numbering != Numbering::Split {
+        let last = members
+            .iter()
+            .find(|m| volume(m).is_some_and(|v| v.2 == max));
+        if let Some(last) = last {
+            if rar_continues(&dir.join(last)) == Some(true) {
+                missing.push(volume_name(&base, numbering, max + 1, width));
+            }
+        }
+    }
+    missing
+}
+
 pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
     let part = Regex::new(r"(?i)\.part0*(\d+)\.rar$").unwrap();
     let rar_old = Regex::new(r"(?i)\.r\d{2}$").unwrap();
@@ -583,7 +733,18 @@ impl Engine {
             return;
         };
         let dir = self.package_dir(&pkg);
-        if self.settings().auto_extract && !self.package_sets(package_id, &dir).await.is_empty() {
+        let sets = self.package_sets(package_id, &dir).await;
+        // A volume still loading in another package of this folder: that one's end starts it.
+        let loading = self.loading_names(&dir).await;
+        if sets.iter().all(|(_, members)| {
+            !loading.is_empty() && self.loading_volumes(members, &loading).is_some()
+        }) {
+            if !sets.is_empty() {
+                tracing::info!(package_id, "extract: waiting for volumes still downloading");
+            }
+            return;
+        }
+        if self.settings().auto_extract {
             if let Err(e) = self.extract_package(package_id).await {
                 tracing::warn!(package_id, "extract: {e:#}");
             }
@@ -685,13 +846,45 @@ impl Engine {
         passwords: &[String],
         only: Option<Vec<ArchiveSet>>,
     ) -> Result<()> {
-        let (first, all): (Vec<String>, Vec<String>) = match only {
-            Some(sets) => (
-                sets.iter().map(|(f, _)| f.clone()).collect(),
-                sets.into_iter().flat_map(|(_, m)| m).collect(),
-            ),
-            None => find_archives(&files::file_names(dir)),
+        let sets: Vec<ArchiveSet> = match only {
+            Some(sets) => sets,
+            None => {
+                let names = files::file_names(dir);
+                find_archives(&names)
+                    .0
+                    .iter()
+                    .filter_map(|first| archive_set(&names, first))
+                    .collect()
+            }
         };
+        let loading = self.loading_names(dir).await;
+        let mut incomplete = Vec::new();
+        let mut first = Vec::new();
+        let mut all = Vec::new();
+        for (f, members) in sets {
+            if let Some(names) = self.loading_volumes(&members, &loading) {
+                incomplete.push(crate::tr!(
+                    "{}: Archiv unvollständig, noch nicht heruntergeladen: {}",
+                    "{}: archive incomplete, not downloaded yet: {}",
+                    f,
+                    names.join(", ")
+                ));
+                continue;
+            }
+            let missing = missing_volumes(dir, &members);
+            if !missing.is_empty() {
+                tracing::info!(archive = %f, missing = ?missing, "extract: archive incomplete");
+                incomplete.push(crate::tr!(
+                    "{}: Archiv unvollständig, es fehlt: {}",
+                    "{}: archive incomplete, missing: {}",
+                    f,
+                    missing.join(", ")
+                ));
+                continue;
+            }
+            first.push(f);
+            all.extend(members);
+        }
         let n = first.len().max(1) as u32;
         self.set_extract_progress(rel, package_id, Some(0));
         let mut result = Ok(());
@@ -717,7 +910,50 @@ impl Engine {
                 let _ = tokio::fs::remove_file(dir.join(a)).await;
             }
         }
+        // The complete sets are extracted; the incomplete ones are the error (JD leaves an
+        // incomplete archive alone and says so).
+        if result.is_ok() && !incomplete.is_empty() {
+            result = Err(anyhow!(incomplete.join("\n")));
+        }
         result
+    }
+
+    /// Names of the downloads not finished yet that go into `dir` (any package there).
+    async fn loading_names(&self, dir: &Path) -> Vec<String> {
+        let Ok(dir) = dir.canonicalize() else {
+            return Vec::new();
+        };
+        let packages: Vec<db::Package> = sqlx::query_as("SELECT * FROM packages")
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+        let mut names = Vec::new();
+        for p in packages {
+            if !self.package_dir(&p).canonicalize().is_ok_and(|d| d == dir) {
+                continue;
+            }
+            for d in db::package_downloads(&self.db, p.id)
+                .await
+                .unwrap_or_default()
+            {
+                if d.status != status::FINISHED {
+                    names.push(d.name);
+                }
+            }
+        }
+        names
+    }
+
+    /// The downloads among `loading` that belong to the set of `members` (JD: an archive with
+    /// a part not downloaded yet is incomplete), if any.
+    fn loading_volumes(&self, members: &[String], loading: &[String]) -> Option<Vec<String>> {
+        let key = members.iter().find_map(|m| set_key(m))?.0;
+        let names: Vec<String> = loading
+            .iter()
+            .filter(|n| set_key(n).is_some_and(|(k, _)| k == key))
+            .cloned()
+            .collect();
+        (!names.is_empty()).then_some(names)
     }
 
     /// One archive set in `dir`: the known passwords first, then, if none opens it and asking
@@ -956,6 +1192,118 @@ mod tests {
             Some(46)
         );
         assert_eq!(last_percent("Everything is Ok"), None);
+    }
+
+    /// A RAR5 volume as far as the check reads it: signature, some data, end of archive block
+    /// (rarlab technote: CRC32, size 3, type 5, flags 0, end of archive flags).
+    fn rar5(continues: bool) -> Vec<u8> {
+        let mut b = b"Rar!\x1a\x07\x01\x00".to_vec();
+        b.extend([0u8; 40]);
+        let body = [0x03, 0x05, 0x00, u8::from(continues)];
+        b.extend(crc32fast::hash(&body).to_le_bytes());
+        b.extend(body);
+        b
+    }
+
+    /// A RAR 2.9–4 volume: signature, data, ENDARC_HEAD (type 0x7b), with the volume number
+    /// field (flag 0x0008) when `vol` is given.
+    fn rar4(continues: bool, vol: Option<u16>) -> Vec<u8> {
+        let mut b = b"Rar!\x1a\x07\x00".to_vec();
+        b.extend([0u8; 40]);
+        let flags: u16 = u16::from(continues) | if vol.is_some() { 0x0008 } else { 0 };
+        let size: u16 = 7 + if vol.is_some() { 2 } else { 0 };
+        let mut head = vec![0x7b];
+        head.extend(flags.to_le_bytes());
+        head.extend(size.to_le_bytes());
+        if let Some(v) = vol {
+            head.extend(v.to_le_bytes());
+        }
+        b.extend((crc32fast::hash(&head) as u16).to_le_bytes());
+        b.extend(head);
+        b
+    }
+
+    #[test]
+    fn rar_end_block_says_whether_a_volume_follows() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str, bytes: Vec<u8>| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        assert_eq!(rar_continues(&at("a", rar5(true))), Some(true));
+        assert_eq!(rar_continues(&at("b", rar5(false))), Some(false));
+        assert_eq!(rar_continues(&at("c", rar4(true, None))), Some(true));
+        assert_eq!(rar_continues(&at("d", rar4(false, Some(3)))), Some(false));
+        assert_eq!(rar_continues(&at("e", rar4(true, Some(0)))), Some(true));
+        // A wrong checksum, no end block or no RAR at all: nothing is assumed.
+        let mut bad = rar5(true);
+        let n = bad.len();
+        bad[n - 5] ^= 0xff;
+        assert_eq!(rar_continues(&at("f", bad)), None);
+        assert_eq!(
+            rar_continues(&at("g", b"Rar!\x1a\x07\x01\x00 data".to_vec())),
+            None
+        );
+        assert_eq!(rar_continues(&at("h", b"PK\x03\x04 zip".to_vec())), None);
+        assert_eq!(rar_continues(&at("i", Vec::new())), None);
+    }
+
+    #[test]
+    fn missing_volumes_from_numbering_and_the_last_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let put =
+            |name: &str, bytes: Vec<u8>| std::fs::write(dir.path().join(name), bytes).unwrap();
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A lone first part of a larger set (the case of 2026-09-30).
+        put("G.part01.rar", rar5(true));
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["G.part01.rar"])),
+            ["G.part02.rar"]
+        );
+        // A gap, and the last one there says it is the last.
+        put("G.part03.rar", rar5(false));
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["G.part01.rar", "G.part03.rar"])),
+            ["G.part02.rar"]
+        );
+        put("G.part02.rar", rar5(true));
+        assert!(missing_volumes(
+            dir.path(),
+            &names(&["G.part01.rar", "G.part02.rar", "G.part03.rar"])
+        )
+        .is_empty());
+        // The last one there wants another: the next one is missing, in the set's width.
+        put("H.part1.rar", rar5(true));
+        put("H.part2.rar", rar5(true));
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["H.part1.rar", "H.part2.rar"])),
+            ["H.part3.rar"]
+        );
+        // Old RAR naming: x.rar, x.r00, x.r01.
+        put("Old.rar", rar4(true, None));
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["Old.rar"])),
+            ["Old.r00"]
+        );
+        put("Old.r01", rar4(false, Some(2)));
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["Old.rar", "Old.r01"])),
+            ["Old.r00"]
+        );
+        put("Old.r00", rar4(true, Some(1)));
+        assert!(missing_volumes(dir.path(), &names(&["Old.rar", "Old.r00", "Old.r01"])).is_empty());
+        // A single RAR that is no volume, split files (only gaps count) and 7z/zip: complete.
+        put("One.rar", rar5(false));
+        assert!(missing_volumes(dir.path(), &names(&["One.rar"])).is_empty());
+        assert_eq!(
+            missing_volumes(dir.path(), &names(&["B.7z.001", "B.7z.003"])),
+            ["B.7z.002"]
+        );
+        assert!(missing_volumes(dir.path(), &names(&["B.7z.001"])).is_empty());
+        assert!(missing_volumes(dir.path(), &names(&["Film.7z"])).is_empty());
+        // Unreadable end (not written yet, other format): only the numbering decides.
+        assert!(missing_volumes(dir.path(), &names(&["Gone.part01.rar"])).is_empty());
     }
 
     #[test]

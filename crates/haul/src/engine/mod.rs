@@ -2223,6 +2223,84 @@ mod engine_tests {
         e.shutdown().await;
     }
 
+    /// An incomplete archive is not extracted (JD ExtractionExtension: "Incomplete Archive"):
+    /// a part still loading in another package of the folder makes the automatic start wait;
+    /// a lone first RAR part whose end block says another follows fails with the missing name,
+    /// without trying passwords or asking for one (2026-09-30: part01 of a larger set).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incomplete_archive_waits_or_names_the_missing_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = PluginManager::new(vec![], None);
+        let captchas = Arc::new(crate::captcha::Captchas::new(Events::new()));
+        plugins.set_captchas(captchas.clone());
+        let e = engine_with(dir.path(), plugins).await;
+        let folder = e.cfg.done_dir.join("Game");
+        std::fs::create_dir_all(&folder).unwrap();
+        // RAR5 volume with the end of archive flag "not last volume" (rarlab technote).
+        let mut part1 = b"Rar!\x1a\x07\x01\x00".to_vec();
+        part1.extend([0u8; 40]);
+        let body = [0x03, 0x05, 0x00, 0x01];
+        part1.extend(crc32fast::hash(&body).to_le_bytes());
+        part1.extend(body);
+        std::fs::write(folder.join("Game.part01.rar"), &part1).unwrap();
+        let package = |files: &'static [(&'static str, &'static str)]| {
+            let e = e.clone();
+            async move {
+                let id = sqlx::query(
+                    "INSERT INTO packages(name, target_dir, collector, created_at) VALUES ('Game', 'Game', 0, 0)",
+                )
+                .execute(&e.db)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+                for (file, st) in files {
+                    sqlx::query(
+                        "INSERT INTO downloads(package_id, url, status, name, created_at) VALUES (?, ?, ?, ?, 0)",
+                    )
+                    .bind(id)
+                    .bind(format!("https://x.test/{file}"))
+                    .bind(st)
+                    .bind(file)
+                    .execute(&e.db)
+                    .await
+                    .unwrap();
+                }
+                id
+            }
+        };
+        let first = package(&[("Game.part01.rar", status::FINISHED)]).await;
+        let rest = package(&[("Game.part02.rar", status::DOWNLOADING)]).await;
+
+        // Part 2 is still loading in the other package: the automatic start waits.
+        e.clone().on_download_finished(first).await;
+        let pkg = db::get_package(&e.db, first).await.unwrap().unwrap();
+        assert_eq!(pkg.extract, None);
+        // Started by hand it says so.
+        let err = e.extract_package(first).await.unwrap_err().to_string();
+        assert!(
+            crate::i18n::pick(&err, false).contains("noch nicht heruntergeladen: Game.part02.rar"),
+            "{err}"
+        );
+
+        // Part 2 gone from the list: the end block of part 1 names it, no password is tried.
+        sqlx::query("DELETE FROM downloads WHERE package_id = ?")
+            .bind(rest)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        e.clone().on_download_finished(first).await;
+        let pkg = db::get_package(&e.db, first).await.unwrap().unwrap();
+        assert_eq!(pkg.extract.as_deref(), Some("failed"));
+        let msg = crate::i18n::pick(pkg.extract_error.as_deref().unwrap(), false);
+        assert!(
+            msg.contains("Archiv unvollständig, es fehlt: Game.part02.rar"),
+            "{msg}"
+        );
+        assert!(captchas.list().is_empty());
+        assert!(folder.join("Game.part01.rar").exists());
+        e.shutdown().await;
+    }
+
     /// A protected archive, JD's way: the package's passwords and the list are tried, then the
     /// user is asked (again after a wrong answer); the password that opened it goes first in
     /// the list and opens the next archive without asking. With asking off it just fails.
