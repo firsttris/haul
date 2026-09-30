@@ -155,6 +155,48 @@ describe('datanodes', () => {
     expect(r).toMatchObject({ url: CDN, name: 'OG19952-COREDEA.part01.rar' });
   });
 
+  it('has the user solve the Turnstile from a captcha-html over several lines (2026-09)', async () => {
+    // Structure of the real step 2 page (POST /download answer, 2026-09-30).
+    const page2 = `<download-countdown :countdown="10"
+        code="abcdefghijkl" referer="https://datanodes.to/users" rand="22dau"
+        free-method="Free Download" premium-method=""
+        :has-captcha="true"
+        captcha-html="&lt;script src=&quot;https://challenges.cloudflare.com/turnstile/v0/api.js&quot; defer&gt;&lt;/script&gt;
+&lt;div class=&quot;cf-turnstile&quot; data-sitekey=&quot;0x4AAAAAAD8U9nktqncPIkBM&quot;&gt;&lt;/div&gt;
+"
+        :has-countdown="true" message=""
+        dl-token="1790746876.10.aa4f191644faccf7d125c31f"
+        name="Film.part1.rar"></download-countdown>`;
+    const posts: HttpRequest[] = [];
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) => {
+        posts.push(req);
+        return req.form?.op === 'download1' ? { body: page2 } : { body: JSON.stringify({ url: CDN }) };
+      },
+    });
+    expect((await plugin.resolve(LINK, ctx)).url).toBe(CDN);
+    expect(ctx.captchas[0]).toMatchObject({ kind: 'turnstile', siteKey: '0x4AAAAAAD8U9nktqncPIkBM' });
+    expect(posts[1].form).toMatchObject({
+      op: 'download2',
+      rand: '22dau',
+      dl_token: '1790746876.10.aa4f191644faccf7d125c31f',
+      'cf-turnstile-response': 'CAPTCHA-TOKEN',
+      'g-recaptcha-response': 'CAPTCHA-TOKEN',
+    });
+    expect(ctx.waits[0]).toBeGreaterThan(9);
+  });
+
+  it('reports a wrong captcha, not offline, when the page also says "No such file" (2026-09)', async () => {
+    const page2 = `<download-countdown countdown="1" rand="r" captcha-html="&lt;div class=&quot;cf-turnstile&quot; data-sitekey=&quot;k&quot;&gt;&lt;/div&gt;"></download-countdown>`;
+    const answer = `<a href="/premium">Pricing</a><div><p class="m-0">No such file</p></div><div><p class="m-0">Wrong captcha</p></div>`;
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': (req) => (req.form?.op === 'download1' ? { body: page2 } : { body: answer }),
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+  });
+
   it('knows its own errors', async () => {
     const domain = fakeCtx({ 'GET https://datanodes.to/abcdefghijkl': { body: "<p> Not allowed from domain you're coming from</p>" } });
     await expect(plugin.resolve(LINK, domain)).rejects.toMatchObject({ haulKind: 'fatal' });

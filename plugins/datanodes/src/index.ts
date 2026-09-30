@@ -30,7 +30,7 @@ export default definePlugin(
   createXfsPlugin({
     id: 'datanodes',
     name: 'Datanodes',
-    version: 10,
+    version: 11,
     domains: ['datanodes.to'],
     fileIdLength: 12,
     accountRequired: false,
@@ -74,7 +74,9 @@ export default definePlugin(
         if (!/countdown="\d+"/i.test(page.body)) return undefined;
         const rand = /rand="([^"]+)"/i.exec(page.body)?.[1] ?? '';
         const token = /dl-token="([^"]+)"/i.exec(page.body)?.[1];
-        const captcha = /captcha-html="(.*?)"/i.exec(page.body)?.[1];
+        // JD `captcha-html="(.*?)"`; the attribute spans several lines (2026-09: Turnstile script
+        // and widget), so read up to the closing quote instead of to the end of the line.
+        const captcha = /captcha-html="([^"]*)"/i.exec(page.body)?.[1];
         const fields: Record<string, string> = {
           op: 'download2',
           g_captch__a: '1',

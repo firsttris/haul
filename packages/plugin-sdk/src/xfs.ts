@@ -806,6 +806,11 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       steps.push(fields.op ?? 'download2');
       ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download2.action || res.url || url), fields)));
       if (dl) return direct(dl);
+      // JD checks only checkErrors after download2, so "Wrong captcha" wins over an error text
+      // next to it (datanodes.to 2026-09: "No such file" + "Wrong captcha" is not offline).
+      if (/>\s*Wrong captcha/i.test(visible(res.body))) {
+        throw new TemporaryError({ de: `${cfg.name}: Captcha falsch`, en: `${cfg.name}: wrong captcha` });
+      }
       assertOnline(res);
       // The page shows the form again: another round with the next password (at most 3).
       if (await passwordRejected(ctx, pw, visible(res.body))) {
