@@ -244,19 +244,36 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
     };
     let method = reqwest::Method::from_bytes(req.method.as_bytes())?;
     let mut rb = client
-        .request(method, &req.url)
+        .request(method.clone(), &req.url)
         .timeout(Duration::from_millis(
             req.timeout_ms.unwrap_or(60_000).min(300_000),
         ));
     for (k, v) in &req.headers {
         rb = rb.header(k, v);
     }
+    let empty =
+        req.json.is_none() && req.form.is_none() && req.body.as_deref().is_none_or(str::is_empty);
     if let Some(json) = &req.json {
         rb = rb.json(json);
     } else if let Some(form) = &req.form {
         rb = rb.form(form);
     } else if let Some(body) = req.body {
         rb = rb.body(body);
+    }
+    // A POST without a body still says `Content-Length: 0`, like JD's `postPage(url, "")` (and
+    // browsers); reqwest leaves it out, and Google answers 411 "Length Required" (Drive's
+    // quick link check, 2026-09-30).
+    if empty
+        && matches!(
+            method,
+            reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH
+        )
+        && !req
+            .headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("content-length"))
+    {
+        rb = rb.header(reqwest::header::CONTENT_LENGTH, "0");
     }
     let mut resp = rb.send().await?;
     let status = resp.status().as_u16();
@@ -1180,5 +1197,56 @@ mod cookie_and_file_tests {
         .unwrap();
         solver.await.unwrap();
         assert_eq!(v["url"], "x7k2");
+    }
+}
+
+#[cfg(test)]
+mod empty_post_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A POST with an empty body says `Content-Length: 0`, like JD's `postPage(url, "")`:
+    /// Google answers a POST without it with 411 "Length Required" (Drive's quick link check,
+    /// 2026-09-30).
+    #[tokio::test]
+    async fn empty_post_sends_content_length_zero() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut heads = Vec::new();
+            for _ in 0..2 {
+                let (mut s, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 4096];
+                let mut got = Vec::new();
+                while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = s.read(&mut buf).await.unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                }
+                heads.push(String::from_utf8_lossy(&got).to_lowercase());
+                s.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+                    .await
+                    .unwrap();
+            }
+            heads
+        });
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        for body in [r#""body":"","#, ""] {
+            let raw = format!(
+                r#"{{"method":"POST","url":"http://{addr}/uc?id=x",{body}"headers":{{}}}}"#
+            );
+            let res = do_http(&clients, &raw).await.unwrap();
+            assert_eq!(res.status, 200);
+        }
+        for head in server.await.unwrap() {
+            assert!(head.starts_with("post /uc?id=x"), "{head}");
+            assert!(head.contains("\r\ncontent-length: 0\r\n"), "{head}");
+        }
     }
 }
