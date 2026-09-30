@@ -14,6 +14,13 @@ reCaptcha, hCaptcha and Turnstile only work on the hoster's own page. Like JDown
 solver, Haul lets your browser solve them on that page and takes the answer:
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
+
+   **Chrome, Edge, Brave and other Chromium browsers** run userscripts only after you allow it:
+   open the extension's details (`chrome://extensions` → *Details*) and turn on
+   **Allow user scripts**. In older versions (before Chrome 138) there is no such switch; turn on
+   **Developer mode** at the top right of `chrome://extensions` instead. Without it the userscript
+   is installed but never runs: **Solve** opens the full hoster page, and Haul gets no answer.
+   Firefox needs nothing of this.
 2. In Haul, open **Settings → Captchas** and install the userscript `haul-captcha.user.js` from there.
 3. When a captcha is waiting, a banner appears at the top of Haul, and in the tab title. Turn on the
    browser notification in the same settings to be told when Haul is in the background.
