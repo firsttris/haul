@@ -5,6 +5,7 @@ import { api, post, type Package } from '../api';
 import { PageHeader, usePackages } from '../components/Layout';
 import { IconPlay, IconRefresh, IconTrash } from '../components/icons';
 import { partialArchives } from '../components/archive';
+import { loadUnchecked, pruneUnchecked, saveUnchecked, type Unchecked } from '../components/unchecked';
 import { describe, toneColor } from '../components/status';
 import { bytes } from '../format';
 import { localize, useT } from '../i18n';
@@ -97,9 +98,8 @@ function AddLinksForm() {
   );
 }
 
-/** Unchecked files per package: everything starts checked (like JD's Linkgrabber), so
- *  "start" without touching a checkbox loads the whole package. */
-type Unchecked = Map<number, Set<number>>;
+// Unchecked files per package (components/unchecked): everything starts checked (like JD's
+// Linkgrabber), so "start" without touching a checkbox loads the whole package.
 
 /** Starts the checked files of a package; all checked: the whole package. */
 function startPackage(pkg: Package, unchecked: Set<number>) {
@@ -288,8 +288,14 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
 
 export function CollectorPage() {
   const t = useT();
-  const { data: packages = [] } = usePackages('collector');
-  const [unchecked, setUnchecked] = useState<Unchecked>(new Map());
+  const { data: packages = [], isSuccess } = usePackages('collector');
+  // Kept in this browser, so a reload does not check everything again.
+  const [unchecked, setUnchecked] = useState<Unchecked>(loadUnchecked);
+  useEffect(() => saveUnchecked(unchecked), [unchecked]);
+  // Started, discarded or deleted: forget their checkboxes (only once the list is loaded).
+  useEffect(() => {
+    if (isSuccess) setUnchecked((m) => pruneUnchecked(m, packages));
+  }, [isSuccess, packages]);
   const uncheckedOf = (p: Package) => unchecked.get(p.id) ?? new Set<number>();
   const someUnchecked = packages.some((p) => p.downloads.some((d) => uncheckedOf(p).has(d.id)));
   const startAll = useMutation({

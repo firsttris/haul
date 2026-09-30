@@ -52,8 +52,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - Queue mit N parallelen Downloads, segmentiertes Laden über Range-Requests, `.part`-Dateien,
   Resume nach Neustart, Retry mit Backoff, globales Bandbreitenlimit
 - Linksammler mit Online-Check, Paketname, Zielordner, Download-Passwort und Archiv-Passwörtern;
-  jede Datei hat ein Häkchen (anfangs alle an, Shift-Klick für Bereiche), gestartet werden nur die
-  angehakten, der Rest bleibt im Linksammler. Teilweise angehakte mehrteilige Archive meldet Haul
+  jede Datei hat ein Häkchen (anfangs alle an, Shift-Klick für Bereiche; der Browser merkt sie sich
+  auch über ein Neuladen), gestartet werden nur die angehakten, der Rest bleibt im Linksammler. Teilweise angehakte mehrteilige Archive meldet Haul
 - passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
   ddownload, Datanodes, FileQ, Filekeeper): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
