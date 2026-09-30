@@ -1,8 +1,6 @@
 name: Publish Docker image
 
-# The only workflow that builds the Docker image. It runs when you start it (Actions → Publish
-# Docker image → Run workflow) or push a release tag: v1.2.3 publishes tristanteu/haul:1.2.3, :1.2
-# and :latest, a manual run on a branch publishes :<branch>. Both for amd64 and arm64.
+# A release tag (v1.2.3) publishes tristanteu/haul:1.2.3, :1.2 and :latest for amd64 and arm64.
 # Each platform builds on its own native runner (compiling Rust under QEMU takes too long);
 # the merge job joins them into one multi-arch image.
 on:

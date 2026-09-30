@@ -98,9 +98,7 @@ All endpoints are under `/api` and speak JSON. Authentication with the session c
 
 Pushing a tag `v*` builds the image for `linux/amd64` and `linux/arm64` and publishes it to Docker Hub
 as `tristanteu/haul` with the tags `latest`, `X.Y.Z` and `X.Y`. The repository needs the secret
-`DOCKER_PAT`, a Docker Hub access token with write access. The image is built only then, or when
-you start **Actions → Publish Docker image → Run workflow** (publishes `tristanteu/haul:<branch>`);
-the CI on pushes and pull requests does not build it.
+`DOCKER_PAT`, a Docker Hub access token with write access.
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
