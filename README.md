@@ -52,7 +52,8 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
 - passwortgeschützte Dateien und Ordner (1fichier, Gofile, Mediafire, XFS-Hoster wie Send,
   ddownload, Datanodes, FileQ, Filekeeper): Passwort beim Hinzufügen angeben oder eintippen, wenn Haul danach fragt
 - Click'n'Load (CNL1 und CNL2) über `haul-cnl` auf dem Desktop
-- automatisches Entpacken fertiger Pakete mit `7z`/`unrar`, mit Fortschritt in Prozent
+- automatisches Entpacken fertiger Pakete mit `7z`/`unrar`, mit Fortschritt in Prozent; jedes Paket
+  entpackt nur die Archive, die es selbst geladen hat (teilen sich Pakete einen Ordner, stört keins das andere)
 - Ansicht **Fertig**: der Fertig-Ordner wie auf der Platte, mit Paketzustand (entpackt, Archive übrig,
   Fehler, nicht von Haul); Auswahl per Checkbox, dann Entpacken (ein beliebiger Teil entpackt den ganzen
   Satz, in denselben Ordner), Verschieben in andere Ordner, neuer Ordner, Archive löschen, Löschen

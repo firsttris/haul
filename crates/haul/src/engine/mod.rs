@@ -1851,6 +1851,132 @@ mod engine_tests {
         e.shutdown().await;
     }
 
+    /// Two packages in one folder (the Linksammler's "3 of 5" start): each extracts only the
+    /// archives it downloaded, so a half-downloaded one of the other package neither fails it
+    /// nor does the other package extract its archives a second time.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn package_extracts_only_its_own_archives() {
+        let _path = extract::PATH_LOCK.lock().await;
+        let Some(seven) = extract::available_tools()
+            .into_iter()
+            .map(|t| t.describe())
+            .find(|p| p.ends_with("7z") || p.ends_with("7zz") || p.ends_with("7za"))
+        else {
+            eprintln!("skipped: 7-Zip is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let folder = e.cfg.done_dir.join("Film");
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&src).unwrap();
+        let seven_a = |args: &[&str]| {
+            let ok = std::process::Command::new(&seven)
+                .current_dir(&src)
+                .arg("a")
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok);
+        };
+        std::fs::write(src.join("film.txt"), "film").unwrap();
+        seven_a(&[folder.join("Film.7z").to_str().unwrap(), "film.txt"]);
+        // Bonus in two volumes (random data does not compress).
+        let noise: Vec<u8> = (0..300_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 7) as u8)
+            .collect();
+        std::fs::write(src.join("bonus.bin"), noise).unwrap();
+        seven_a(&[
+            "-v150k",
+            "-mx0",
+            src.join("Bonus.7z").to_str().unwrap(),
+            "bonus.bin",
+        ]);
+        // Two packages with one folder, like the Linksammler's "3 of 5" start.
+        let package = |name: &'static str, files: &'static [(&'static str, &'static str)]| {
+            let e = e.clone();
+            async move {
+                let id = sqlx::query(
+                    "INSERT INTO packages(name, target_dir, collector, created_at) VALUES (?, 'Film', 0, 0)",
+                )
+                .bind(name)
+                .execute(&e.db)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+                for (file, st) in files {
+                    sqlx::query(
+                        "INSERT INTO downloads(package_id, url, status, name, created_at) VALUES (?, ?, ?, ?, 0)",
+                    )
+                    .bind(id)
+                    .bind(format!("https://x.test/{file}"))
+                    .bind(st)
+                    .bind(file)
+                    .execute(&e.db)
+                    .await
+                    .unwrap();
+                }
+                id
+            }
+        };
+        let film = package("Film", &[("Film.7z", status::FINISHED)]).await;
+        let bonus = package(
+            "Film",
+            &[
+                ("Bonus.7z.001", status::FINISHED),
+                ("Bonus.7z.002", status::DOWNLOADING),
+            ],
+        )
+        .await;
+        // Only the first bonus volume is done yet.
+        std::fs::rename(src.join("Bonus.7z.001"), folder.join("Bonus.7z.001")).unwrap();
+
+        // The film package extracts the film; the half bonus archive is not its business.
+        e.extract_package(film).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(folder.join("film.txt")).unwrap(),
+            "film"
+        );
+        assert!(!folder.join("bonus.bin").exists());
+        let pkg = db::get_package(&e.db, film).await.unwrap().unwrap();
+        assert_eq!(
+            (pkg.extract.as_deref(), pkg.extract_error),
+            (Some("done"), None)
+        );
+
+        // The bonus package, once complete, extracts the bonus and leaves the film alone.
+        std::fs::rename(src.join("Bonus.7z.002"), folder.join("Bonus.7z.002")).unwrap();
+        sqlx::query("UPDATE downloads SET status = ? WHERE package_id = ?")
+            .bind(status::FINISHED)
+            .bind(bonus)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        std::fs::remove_file(folder.join("film.txt")).unwrap();
+        e.extract_package(bonus).await.unwrap();
+        assert_eq!(
+            std::fs::metadata(folder.join("bonus.bin")).unwrap().len(),
+            300_000
+        );
+        assert!(
+            !folder.join("film.txt").exists(),
+            "the film was extracted again"
+        );
+
+        // Files renamed in Fertig: none of the package's names is there, so the whole folder.
+        sqlx::query("UPDATE downloads SET name = 'gone.7z' WHERE package_id = ?")
+            .bind(film)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        e.extract_package(film).await.unwrap();
+        assert!(folder.join("film.txt").exists());
+        e.shutdown().await;
+    }
+
     /// A protected archive, JD's way: the package's passwords and the list are tried, then the
     /// user is asked (again after a wrong answer); the password that opened it goes first in
     /// the list and opens the next archive without asking. With asking off it just fails.

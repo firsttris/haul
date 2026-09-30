@@ -507,8 +507,7 @@ impl Engine {
             return;
         };
         let dir = self.package_dir(&pkg);
-        let (archives, _) = find_archives(&files::file_names(&dir));
-        if self.settings().auto_extract && !archives.is_empty() {
+        if self.settings().auto_extract && !self.package_sets(package_id, &dir).await.is_empty() {
             if let Err(e) = self.extract_package(package_id).await {
                 tracing::warn!(package_id, "extract: {e:#}");
             }
@@ -525,14 +524,38 @@ impl Engine {
         }
     }
 
-    /// Extracts the archives in the package folder (whatever is on disk there, so renamed or
-    /// added files count too) and records the result on the package.
+    /// The package's archive sets in its folder: those with at least one file the package
+    /// downloaded, with all their volumes. Another package's archives in the same folder stay
+    /// out (a Linksammler package started in parts shares its folder), so they are neither
+    /// extracted twice nor, half downloaded, the reason this package fails. If none of the
+    /// package's files is there any more (renamed or moved in Fertig): every set in the folder.
+    async fn package_sets(&self, package_id: i64, dir: &Path) -> Vec<ArchiveSet> {
+        let names = files::file_names(dir);
+        let own: Vec<String> = db::package_downloads(&self.db, package_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|d| d.status == status::FINISHED)
+            .map(|d| d.name)
+            .collect();
+        let present = names.iter().any(|n| own.contains(n));
+        find_archives(&names)
+            .0
+            .iter()
+            .filter_map(|first| archive_set(&names, first))
+            .filter(|(_, members)| !present || members.iter().any(|m| own.contains(m)))
+            .collect()
+    }
+
+    /// Extracts the package's archives in its folder (see `package_sets`) and records the
+    /// result on the package.
     pub async fn extract_package(&self, package_id: i64) -> Result<()> {
         let pkg = db::get_package(&self.db, package_id)
             .await?
             .ok_or_else(|| anyhow!(crate::tr!("Paket nicht gefunden", "Package not found")))?;
         let dir = self.package_dir(&pkg);
-        if find_archives(&files::file_names(&dir)).0.is_empty() {
+        let sets = self.package_sets(package_id, &dir).await;
+        if sets.is_empty() {
             return Ok(());
         }
         let claimed = sqlx::query(
@@ -557,7 +580,7 @@ impl Engine {
             .collect();
         let rel = files::relative(&self.cfg.done_dir, &dir);
         let error = self
-            .extract_dir(&dir, &rel, Some(package_id), &passwords, None)
+            .extract_dir(&dir, &rel, Some(package_id), &passwords, Some(sets))
             .await
             .err()
             .map(|e| format!("{e:#}"));
@@ -575,7 +598,7 @@ impl Engine {
         }
     }
 
-    /// Extracts every archive set directly inside `dir` (or only the set `only`: first volume
+    /// Extracts every archive set directly inside `dir` (or only the sets `only`: first volume
     /// and all volumes), reporting the overall percentage under `rel` (the folder relative to
     /// the done folder).
     async fn extract_dir(
@@ -584,10 +607,13 @@ impl Engine {
         rel: &str,
         package_id: Option<i64>,
         passwords: &[String],
-        only: Option<(String, Vec<String>)>,
+        only: Option<Vec<ArchiveSet>>,
     ) -> Result<()> {
-        let (first, all) = match only {
-            Some((first, members)) => (vec![first], members),
+        let (first, all): (Vec<String>, Vec<String>) = match only {
+            Some(sets) => (
+                sets.iter().map(|(f, _)| f.clone()).collect(),
+                sets.into_iter().flat_map(|(_, m)| m).collect(),
+            ),
             None => find_archives(&files::file_names(dir)),
         };
         let n = first.len().max(1) as u32;
@@ -809,7 +835,7 @@ impl Engine {
                                 .unwrap_or_default(),
                             None => Vec::new(),
                         };
-                        this.extract_dir(&dir, &folder, package, &passwords, set)
+                        this.extract_dir(&dir, &folder, package, &passwords, set.map(|s| vec![s]))
                             .await
                     }
                 };
