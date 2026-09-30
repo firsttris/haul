@@ -752,6 +752,7 @@ mod replace_tests {
             "https://mega.nz/file/AbCdEfGh#key",
             "https://mega.co.nz/#!AbCdEfGh!key",
             "https://drive.google.com/drive/folders/1xyz",
+            "https://docs.google.com/document/d/1AbCdEf/edit",
             "https://send.now/s/bob",
             "https://send.now/d/1pLfI",
         ] {

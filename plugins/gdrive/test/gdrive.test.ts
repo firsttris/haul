@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fakeCtx } from '@haul/plugin-sdk/testing';
 import { sha1Hex } from '@haul/plugin-sdk';
 import type { HttpRequest } from '@haul/plugin-sdk';
-import plugin, { confirmUrl, parseLink } from '../src/index';
+import plugin, { chooseExport, confirmUrl, exportName, fileApiKey, parseLink } from '../src/index';
 
 const ID = '1AbC-dEf_GhIjKlMnOpQrStUvWxYz0123';
 const LINK = `https://drive.google.com/file/d/${ID}/view?usp=sharing`;
@@ -25,7 +25,8 @@ describe('google drive links', () => {
     for (const f of ['https://drive.google.com/drive/folders/1xyz', 'https://drive.google.com/drive/u/0/folders/1xyz', 'https://drive.google.com/folderview?id=1xyz', 'https://docs.google.com/folder/d/1xyz/edit']) {
       expect(plugin.matches.some((re) => re.test(f))).toBe(true);
     }
-    expect(plugin.matches[0].test('https://docs.google.com/document/d/1xyz/edit')).toBe(false);
+    // JD: Google Docs documents are file links too (exported when downloaded).
+    expect(parseLink('https://docs.google.com/document/d/1xyz/edit')?.id).toBe('1xyz');
   });
 });
 
@@ -69,7 +70,6 @@ describe('google drive check and download', () => {
     await expect(run({ scanResult: 'ERROR', disposition: 'QUOTA_EXCEEDED' })).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 3600 });
     await expect(run({ scanResult: 'ERROR', disposition: 'FILE_INFECTED_NOT_OWNER' })).rejects.toMatchObject({ haulKind: 'fatal' });
     await expect(run({ scanResult: 'ERROR', disposition: 'DOWNLOAD_RESTRICTED' })).rejects.toMatchObject({ haulKind: 'fatal' });
-    await expect(run({ fileName: 'Doc', sizeBytes: 0 })).rejects.toThrow(/Google-Dokument/);
     const priv = fakeCtx({ [QUICK]: { status: 403, body: '' } });
     await expect(plugin.resolve(LINK, priv)).rejects.toThrow(/private Datei/);
     const gone = fakeCtx({ [QUICK]: { status: 404, body: '' } });
@@ -251,5 +251,65 @@ describe('google drive with a Google account (JD cookie login)', () => {
       },
     });
     await plugin.crawl!(`https://drive.google.com/drive/folders/${folder}`, anon);
+  });
+});
+
+describe('google documents (JD parseGoogleDocumentPropertiesAPIAndSetFilename)', () => {
+  const links = {
+    'application/pdf': 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=docx',
+    'application/vnd.oasis.opendocument.text': 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=odt',
+    'text/markdown': 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=markdown',
+  };
+  const DOC = 'application/vnd.google-apps.document';
+
+  it('picks the format: the title’s own, then Google’s download format, then JD’s fallback, then ZIP', () => {
+    expect(chooseExport('D1', 'Bericht.pdf', DOC, links).ext).toBe('pdf');
+    expect(chooseExport('D1', 'Notizen.md', DOC, links).ext).toBe('md');
+    expect(chooseExport('D1', 'Bericht', DOC, links)).toEqual({ ext: 'docx', url: links['application/vnd.openxmlformats-officedocument.wordprocessingml.document'] });
+    expect(chooseExport('S1', 'Tabelle', 'application/vnd.google-apps.spreadsheet', { a: 'https://docs.google.com/spreadsheets/export?id=S1&exportFormat=xlsx', b: 'https://docs.google.com/spreadsheets/export?id=S1&exportFormat=pdf' }).ext).toBe('xlsx');
+    expect(chooseExport('X1', 'Zeichnung', 'application/vnd.google-apps.drawing', { a: 'https://docs.google.com/drawings/export?id=X1&exportFormat=svg', b: 'https://docs.google.com/drawings/export?id=X1&exportFormat=pdf' }).ext).toBe('pdf');
+    expect(chooseExport('D1', 'Unbekannt', DOC, undefined)).toEqual({
+      ext: 'zip',
+      url: 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=zip',
+    });
+    expect(exportName('Bericht', 'docx')).toBe('Bericht.docx');
+    expect(exportName('Bericht.PDF', 'pdf')).toBe('Bericht.PDF');
+    expect(fileApiKey('x,"AIzaFileKey",null,"/drive/v2beta",y')).toBe('AIzaFileKey');
+    expect(fileApiKey('"/drive/v2internal","AIzaInternal"')).toBe('AIzaInternal');
+  });
+
+  it('exports a document found by its size 0: file page, details, export', async () => {
+    const quickDoc = `POST https://drive.google.com/uc?id=D1&authuser=0&export=download`;
+    const EXPORT = links['application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const ctx = fakeCtx({
+      [quickDoc]: { body: `)]}'\n${JSON.stringify({ fileName: 'Bericht', sizeBytes: 0 })}` },
+      'GET https://drive.google.com/file/d/D1/view': { body: '<script>x,"AIzaFileKey",null,"/drive/v2beta"</script>' },
+      'GET https://content.googleapis.com/drive/v2beta/files/D1?': (req) => {
+        expect(req.url).toContain('key=AIzaFileKey');
+        expect(req.url).toContain('exportLinks');
+        return { body: JSON.stringify({ id: 'D1', title: 'Bericht', mimeType: DOC, exportLinks: links }) };
+      },
+      [`GET ${EXPORT}`]: { file: true },
+    });
+    expect(await plugin.resolve('https://docs.google.com/document/d/D1/edit', ctx)).toMatchObject({ url: EXPORT, name: 'Bericht.docx', maxConnections: 1 });
+  });
+
+  it('uses v2internal with the account (JD)', async () => {
+    const quickDoc = `POST https://drive.google.com/uc?id=D1&authuser=0&export=download`;
+    const ZIP = 'https://docs.google.com/feeds/download/documents/export/Export?id=D1&exportFormat=zip';
+    const ctx = fakeCtx(
+      {
+        [quickDoc]: { body: `)]}'\n${JSON.stringify({ fileName: 'X', sizeBytes: 0 })}` },
+        'GET https://drive.google.com/file/d/D1/view': { body: '"/drive/v2internal","AIzaInternal"' },
+        'GET https://clients6.google.com/drive/v2internal/files/D1?': (req) => {
+          expect(req.headers?.Authorization).toMatch(/^SAPISIDHASH /);
+          return { body: JSON.stringify({ id: 'D1', title: 'X', mimeType: 'application/vnd.google-apps.form' }) };
+        },
+        [`GET ${ZIP}`]: { file: true },
+      },
+      { id: 1, user: '', secret: 'SAPISID=s1; SID=x' },
+    );
+    expect(await plugin.resolve('https://drive.google.com/file/d/D1/view', ctx)).toMatchObject({ url: ZIP, name: 'X.zip' });
   });
 });

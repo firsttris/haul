@@ -33,7 +33,9 @@ Links einfügen oder per Click'n'Load schicken, der Server lädt, der Browser ze
   abgewartet, ohne als Fehlversuch zu zählen
 - Google Drive: öffentliche Dateien und Ordner (mit Unterordnern und Verknüpfungen) ohne Account
   wie bei JDownloader (schneller Link-Check, Bestätigung bei großen Dateien, Kontingent- und
-  Rate-Limit mit Wartezeit); Google-Dokumente noch nicht
+  Rate-Limit mit Wartezeit); Google-Dokumente (Docs, Tabellen, Präsentationen) werden exportiert:
+  im Format aus dem Titel (z. B. „Bericht.pdf“), sonst wie Google Drives eigener Download als
+  Word, Excel bzw. PowerPoint, sonst PDF/ODF/Text, zuletzt als ZIP wie JDownloader
 - Datanodes ohne Account (XFS mit JDs Datanodes-Anpassungen); ein reCaptcha löst du im Browser
   (siehe [Captchas](#captchas))
 - FileQ (fileq.net) und Filekeeper (filekeeper.net) ohne Account über den XFS-Free-Weg wie bei

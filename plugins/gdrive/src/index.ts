@@ -28,7 +28,13 @@
  *   API gets `Authorization: SAPISIDHASH <time>_<sha1(time SAPISID origin)>` and
  *   `X-Goog-Authuser: 0` (JD prepBrowserWebAPI), the fallback download URL is `/u/0/uc`
  *   (JD constructFileDirectDownloadUrl). Folders are listed with the account too.
- * - Not yet: Google Docs exports, video streams.
+ * - Google documents (JD parseGoogleDocumentPropertiesAPIAndSetFilename): the quick check gives
+ *   size 0; the file page (JD handleLinkcheckFileOverview) gives the web API key, the file's
+ *   details (`v2beta/files/<id>`, logged in `v2internal`) its type and `exportLinks`. The format:
+ *   JD's AUTO first (the title names an available one, e.g. "Bericht.pdf"), then, unlike JD's
+ *   default ZIP of HTML pages, what Google Drive's own "Download" gives (Word, PowerPoint,
+ *   Excel), then JD's fallback pdf, odt, ods, txt, and last JD's ZIP export.
+ * - Not yet: video streams.
  */
 import {
   AccountError,
@@ -47,9 +53,9 @@ import {
 import type { CrawledFile, Ctx, FileHash, HttpResponse } from '@haul/plugin-sdk';
 
 const HOSTS = '(?:drive|docs|drive\\.usercontent)\\.google\\.com';
-/** JD getAnnotationUrls, without Google Docs documents (they need an export). */
+/** JD getAnnotationUrls: file links and Google Docs documents (`document/d/`). */
 const LINK = new RegExp(
-  `^https?://${HOSTS}/(?:(?:leaf|open)\\?(?:[^"<>/]*?&)?id=[A-Za-z0-9_-]+|(?:u/\\d+/)?uc\\?(?:[^"<>]*?&)?id=[A-Za-z0-9_-]+|download\\?(?:[^"<>]*?&)?id=[A-Za-z0-9_-]+|(?:a/[a-zA-Z0-9.]+/)?file/d/[A-Za-z0-9_-]+)`,
+  `^https?://${HOSTS}/(?:(?:leaf|open)\\?(?:[^"<>/]*?&)?id=[A-Za-z0-9_-]+|(?:u/\\d+/)?uc\\?(?:[^"<>]*?&)?id=[A-Za-z0-9_-]+|download\\?(?:[^"<>]*?&)?id=[A-Za-z0-9_-]+|(?:a/[a-zA-Z0-9.]+/)?(?:file|document)/d/[A-Za-z0-9_-]+)`,
   'i',
 );
 /** JD GoogleDriveCrawler: PATTERN_FOLDER_NORMAL, PATTERN_FOLDERVIEW, PATTERN_FOLDER_CURRENT. */
@@ -117,7 +123,7 @@ function privateError(ctx: Ctx, what: 'file' | 'folder'): PluginError {
 /** File id and resource key (JD getFID / getFileResourceKey). */
 export function parseLink(link: string): { id: string; resourceKey?: string } | undefined {
   const id =
-    /\/file\/d\/([A-Za-z0-9_-]+)/i.exec(link)?.[1] ??
+    /\/(?:file|document)\/d\/([A-Za-z0-9_-]+)/i.exec(link)?.[1] ??
     /[?&]id=([A-Za-z0-9_-]+)/i.exec(link)?.[1];
   if (!id || !LINK.test(link)) return undefined;
   const resourceKey = /[?&]resourcekey=([^&#]+)/i.exec(link)?.[1];
@@ -366,6 +372,87 @@ async function quickCheck(ctx: Ctx, id: string, resourceKey: string | undefined,
   return JSON.parse(json) as Quick;
 }
 
+/** JD handleLinkcheckFileOverview: the web API key on the file page. */
+export function fileApiKey(html: string): string | undefined {
+  return /"([^"]+)",null,"\/drive\/v2beta"/.exec(html)?.[1] ?? /"\/drive\/v2internal","([^"]+)"/.exec(html)?.[1];
+}
+
+/** Google Drive's own download format per document type (its "Download" menu). */
+const OFFICE: Record<string, string> = { document: 'docx', presentation: 'pptx', spreadsheet: 'xlsx' };
+/** JD fileExtFallbackPriorityList. */
+const FALLBACK = ['pdf', 'odt', 'ods', 'txt'];
+
+/**
+ * The export of a Google document: its URL and file extension (JD
+ * parseGoogleDocumentPropertiesAPIAndSetFilename, see the top of the file), or JD's ZIP export
+ * when no known format is offered.
+ */
+export function chooseExport(id: string, title: string, mimeType: string | undefined, exportLinks: Record<string, string> | undefined): { url: string; ext: string } {
+  const byExt = new Map<string, string>();
+  for (const url of Object.values(exportLinks ?? {})) {
+    const fmt = /[?&]exportFormat=([^&#]+)/i.exec(url)?.[1]?.toLowerCase();
+    if (!fmt) continue;
+    byExt.set(fmt, url);
+    // JD: "Small workaround for markdown".
+    if (fmt === 'markdown') byExt.set('md', url);
+  }
+  const type = /^application\/vnd\.google-apps\.(.+)$/i.exec(mimeType ?? '')?.[1]?.toLowerCase();
+  const own = /\.([A-Za-z0-9]{2,5})$/.exec(title)?.[1]?.toLowerCase();
+  for (const ext of [own, type ? OFFICE[type] : undefined, ...FALLBACK]) {
+    const url = ext ? byExt.get(ext) : undefined;
+    if (ext && url) return { url, ext };
+  }
+  return { url: `https://docs.google.com/feeds/download/documents/export/Export?id=${encodeURIComponent(id)}&exportFormat=zip`, ext: 'zip' };
+}
+
+/** JD applyFilenameExtension: the title with the export's extension. */
+export function exportName(title: string, ext: string): string {
+  return title.toLowerCase().endsWith(`.${ext}`) ? title : `${title}.${ext}`;
+}
+
+/** A Google document: its details from the web API (JD crawlAdditionalFileInformationFromWebsite), then the export. */
+async function resolveDocument(ctx: Ctx, t: { id: string; resourceKey?: string }, fallbackTitle: string | undefined, headers: Record<string, string>) {
+  const page = await ctx.http.get(`${fileUrl(t.id, t.resourceKey)}/view`, { headers });
+  pageErrors(ctx, page);
+  const key = fileApiKey(page.body) ?? webApiInfo(page.body).key;
+  if (!key) {
+    throw new TemporaryError({ de: 'Google Drive: Schlüssel für die Dokument-Details nicht gefunden', en: 'Google Drive: key for the document details not found' });
+  }
+  const query = [`fields=${encodeURIComponent(FIELDS)}`, 'supportsTeamDrives=true', 'enforceSingleParent=true', `key=${encodeURIComponent(key)}`];
+  // JD: logged in `clients6.google.com/drive/v2internal`, else `content.googleapis.com/drive/v2beta`.
+  const api = ctx.account.get() ? 'https://clients6.google.com/drive/v2internal' : 'https://content.googleapis.com/drive/v2beta';
+  const res = await ctx.http.get(`${api}/files/${encodeURIComponent(t.id)}?${query.join('&')}`, {
+    headers: {
+      ...headers,
+      ...authHeaders(ctx),
+      Accept: '*/*',
+      Origin: DRIVE,
+      Referer: `${DRIVE}/`,
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-Javascript-User-Agent': 'google-api-javascript-client/1.1.0',
+      ...(t.resourceKey ? { 'X-Goog-Drive-Resource-Keys': `${t.id}/${t.resourceKey}` } : {}),
+    },
+  });
+  if (res.status === 404) throw new OfflineError({ de: 'Google Drive: Dokument nicht gefunden', en: 'Google Drive: document not found' });
+  if (res.status === 403) throw privateError(ctx, 'file');
+  if (res.status === 429) throw new TemporaryError({ de: 'Google Drive: Rate-Limit', en: 'Google Drive: rate limited' }, RATE_WAIT);
+  let info: DriveItem & { exportLinks?: Record<string, string> } = { id: t.id };
+  try {
+    info = res.json();
+  } catch {
+    throw new TemporaryError({ de: `Google Drive: Dokument-Details nicht lesbar (HTTP ${res.status})`, en: `Google Drive: document details not readable (HTTP ${res.status})` });
+  }
+  const title = info.title || fallbackTitle || t.id;
+  const chosen = chooseExport(t.id, title, info.mimeType, info.exportLinks);
+  const file = await ctx.http.get(chosen.url, { headers });
+  if (!file.file) {
+    pageErrors(ctx, file);
+    throw new TemporaryError({ de: 'Google Drive: Export des Dokuments nicht bekommen', en: 'Google Drive: could not get the document export' });
+  }
+  // An export has no size in advance and is made on the fly: one connection.
+  return { url: file.url, name: exportName(title, chosen.ext), headers, maxConnections: 1 };
+}
+
 /** JD findConfirmDownloadurlForm: the confirm link or the download form on the warning page. */
 export function confirmUrl(html: string, pageUrl: string): string | undefined {
   const link = /"([^"]*?\/uc[^"]+export=download[^<>"]*?confirm=[^<>"]+)"/i.exec(html)?.[1];
@@ -387,7 +474,7 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 5,
+  version: 6,
   matches: [LINK, FOLDER],
   accountRequired: false,
   // JD GoogleDriveCrawler logs in too: private folders of the account.
@@ -448,12 +535,8 @@ export default definePlugin({
       }
       throw new PluginError('fatal', `Google Drive: ${q.disposition ?? 'ERROR'}`);
     }
-    if (q.sizeBytes === 0) {
-      throw new PluginError('fatal', {
-        de: 'Google Drive: Google-Dokument (Export noch nicht unterstützt)',
-        en: 'Google Drive: Google document (export not supported yet)',
-      });
-    }
+    // JD: "Filesize field will be 0 for Google Documents and given downloadUrl will be broken".
+    if (q.sizeBytes === 0) return resolveDocument(ctx, t, q.fileName, headers);
     const name = q.fileName;
     const size = q.sizeBytes && q.sizeBytes > 0 ? q.sizeBytes : undefined;
     const done = (url: string) => ({ url, name, size, headers, maxConnections: CONNECTIONS });
