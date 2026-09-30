@@ -43,6 +43,10 @@ struct HttpReq {
     #[serde(default = "yes")]
     follow_redirects: bool,
     timeout_ms: Option<u64>,
+    /// Read the answer as a page whatever its headers say (JD `getPage`/`postPage` always
+    /// load it): Drive's quick link check answers `application/binary` (2026-09-30).
+    #[serde(default)]
+    page: bool,
 }
 
 fn yes() -> bool {
@@ -293,7 +297,7 @@ async fn do_http(clients: &HttpClients, raw: &str) -> Result<HttpResp> {
             })
             .or_insert(v);
     }
-    if looks_like_file(resp.headers()) {
+    if !req.page && looks_like_file(resp.headers()) {
         return Ok(HttpResp {
             status,
             url,
@@ -1248,5 +1252,51 @@ mod empty_post_tests {
             assert!(head.starts_with("post /uc?id=x"), "{head}");
             assert!(head.contains("\r\ncontent-length: 0\r\n"), "{head}");
         }
+    }
+    /// A binary answer is a file unless the plugin wants the page (Drive's quick link check
+    /// comes as `application/binary` after a 307, 2026-09-30).
+    #[tokio::test]
+    async fn page_option_reads_a_binary_answer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut s, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 4096];
+                let _ = s.read(&mut buf).await.unwrap();
+                let body = ")]}'\n{\"fileName\":\"a.bin\"}";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/binary\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                );
+                s.write_all(head.as_bytes()).await.unwrap();
+                s.write_all(body.as_bytes()).await.unwrap();
+            }
+        });
+        let clients = HttpClients {
+            follow: Client::new(),
+            no_follow: Client::new(),
+            jar: None,
+        };
+        let url = format!("http://{addr}/uc");
+        let file = do_http(
+            &clients,
+            &format!(r#"{{"method":"POST","url":"{url}","body":""}}"#),
+        )
+        .await
+        .unwrap();
+        assert!(file.file && file.body.is_empty());
+        let page = do_http(
+            &clients,
+            &format!(r#"{{"method":"POST","url":"{url}","body":"","page":true}}"#),
+        )
+        .await
+        .unwrap();
+        assert!(!page.file);
+        assert!(
+            page.body.ends_with(r#"{"fileName":"a.bin"}"#),
+            "{}",
+            page.body
+        );
     }
 }

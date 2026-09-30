@@ -17,6 +17,11 @@ export interface HttpOptions {
   form?: Record<string, string>;
   /** Raw body. */
   body?: string;
+  /**
+   * Read the answer as a page, whatever its headers say (like JD's getPage/postPage). By
+   * default an attachment or a binary content type counts as a file and its body is not read.
+   */
+  page?: boolean;
 }
 
 export interface HttpRequest extends HttpOptions {

@@ -361,8 +361,11 @@ async function quickCheck(ctx: Ctx, id: string, resourceKey: string | undefined,
   if (resourceKey) q.push(`resourcekey=${encodeURIComponent(resourceKey)}`);
   // JD: "authuser=0 also for logged-in users!"
   q.push('authuser=0', 'export=download');
+  // JD postPage reads the answer whatever it says it is: after a 307 to
+  // drive.usercontent.google.com it comes as application/binary (2026-09-30).
   const res = await ctx.http.post(`https://drive.google.com/uc?${q.join('&')}`, '', {
     headers: { ...headers, 'X-Drive-First-Party': 'DriveViewer' },
+    page: true,
   });
   if (res.status === 404) throw new OfflineError({ de: 'Google Drive: Datei nicht gefunden', en: 'Google Drive: file not found' });
   if (res.status === 403) throw privateError(ctx, 'file');

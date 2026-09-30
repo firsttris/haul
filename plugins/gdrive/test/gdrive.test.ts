@@ -65,6 +65,18 @@ describe('google drive check and download', () => {
     expect(confirmUrl('<p>nothing</p>', 'https://drive.google.com/')).toBeUndefined();
   });
 
+  it('reads the quick check as a page: it comes as an attachment (2026-09-30)', async () => {
+    // The answer after the 307 to drive.usercontent.google.com, as curl showed it:
+    // content-disposition: attachment; filename="json.txt".
+    const ctx = fakeCtx({
+      [QUICK]: (req) => {
+        expect(req.page).toBe(true);
+        return { body: `)]}'\n{"scanResult":"ERROR","disposition":"QUOTA_EXCEEDED"}`, url: 'https://drive.usercontent.google.com/uc?id=x' };
+      },
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 3600 });
+  });
+
   it('maps quota, infected, restricted and private files like JD', async () => {
     const run = (data: object) => plugin.resolve(LINK, fakeCtx({ [QUICK]: quick(data) }));
     await expect(run({ scanResult: 'ERROR', disposition: 'QUOTA_EXCEEDED' })).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 3600 });

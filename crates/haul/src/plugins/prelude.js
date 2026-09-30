@@ -30,6 +30,7 @@
       headers: toHeaderMap(opts.headers),
       followRedirects: opts.followRedirects !== false,
       timeoutMs: opts.timeoutMs || 60000,
+      page: opts.page === true,
     };
     if (opts.json !== undefined) req.json = opts.json;
     else if (opts.form !== undefined) req.form = toHeaderMap(opts.form);
