@@ -1,0 +1,15 @@
+{
+  "name": "@haul/extension",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "description": "Send links to Haul: right-click menu and Click'n'Load in the browser",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.4"
+  }
+}

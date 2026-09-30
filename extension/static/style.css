@@ -1,0 +1,52 @@
+:root {
+  color-scheme: dark;
+  --bg: #14171a;
+  --panel: #1b1f23;
+  --line: #2a3036;
+  --text: #e8eaed;
+  --muted: #9aa3ab;
+  --accent: #f0a43a;
+  --ok: #34d399;
+  --bad: #f87171;
+  font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
+h1 img { width: 28px; height: 28px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; }
+p { margin: 0 0 10px; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+label { display: block; font-weight: 600; margin: 14px 0 6px; }
+input[type='text'], input[type='url'], input[type='password'], textarea {
+  width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font: inherit;
+}
+textarea { resize: vertical; min-height: 90px; font-family: ui-monospace, monospace; font-size: 12px; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; margin: 12px 0; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+button {
+  font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #14171a; }
+button:disabled { opacity: 0.5; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.status { margin-top: 12px; min-height: 20px; font-size: 13px; }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--bad); }
+
+/* Options page */
+.page { max-width: 620px; margin: 40px auto; padding: 0 20px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 20px; }
+
+/* Popup */
+.popup { width: 360px; padding: 16px; }
+.popup header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.popup h1 { font-size: 16px; }
+.popup .stats { font-size: 12px; color: var(--muted); }
+.popup .row button { flex: 1; }
+.popup footer { display: flex; justify-content: space-between; margin-top: 14px; font-size: 12px; }

@@ -35,6 +35,8 @@ type CnlCheck = { ok: boolean; text: string } | null;
 
 /** Checks from *this* browser whether something answers on 127.0.0.1:9666, like a web page would. */
 async function checkCnl(t: Messages): Promise<CnlCheck> {
+  // The extension answers Click'n'Load inside the page and sets `jdownloader` like jdcheck.js.
+  if ((window as { jdownloader?: unknown }).jdownloader === true) return { ok: true, text: t.settings.cnlExtension };
   try {
     const res = await fetch('http://127.0.0.1:9666/jdcheck.js', { cache: 'no-store' });
     const body = await res.text();

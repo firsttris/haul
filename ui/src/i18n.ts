@@ -187,6 +187,7 @@ const de = {
     packageAria: (name: string) => `Paket ${name}`,
     target: 'Zielordner',
     manual: 'manuell',
+    extension: 'Browser-Erweiterung',
     from: 'von',
     withPassword: 'mit Passwort',
     offline: (n: number) => `${n} offline`,
@@ -272,9 +273,10 @@ const de = {
     languageHelp: 'Gilt für diesen Browser, auch für Meldungen von Server und Hostern.',
     cnlTitle: "Click'n'Load vom Desktop",
     cnlIntroA: 'Webseiten schicken Links an',
-    cnlIntroB: 'des Browser-Rechners. Dort leitet',
-    cnlIntroC: 'sie mit einem API-Token an diesen Server weiter. Empfangene Links landen im Linksammler.',
-    tokenOnce: 'Token nur jetzt sichtbar. Kopieren und in haul-cnl eintragen:',
+    cnlIntroB:
+      'des Browser-Rechners. Die Browser-Erweiterung von Haul fängt sie ab und schickt sie mit einem API-Token an diesen Server; ohne Erweiterung leitet',
+    cnlIntroC: 'sie weiter. Empfangene Links landen im Linksammler.',
+    tokenOnce: 'Token nur jetzt sichtbar. Kopieren und in die Browser-Erweiterung oder haul-cnl eintragen:',
     tokenSet: 'Ein Token ist gesetzt. Ein neues ersetzt das alte.',
     tokenNone: 'Noch kein Token erstellt.',
     sshComment: '# Zum Testen ohne haul-cnl:',
@@ -284,9 +286,10 @@ const de = {
     cnlOther: (status: number) => `Auf Port 9666 antwortet etwas anderes als Haul (HTTP ${status}).`,
     cnlForwarder: 'Port 9666 erreichbar: haul-cnl läuft und leitet an den Server weiter.',
     cnlLocal: 'Port 9666 erreichbar: Haul selbst lauscht auf diesem Rechner.',
+    cnlExtension: "Die Browser-Erweiterung von Haul übernimmt Click'n'Load in diesem Browser.",
     cnlUnreachable:
       'Port 9666 ist von diesem Browser aus nicht erreichbar. Läuft Haul auf einem anderen Rechner, ' +
-      'auf diesem Rechner haul-cnl starten (oder den SSH-Tunnel). Fragt der Browser nach Zugriff aufs lokale Netzwerk, erlauben.',
+      'die Browser-Erweiterung installieren oder auf diesem Rechner haul-cnl starten (oder den SSH-Tunnel). Fragt der Browser nach Zugriff aufs lokale Netzwerk, erlauben.',
     loginTitle: 'Zugang',
     currentPassword: 'Aktuelles Passwort',
     newPassword: 'Neues Passwort',
@@ -518,6 +521,7 @@ const en: Messages = {
     packageAria: (name) => `Package ${name}`,
     target: 'Target folder',
     manual: 'manual',
+    extension: 'browser extension',
     from: 'from',
     withPassword: 'with password',
     offline: (n) => `${n} offline`,
@@ -602,9 +606,10 @@ const en: Messages = {
     languageHelp: 'Applies to this browser, including messages from the server and hosters.',
     cnlTitle: "Click'n'Load from the desktop",
     cnlIntroA: 'Web pages send links to',
-    cnlIntroB: 'on the browser’s machine. There',
-    cnlIntroC: 'forwards them to this server with an API token. Received links land in the link grabber.',
-    tokenOnce: 'The token is shown only now. Copy it into haul-cnl:',
+    cnlIntroB:
+      'on the browser’s machine. Haul’s browser extension catches them and sends them to this server with an API token; without the extension,',
+    cnlIntroC: 'forwards them. Received links land in the link grabber.',
+    tokenOnce: 'The token is shown only now. Copy it into the browser extension or haul-cnl:',
     tokenSet: 'A token is set. A new one replaces it.',
     tokenNone: 'No token created yet.',
     sshComment: '# For testing without haul-cnl:',
@@ -614,9 +619,10 @@ const en: Messages = {
     cnlOther: (status) => `Something other than Haul answers on port 9666 (HTTP ${status}).`,
     cnlForwarder: 'Port 9666 reachable: haul-cnl is running and forwards to the server.',
     cnlLocal: 'Port 9666 reachable: Haul itself listens on this machine.',
+    cnlExtension: "Haul’s browser extension handles Click'n'Load in this browser.",
     cnlUnreachable:
-      'Port 9666 is not reachable from this browser. If Haul runs on another machine, start haul-cnl ' +
-      '(or the SSH tunnel) on this one. If the browser asks for access to the local network, allow it.',
+      'Port 9666 is not reachable from this browser. If Haul runs on another machine, install the browser extension ' +
+      'or start haul-cnl (or the SSH tunnel) on this one. If the browser asks for access to the local network, allow it.',
     loginTitle: 'Login',
     currentPassword: 'Current password',
     newPassword: 'New password',

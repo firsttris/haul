@@ -9,6 +9,7 @@
     "dev:ui": "pnpm --filter @haul/ui dev",
     "build": "pnpm build:plugins && pnpm --filter @haul/ui build",
     "build:plugins": "node scripts/build-plugins.mjs",
+    "build:extension": "pnpm --filter @haul/extension build",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck"
   },
