@@ -1303,6 +1303,78 @@ mod engine_tests {
     /// A free download server that allows one connection at a time and answers every other one
     /// with 503 (fileq.net, 2026-09): the download plans 4 segments, but the refused ones wait
     /// for a free slot instead of failing the download (whose link may have cost a captcha).
+    /// With debug logging, a plugin that fails ("direct link not found") leaves the hoster's pages
+    /// it got in the tmp folder, so one can see what the hoster sent.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_plugin_leaves_its_pages_with_debug_logging() {
+        // Global, so the plugin runtime's threads see it too (other tests only log more).
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::fmt()
+                .with_env_filter("haul=debug")
+                .with_test_writer()
+                .finish(),
+        );
+        let app = axum::Router::new()
+            .route(
+                "/f/abc",
+                get(|| async { "<html><form id=\"downloadForm\">step one</form></html>" }),
+            )
+            .route(
+                "/f/abc/next",
+                axum::routing::post(|| async { "<html>step two, no link</html>" }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let hoster = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let code = format!(
+            r#"var __plugin = {{ default: {{ id: "pg", version: 1, matches: [/https?:\/\/pg\.test\//],
+                async resolve(link, ctx) {{
+                    await ctx.http.get("{hoster}/f/abc");
+                    await ctx.http.post("{hoster}/f/abc/next", "op=download1");
+                    throw new Error("direct link not found");
+                }},
+            }}}};"#
+        );
+        std::fs::write(plugin_dir.join("pg.js"), code).unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://pg.test/f/abc".into(),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        let (one, two) = (
+            dir.path().join(format!("tmp/{id}.plugin-1.html")),
+            dir.path().join(format!("tmp/{id}.plugin-2.html")),
+        );
+        for _ in 0..200 {
+            if two.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let first = std::fs::read_to_string(&one).unwrap();
+        assert!(
+            first.starts_with(&format!("<!-- GET 200 {hoster}/f/abc -->")),
+            "{first}"
+        );
+        assert!(first.contains("step one"));
+        let second = std::fs::read_to_string(&two).unwrap();
+        assert!(
+            second.starts_with("<!-- POST 200 ") && second.contains("step two"),
+            "{second}"
+        );
+        e.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn refused_connections_wait_for_a_free_one() {
         struct Slot(Arc<std::sync::atomic::AtomicUsize>);

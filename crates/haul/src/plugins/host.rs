@@ -49,6 +49,62 @@ fn yes() -> bool {
     true
 }
 
+/// A page a plugin received from the hoster (only recorded with debug logging on).
+#[derive(Debug, Clone)]
+pub struct RecordedPage {
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+    pub body: String,
+}
+
+/// How many pages of a call are kept, and how much of each.
+const KEEP_PAGES: usize = 8;
+const PAGE_MAX: usize = 1024 * 1024;
+
+type PageLog = std::collections::VecDeque<RecordedPage>;
+
+/// The last pages of the latest call per plugin and link, while debug logging is on: when a
+/// download fails inside the plugin (e.g. "direct link not found"), the worker saves them, so
+/// one sees what the hoster sent without guessing.
+static PAGES: std::sync::LazyLock<std::sync::Mutex<HashMap<String, PageLog>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn page_key(plugin_id: &str, link: &str) -> String {
+    format!("{plugin_id} {link}")
+}
+
+/// The pages recorded for the latest call of `plugin_id` on `link` (and forgets them).
+pub fn take_pages(plugin_id: &str, link: &str) -> Vec<RecordedPage> {
+    PAGES
+        .lock()
+        .unwrap()
+        .remove(&page_key(plugin_id, link))
+        .map(Vec::from)
+        .unwrap_or_default()
+}
+
+fn record_page(key: &str, method: &str, resp: &HttpResp) {
+    if resp.file || !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+    let mut body = resp.body.clone();
+    if body.len() > PAGE_MAX {
+        body.truncate(body.floor_char_boundary(PAGE_MAX));
+    }
+    let mut pages = PAGES.lock().unwrap();
+    let log = pages.entry(key.to_string()).or_default();
+    if log.len() == KEEP_PAGES {
+        log.pop_front();
+    }
+    log.push_back(RecordedPage {
+        method: method.to_string(),
+        url: resp.url.clone(),
+        status: resp.status,
+        body,
+    });
+}
+
 #[derive(Serialize)]
 struct HttpResp {
     status: u16,
@@ -415,20 +471,30 @@ async fn invoke_inner(
     let code = code.to_string();
     let method = method.to_string();
     let plugin_id = plugin_id.to_string();
+    // Pages are kept per plugin and link (the call's first argument), for the latest call.
+    let page_key = page_key(
+        &plugin_id,
+        args.get(0).and_then(|a| a.as_str()).unwrap_or(""),
+    );
+    PAGES.lock().unwrap().remove(&page_key);
     let args = args.to_string();
     let env = env.to_string();
     let clients = Arc::new(clients);
     let out = async_with!(ctx => |ctx| {
         let setup = || -> rquickjs::Result<Promise> {
             let g = ctx.globals();
-            let c = clients.clone();
+            let (c, key) = (clients.clone(), page_key.clone());
             g.set(
                 "__host_http",
                 Func::from(Async(move |req: String| {
-                    let c = c.clone();
+                    let (c, key) = (c.clone(), key.clone());
                     async move {
                         match do_http(&c, &req).await {
-                            Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                            Ok(r) => {
+                                let method = serde_json::from_str::<HttpReq>(&req).map(|q| q.method).unwrap_or_default();
+                                record_page(&key, &method, &r);
+                                serde_json::to_string(&r).unwrap_or_default()
+                            }
                             Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
                         }
                     }

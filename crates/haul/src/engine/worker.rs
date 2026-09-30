@@ -270,6 +270,38 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
     Ok(())
 }
 
+/// Writes the pages a failed plugin call received to `<tmp>/<id>.plugin-<n>.html`, each with
+/// method, status and URL in a comment on top, like the page a direct link gave instead of the
+/// file.
+async fn save_plugin_pages(
+    engine: &Engine,
+    id: i64,
+    pages: &[crate::plugins::host::RecordedPage],
+    error: &crate::plugins::PluginError,
+) {
+    if pages.is_empty() {
+        return;
+    }
+    let _ = tokio::fs::create_dir_all(&engine.cfg.tmp_dir).await;
+    let mut files = Vec::new();
+    for (n, p) in pages.iter().enumerate() {
+        let file = engine
+            .cfg
+            .tmp_dir
+            .join(format!("{id}.plugin-{}.html", n + 1));
+        let text = format!("<!-- {} {} {} -->\n{}", p.method, p.status, p.url, p.body);
+        if tokio::fs::write(&file, text).await.is_ok() {
+            files.push(file.display().to_string());
+        }
+    }
+    tracing::debug!(
+        id,
+        error = %crate::i18n::pick(&error.message, true),
+        "plugin failed; the hoster's pages it got: {}",
+        files.join(", ")
+    );
+}
+
 async fn cancellable<T>(
     cancel: &CancellationToken,
     fut: impl std::future::Future<Output = T>,
@@ -330,6 +362,11 @@ async fn execute(
             .await?;
             if let Some(a) = &acc {
                 engine.save_session(&plugin.id, a.id).await;
+            }
+            // Debug logging: the pages the plugin got from the hoster, saved when it failed.
+            let pages = crate::plugins::host::take_pages(&plugin.id, &d.url);
+            if let Err(e) = &r {
+                save_plugin_pages(engine, id, &pages, e).await;
             }
             // Entered or rejected, whatever the call's outcome (JD: setDownloadPassword).
             if let Some(p) = password.changed() {

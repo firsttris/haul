@@ -106,7 +106,7 @@ Dann `http://server:8080` öffnen und beim ersten Aufruf den Benutzer anlegen (o
 | `HAUL_USER`, `HAUL_PASSWORD` | – | legt den Login beim ersten Start an |
 | `HAUL_USER_AGENT` | Desktop-Browser | User-Agent gegenüber Hostern |
 | `HAUL_7Z`, `HAUL_UNRAR` | `7z`, `unrar` | Programme zum Entpacken |
-| `RUST_LOG` | `info` | Log-Level |
+| `RUST_LOG` | `info` | Log-Level; mit `haul=debug` speichert Haul bei Hoster-Problemen die Seiten im tmp-Ordner: `<id>.page.html` (Seite statt Datei), `<id>.plugin-<n>.html` (die letzten Seiten eines gescheiterten Plugin-Aufrufs) |
 
 ## Captchas
 
