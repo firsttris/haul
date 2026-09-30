@@ -106,8 +106,10 @@ fn vint(b: &[u8], at: usize) -> Option<(u64, usize)> {
 
 /// Whether the RAR file says another volume follows: its end-of-archive block, the last block of
 /// every volume, has the flag "not last volume" (RAR5: end of archive flag 0x0001; RAR 2.9–4:
-/// ENDARC_HEAD flag 0x0001, "archive continues in next volume"; rarlab technote). `None` when it
-/// is no RAR or the block is not found with a matching checksum, so nothing is assumed then.
+/// ENDARC_HEAD flag 0x0001, "archive continues in next volume"; rarlab technote). Some bytes
+/// may follow the block (a RAR5 part01 of 2026-09-30 has 7 more, 7-Zip's "Tail Size = 7"), so
+/// it is searched in the file's last bytes: the one nearest the end with a matching checksum.
+/// `None` when it is no RAR or no such block is there, so nothing is assumed then.
 fn rar_continues(path: &Path) -> Option<bool> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
@@ -125,23 +127,26 @@ fn rar_continues(path: &Path) -> Option<bool> {
     let end = tail.len();
     if rar5 {
         // CRC32 (4 bytes), header size (vint), then type 5, header flags, end of archive flags;
-        // the CRC covers everything from the header size on.
+        // the CRC covers the header from its size field to its end.
         for p in (0..end.saturating_sub(7)).rev() {
             let Some((size, size_len)) = vint(&tail, p + 4) else {
                 continue;
             };
             let body = p + 4 + size_len;
-            if body as u64 + size != end as u64 {
+            let Some(head_end) = usize::try_from(size).ok().and_then(|s| body.checked_add(s))
+            else {
+                continue;
+            };
+            if size < 3 || head_end > end {
                 continue;
             }
             let crc = u32::from_le_bytes(tail[p..p + 4].try_into().ok()?);
-            if crc32fast::hash(&tail[p + 4..]) != crc {
+            if crc32fast::hash(&tail[p + 4..head_end]) != crc {
                 continue;
             }
-            let (kind, l1) = vint(&tail, body)?;
-            if kind != 5 {
-                return None;
-            }
+            let Some((5, l1)) = vint(&tail, body) else {
+                continue;
+            };
             let (flags, l2) = vint(&tail, body + l1)?;
             let mut at = body + l1 + l2;
             if flags & 0x0001 != 0 {
@@ -150,21 +155,25 @@ fn rar_continues(path: &Path) -> Option<bool> {
             if flags & 0x0002 != 0 {
                 at += vint(&tail, at)?.1; // data size
             }
+            if at >= head_end {
+                return None;
+            }
             return Some(vint(&tail, at)?.0 & 0x0001 != 0);
         }
         None
     } else {
-        // HEAD_CRC (2), HEAD_TYPE 0x7b, HEAD_FLAGS (2), HEAD_SIZE (2) and optional fields; the
-        // CRC is the low half of the CRC32 from HEAD_TYPE on.
-        for size in 7..=end.min(13) {
-            let p = end - size;
-            if tail[p + 2] != 0x7b
-                || u16::from_le_bytes([tail[p + 5], tail[p + 6]]) as usize != size
-            {
+        // HEAD_CRC (2), HEAD_TYPE 0x7b, HEAD_FLAGS (2), HEAD_SIZE (2, 7 to 13 with the optional
+        // fields); the CRC is the low half of the CRC32 of the header from HEAD_TYPE on.
+        for p in (0..end.saturating_sub(6)).rev() {
+            if tail[p + 2] != 0x7b {
+                continue;
+            }
+            let size = u16::from_le_bytes([tail[p + 5], tail[p + 6]]) as usize;
+            if !(7..=13).contains(&size) || p + size > end {
                 continue;
             }
             let crc = u16::from_le_bytes([tail[p], tail[p + 1]]);
-            if crc32fast::hash(&tail[p + 2..]) as u16 != crc {
+            if crc32fast::hash(&tail[p + 2..p + size]) as u16 != crc {
                 continue;
             }
             return Some(u16::from_le_bytes([tail[p + 3], tail[p + 4]]) & 0x0001 != 0);
@@ -1236,6 +1245,23 @@ mod tests {
         assert_eq!(rar_continues(&at("c", rar4(true, None))), Some(true));
         assert_eq!(rar_continues(&at("d", rar4(false, Some(3)))), Some(false));
         assert_eq!(rar_continues(&at("e", rar4(true, Some(0)))), Some(true));
+        // The end of a real part01 (2026-09-30): the block, then 7 more bytes.
+        let mut real = b"Rar!\x1a\x07\x01\x00".to_vec();
+        real.extend([
+            0x3b, 0x85, 0xa8, 0xa0, 0x98, 0x7c, 0x0a, 0x03, 0x02, 0x80, 0xea, 0xf9, 0xc7, 0xf8,
+            0x4b, 0xdd, 0x01, 0x8b, 0x47, 0x51, 0x26, 0x03, 0x05, 0x04, 0x01, 0x00, 0x00, 0x00,
+            0x00, 0xd9, 0xac, 0xb5,
+        ]);
+        assert_eq!(rar_continues(&at("real", real.clone())), Some(true));
+        // The same as the last volume: flag 0, with its checksum.
+        let n = real.len();
+        real[n - 8] = 0x00;
+        let crc = crc32fast::hash(&real[n - 11..n - 7]).to_le_bytes();
+        real[n - 15..n - 11].copy_from_slice(&crc);
+        assert_eq!(rar_continues(&at("real-last", real)), Some(false));
+        let mut r4 = rar4(true, None);
+        r4.extend([0u8; 5]);
+        assert_eq!(rar_continues(&at("r4-tail", r4)), Some(true));
         // A wrong checksum, no end block or no RAR at all: nothing is assumed.
         let mut bad = rar5(true);
         let n = bad.len();
