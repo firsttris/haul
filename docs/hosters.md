@@ -1,7 +1,6 @@
 # Hosters
 
-Every hoster is a plugin. The built-in ones follow JDownloader's plugins (the source is cited in each
-plugin), with pyLoad as a cross-check. Direct HTTP(S) links work without a plugin.
+Every hoster is a plugin. Direct HTTP(S) links work without a plugin.
 
 - [Supported hosters](#supported-hosters)
 - [Accounts](#accounts)
@@ -9,7 +8,6 @@ plugin), with pyLoad as a cross-check. Direct HTTP(S) links work without a plugi
 - [Password-protected files](#password-protected-files)
 - [Checksums](#checksums)
 - [Waits and limits](#waits-and-limits)
-- [Cloudflare](#cloudflare)
 
 ## Supported hosters
 
@@ -18,7 +16,7 @@ plugin), with pyLoad as a cross-check. Direct HTTP(S) links work without a plugi
 | 1fichier | ✅ waits between downloads | API key, no waits | ✅ |
 | Datanodes | ✅ Turnstile in the browser | account login | – |
 | ddownload | – | premium login or API key | – |
-| FileQ | ✅ reads the text captcha itself | premium login | – |
+| FileQ | ✅ text captcha | premium login | – |
 | Filekeeper | ✅ reCaptcha in the browser | premium login | – |
 | Gofile | ✅ guest token | API token | ✅ |
 | Google Drive | ✅ public files | browser cookies: private files, fewer quota problems | ✅ |
@@ -47,12 +45,12 @@ Passwords are stored encrypted with `APP_SECRET`. The page shows the account typ
 remaining traffic where the hoster tells them. With several accounts for a hoster, Haul takes the one
 with the most traffic left; accounts the hoster rejected are skipped.
 
-**XFileSharing sites with a login captcha** (ddownload's login has Turnstile): either solve it in the
+**XFileSharing sites with a login captcha** (ddownload's login has Turnstile): solve it in the
 browser with the [userscript](captchas.md), or log in once in your browser and enter its `xfss` cookie
 as the password: `xfss=…`.
 
-**Google Drive** does not allow a password login for programs. Like JDownloader, Haul uses the
-cookies of a browser that is logged in to drive.google.com: export them with an extension such as
+**Google Drive** accounts are added with the cookies of a browser that is logged in to
+drive.google.com: export them with an extension such as
 Cookie-Editor (JSON, `cookies.txt` or a `Cookie: …` line) and paste them into the password field. An
 optional line `User-Agent: …` makes Haul use the same browser identity.
 
@@ -65,16 +63,13 @@ optional line `User-Agent: …` makes Haul use the same browser identity.
 - **MEGA**: the file arrives encrypted and is decrypted while it is saved (AES-CTR per segment, also
   when a download resumes). If the key is missing from the link, Haul asks for it like for a password.
   When the free transfer quota is used up, all MEGA downloads wait the time MEGA names.
-- **Mediafire**: name and size come from the API when a link is added. Mediafire's checkbox
-  "captcha" is confirmed automatically; at its IP limit Haul tries another User-Agent, like JDownloader.
+- **Mediafire**: name and size come from the API when a link is added.
 - **1fichier**: waits between downloads and for free slots are waited out without counting as failed
   attempts.
-- **Gofile without account**: requests go one after the other and the direct link of a folder is
-  reused, to stay under the guest rate limit.
-- **Datanodes**: the page's own script sends the last step with special headers; Haul does the same.
-- **ddownload**: covers both ways JDownloader and pyLoad use, the web login with the premium form and
-  the XFileSharing API with an API key. It is tested against recorded pages, not yet against a real
-  premium account.
+- **Gofile without account**: Haul keeps its requests few and respects the guest rate limit; when it
+  is reached, all Gofile downloads wait.
+- **ddownload**: web login with a premium account, or the XFileSharing API with an API key. It is
+  tested against recorded pages, not yet against a real premium account.
 
 ## Password-protected files
 
@@ -92,8 +87,7 @@ FileQ, Filekeeper).
 
 ## Checksums
 
-Where the hoster publishes a checksum, Haul verifies the file after the download, like JDownloader's
-"CRC OK": Google Drive (SHA-256/MD5), Gofile (MD5), Mediafire (SHA-256), Send (SHA-256) and MEGA (the
+Where the hoster publishes a checksum, Haul verifies the file after the download: Google Drive (SHA-256/MD5), Gofile (MD5), Mediafire (SHA-256), Send (SHA-256) and MEGA (the
 MAC in the key). A match shows "verified" next to the file. A mismatch downloads the file once
 more and then reports "checksum wrong". One check runs at a time; checks can be turned off under
 **Settings**.
@@ -107,11 +101,5 @@ more and then reports "checksum wrong". One check runs at a time; checks can be 
 - Free downloads use one connection per file where hosters refuse more. Premium downloads use up to
   **Settings → Connections per file**.
 - Other errors are retried with a growing pause, up to **Settings → Retries**.
-
-## Cloudflare
-
-Sites behind Cloudflare's site protection (for example megaup.net) cannot be reached by download
-managers; JDownloader and pyLoad fail there too. Support through
-[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) is planned.
 
 Missing a hoster? Plugins are small TypeScript files, see [Plugins](plugins.md).

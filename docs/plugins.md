@@ -54,7 +54,7 @@ Optional:
 | `ctx.http.get/post/request` | HTTP with one cookie jar per account; the login survives between calls and restarts. Options: `headers`, `followRedirects`, `form`, `json`, `body`, `timeoutMs`, `page` (read the answer as a page even if its headers say it is a file). |
 | `ctx.cookies.get/set` | the jar directly |
 | `ctx.account.get()` | `{ id, user, secret }` or `null` |
-| `ctx.password.get()` | the download password; asks the user if none is stored. `withPassword(ctx, name, attempt)` wraps JD's three attempts. |
+| `ctx.password.get()` | the download password; asks the user if none is stored. `withPassword(ctx, name, attempt)` gives up to three attempts. |
 | `ctx.captcha.solve(...)` | see [Captchas](captchas.md) |
 | `ctx.wait(seconds)` | a countdown |
 | `ctx.hash.sha256`, `ctx.crypto.*` | hashing and AES (for MEGA) |
@@ -72,8 +72,7 @@ Optional:
 
 ## XFileSharing sites
 
-Many hosters run XFileSharing Pro. `createXfsPlugin` from `@haul/plugin-sdk/xfs` does what JD's
-`XFileSharingProBasic` does: login, premium and free downloads (forms, countdown, captchas), errors and
+Many hosters run XFileSharing Pro. `createXfsPlugin` from `@haul/plugin-sdk/xfs` handles them: login, premium and free downloads (forms, countdown, captchas), errors and
 waits. ddownload is a few lines of configuration. Where a site differs, `freeHooks` (forms, countdown,
 direct link) and `headers` adapt it; see `plugins/datanodes` for a site with its own quirks.
 

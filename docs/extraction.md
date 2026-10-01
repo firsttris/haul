@@ -22,7 +22,7 @@ finds `7zz`, `7z`, `7za`, `unrar` and `unar` by itself; which ones it found is s
 
 ## Incomplete archives
 
-Like JDownloader, Haul does not extract an archive that is not complete:
+Haul does not extract an archive that is not complete:
 
 - a part is still downloading, even in another package of the same folder: the automatic start waits
   for it;

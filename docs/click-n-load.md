@@ -7,7 +7,7 @@ browser**. Haul runs on a server, so something on your desktop has to pass the l
 
 The [Haul browser extension](browser-extension.md) for Chrome and Firefox takes the Click'n'Load
 requests over inside the page and sends the links to Haul. Nothing else has to run on your
-computer, and the browser does not ask for access to the local network. It also adds
+computer. It also adds
 *Send to Haul* to the right-click menu.
 
 ## haul-cnl (for developers)

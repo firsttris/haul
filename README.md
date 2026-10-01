@@ -29,8 +29,7 @@ your browser shows it live.
 
 JDownloader has the best hoster support there is, but it is a Java desktop app; on a server it runs
 behind VNC or a cloud remote. pyLoad is made for servers, but many of its hoster plugins have fallen
-behind. Haul takes the hoster knowledge of JDownloader's plugins, source cited in every plugin, and
-puts it into one small container built for a home server:
+behind. Haul is one small container built for a home server:
 
 - **Headless from the start**: one Rust binary with an embedded web UI, no desktop, no VNC, no account
   in someone's cloud.
@@ -42,7 +41,7 @@ puts it into one small container built for a home server:
 
 - **Downloads**: parallel queue, segmented downloads over range requests, resume after restarts,
   retries with backoff, global bandwidth limit, live progress over Server-Sent Events
-- **Hosters like in JDownloader**: premium accounts, free downloads with countdowns and waits,
+- **Hoster support**: premium accounts, free downloads with countdowns and waits,
   folder links resolved into their files, hoster-wide limits respected
 - **Captchas**: simple ones solved by Haul, image captchas typed in the banner, reCaptcha, hCaptcha and
   Turnstile solved in your own browser through a userscript
@@ -159,8 +158,8 @@ all: see [writing plugins](docs/plugins.md). Please run `cargo test`, `cargo cli
 
 ## 📄 License
 
-[GPL-3.0-or-later](LICENSE). Hoster plugins closely follow JDownloader's GPL code, so the whole
-repository is under the GPLv3.
+[GPL-3.0-or-later](LICENSE). Parts of the hoster plugins are based on JDownloader's GPL code, so the
+whole repository is under the GPLv3.
 
 ---
 

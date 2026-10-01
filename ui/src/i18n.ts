@@ -94,7 +94,7 @@ const de = {
     title: 'Captchas',
     intro:
       'reCaptcha, hCaptcha und Turnstile gelten nur auf der Seite des Hosters. Haul öffnet sie deshalb in deinem Browser, ' +
-      'wo ein kleines Userscript das Captcha anzeigt und die Lösung an Haul zurückschickt (wie die Browser-Erweiterung von JDownloader).',
+      'wo ein kleines Userscript das Captcha anzeigt und die Lösung an Haul zurückschickt.',
     step1:
       'Tampermonkey oder Violentmonkey im Browser installieren (Brave: Chrome Web Store). ' +
       'In Chrome, Edge und Brave danach unter chrome://extensions → Details „Nutzerscripts zulassen“ einschalten, sonst läuft das Userscript nicht.',
@@ -261,7 +261,7 @@ const de = {
     archivePasswords: 'Archiv-Passwörter',
     archivePasswordsIntro:
       'Haul probiert diese Passwörter bei jedem geschützten Archiv durch, nach denen des Pakets. ' +
-      'Ein Passwort, das ein Archiv geöffnet hat, steht danach ganz oben (wie die Passwortliste von JDownloader).',
+      'Ein Passwort, das ein Archiv geöffnet hat, steht danach ganz oben.',
     archivePasswordsLabel: 'Ein Passwort pro Zeile',
     archivePasswordsCount: (n: number) => (n === 1 ? '1 Passwort' : `${n} Passwörter`),
     saved: 'Gespeichert.',
@@ -431,7 +431,7 @@ const en: Messages = {
     title: 'Captchas',
     intro:
       'reCaptcha, hCaptcha and Turnstile are only valid on the hoster’s own page. So Haul opens them in your browser, ' +
-      'where a small userscript shows the captcha and sends the answer back to Haul (like JDownloader’s browser extension).',
+      'where a small userscript shows the captcha and sends the answer back to Haul.',
     step1:
       'Install Tampermonkey or Violentmonkey in the browser (Brave: Chrome Web Store). ' +
       'In Chrome, Edge and Brave, then turn on “Allow user scripts” under chrome://extensions → Details, or the userscript does not run.',
@@ -596,7 +596,7 @@ const en: Messages = {
     archivePasswords: 'Archive passwords',
     archivePasswordsIntro:
       'Haul tries these passwords on every protected archive, after the package’s own. ' +
-      'A password that opened an archive moves to the top (like JDownloader’s password list).',
+      'A password that opened an archive moves to the top.',
     archivePasswordsLabel: 'One password per line',
     archivePasswordsCount: (n) => (n === 1 ? '1 password' : `${n} passwords`),
     saved: 'Saved.',

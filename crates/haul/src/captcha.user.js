@@ -2,7 +2,7 @@
 // @name         Haul Captcha
 // @namespace    https://github.com/firsttris/haul
 // @version      1
-// @description  Solves captchas for Haul on the hoster's own page, like JDownloader's browser solver.
+// @description  Solves captchas for Haul on the hoster's own page.
 // @match        *://*/*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest

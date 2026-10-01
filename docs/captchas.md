@@ -4,14 +4,14 @@ Haul handles three kinds of captchas.
 
 | Kind | Who solves it |
 |---|---|
-| Simple text captchas of XFileSharing sites (digits placed with CSS) | Haul reads them itself |
+| Simple text captchas of XFileSharing sites | Haul reads them itself |
 | Image captchas (XFileSharing `/captchas/…`) | You type the text in Haul's banner, no browser extension needed |
 | reCaptcha, hCaptcha, Cloudflare Turnstile | You, in your browser, with the userscript |
 
 ## The userscript
 
-reCaptcha, hCaptcha and Turnstile only work on the hoster's own page. Like JDownloader's browser
-solver, Haul lets your browser solve them on that page and takes the answer:
+reCaptcha, hCaptcha and Turnstile only work on the hoster's own page. Haul lets you solve them in your
+browser on that page and takes the answer:
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
 
@@ -36,7 +36,7 @@ never sent to the hoster. The task carries a one-time secret, so the answer only
 that asked for it.
 
 The same mechanism solves captchas on login pages, for example ddownload's Turnstile, so you do not need
-the `xfss` cookie workaround there.
+to enter the `xfss` cookie there.
 
 ## For plugin authors
 

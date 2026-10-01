@@ -55,11 +55,9 @@ browser** in Haul now says that the extension handles Click'n'Load.
 A Click'n'Load button makes the page send the links to `http://127.0.0.1:9666/flash/add` or
 `/flash/addcrypted2`, by a form, `fetch` or `XMLHttpRequest`. The extension takes these requests
 over inside the page, before the browser sends them, and passes their form fields to Haul's
-`/api/cnl/flash/…` with the API token. The page gets the `success` JDownloader would answer, and
-`window.jdownloader` is `true`, as JDownloader's `jdcheck.js` sets it.
+`/api/cnl/flash/…` with the API token, and the page gets the usual Click'n'Load answer.
 
-That is why the browser never asks for access to the local network: the request to `127.0.0.1`
-does not happen. Haul decrypts CNL2 as always, in its own QuickJS instance without host functions.
+Haul decrypts CNL2 as always, in its own QuickJS instance without host functions.
 
 With Click'n'Load turned off in the extension's settings, pages reach `127.0.0.1:9666` as before,
 so a local JDownloader or [`haul-cnl`](click-n-load.md#haul-cnl) still works.
