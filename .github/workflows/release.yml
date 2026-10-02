@@ -1,0 +1,31 @@
+name: Release
+
+# Pushing a tag vX.Y.Z publishes that version: the CI and the browser extension first, then the
+# shared Docker release from firsttris/workflows. It checks the tag against the version in
+# Cargo.toml, builds amd64 and arm64 each on its own native runner, pushes :x.y.z, :x.y and
+# :latest, updates the Docker Hub description and creates the GitHub release with the extension
+# ZIPs attached. Run by hand on main: the same checks, then the image as :edge, nothing is released.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  extension:
+    uses: ./.github/workflows/extension.yml
+
+  docker:
+    needs: [checks, extension]
+    uses: firsttris/workflows/.github/workflows/docker-release.yml@v1
+    with:
+      image: tristanteu/haul
+      description: Self-hosted download manager for file hosters, with web UI, plugins and auto-extract
+      version-file: Cargo.toml
+      release-artifact: haul-extension
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
