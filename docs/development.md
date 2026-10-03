@@ -96,10 +96,23 @@ All endpoints are under `/api` and speak JSON. Authentication with the session c
 
 ## Releases
 
-Pushing a tag `v*` builds the image for `linux/amd64` and `linux/arm64` and publishes it to Docker Hub
-as `tristanteu/haul` with the tags `latest`, `X.Y.Z` and `X.Y`. The repository needs the secret
-`DOCKER_PAT`, a Docker Hub access token with write access.
+A version is a tag that matches `version` in `Cargo.toml` (`[workspace.package]`): raise the version
+there, commit, then
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
+
+The tag push starts the *Release* workflow (CI and extension here, the rest from the shared
+[`docker-release.yml`](https://github.com/firsttris/workflows) in `firsttris/workflows`):
+
+1. the full CI and the browser extension build,
+2. the tag must match the version in `Cargo.toml`,
+3. the image is built for `linux/amd64` and `linux/arm64`, each on its own native runner (Rust under
+   QEMU takes too long), and published to Docker Hub as `tristanteu/haul` with the tags `X.Y.Z`,
+   `X.Y` and `latest`; the README becomes the Docker Hub description,
+4. only then the GitHub release with generated notes and the extension ZIPs for Chrome and Firefox.
+
+Started by hand on `main` (Actions → *Release* → Run workflow), the workflow runs the same checks and
+publishes the image as `edge`; nothing is released. The repository needs the secret `DOCKER_PAT`, a
+Docker Hub access token with write access.
