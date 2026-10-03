@@ -524,10 +524,7 @@ impl Engine {
         }
         let links = parse_links(&req.links);
         if links.is_empty() {
-            return Err(anyhow!(crate::tr!(
-                "keine gültigen Links gefunden",
-                "no valid links found"
-            )));
+            return Err(anyhow!(crate::msg!("server_links_noneValid")));
         }
         let names: Vec<String> = links
             .iter()
@@ -691,12 +688,12 @@ impl Engine {
                         .collect()
                 }
                 Ok(_) => vec![NewLink {
-                    error: Some(crate::tr!("Ordner ist leer", "Folder is empty")),
+                    error: Some(crate::msg!("server_links_folderEmpty")),
                     password: password.get(),
                     ..NewLink::keep(&d)
                 }],
                 Err(e) => {
-                    tracing::warn!(url = %d.url, "crawl: {}", crate::i18n::pick(&e.message, false));
+                    tracing::warn!(url = %d.url, "crawl: {}", crate::i18n::plain(&e.message));
                     vec![NewLink {
                         online: if e.kind == ErrorKind::Offline {
                             "offline"
@@ -913,13 +910,13 @@ impl Engine {
     /// Linksammler. All of them checked (or a package already started): the whole package.
     /// Returns the package that was started.
     pub async fn start_selected(&self, id: i64, only: &[i64]) -> Result<i64> {
-        let pkg = db::get_package(&self.db, id).await?.ok_or_else(|| {
-            anyhow::anyhow!(crate::tr!("Paket nicht gefunden", "Package not found"))
-        })?;
+        let pkg = db::get_package(&self.db, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!(crate::msg!("server_package_notFound")))?;
         let all = self.package_ids(id).await?;
         let chosen: Vec<i64> = all.iter().copied().filter(|d| only.contains(d)).collect();
         if chosen.is_empty() {
-            anyhow::bail!(crate::tr!("keine Datei ausgewählt", "no file selected"));
+            anyhow::bail!(crate::msg!("server_package_noFileSelected"));
         }
         if chosen.len() == all.len() || !pkg.collector {
             self.start_package(id).await?;
@@ -1496,6 +1493,7 @@ mod engine_tests {
         for _ in 0..100 {
             let d = db::get_download(&e.db, ids[1]).await.unwrap().unwrap();
             if let Some(err) = d.error {
+                let err = crate::i18n::german(&err);
                 assert!(err.contains("Webseite statt der Datei"), "{err}");
                 assert!(err.contains("Link expired"), "{err}");
                 assert_ne!(d.status, status::FINISHED);
@@ -2378,7 +2376,7 @@ mod engine_tests {
         // Started by hand it says so.
         let err = e.extract_package(first).await.unwrap_err().to_string();
         assert!(
-            crate::i18n::pick(&err, false).contains("noch nicht heruntergeladen: Game.part02.rar"),
+            crate::i18n::german(&err).contains("noch nicht heruntergeladen: Game.part02.rar"),
             "{err}"
         );
 
@@ -2391,7 +2389,7 @@ mod engine_tests {
         e.clone().on_download_finished(first).await;
         let pkg = db::get_package(&e.db, first).await.unwrap().unwrap();
         assert_eq!(pkg.extract.as_deref(), Some("failed"));
-        let msg = crate::i18n::pick(pkg.extract_error.as_deref().unwrap(), false);
+        let msg = crate::i18n::german(pkg.extract_error.as_deref().unwrap());
         assert!(
             msg.contains("Archiv unvollständig, es fehlt: Game.part02.rar"),
             "{msg}"
@@ -2515,7 +2513,7 @@ mod engine_tests {
         let c = package("c", None).await;
         let err = e.extract_package(c).await.unwrap_err().to_string();
         assert!(
-            crate::i18n::pick(&err, false).contains("Archiv-Passwörter"),
+            crate::i18n::german(&err).contains("Archiv-Passwörter"),
             "{err}"
         );
         assert!(captchas.list().is_empty());

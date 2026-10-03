@@ -447,7 +447,7 @@ pub async fn invoke_with(
                 if *deadline.lock().unwrap() <= tokio::time::Instant::now() {
                     return Err(PluginError {
                         kind: ErrorKind::Temporary,
-                        message: crate::tr!("Plugin-Zeitlimit überschritten", "plugin timed out"),
+                        message: crate::msg!("server_plugin_timeout"),
                         wait_secs: None,
                         hoster_wide: false,
                     });

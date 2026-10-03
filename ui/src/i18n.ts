@@ -1,690 +1,20 @@
 /**
- * UI texts in German and English. `de` defines the shape; `en` must match it (checked by tsc).
- * The language is the one picked in the UI (kept in localStorage), else the browser's.
+ * The interface language. The texts live in messages/{de,en}.json and are compiled by Paraglide
+ * to src/paraglide: components call them directly (m.settings_title()). The language is the one
+ * picked in the UI (kept in localStorage), else the browser's; a change reloads the page.
+ *
+ * The server sends its messages as keys with their inputs, `\u0002["key",{…}]\u0003`, possibly
+ * inside other text (see crates/haul/src/i18n.rs); localize() renders them. Plugins and entries
+ * stored by older versions carry both texts instead: `\u0002` de `\u001f` en `\u0003`.
  */
-import { useSyncExternalStore } from 'react';
+import * as m from './paraglide/messages';
+import { overwriteGetLocale } from './paraglide/runtime';
 
 export type Lang = 'de' | 'en';
 export const LANGS: { id: Lang; label: string }[] = [
   { id: 'de', label: 'Deutsch' },
   { id: 'en', label: 'English' },
 ];
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-const de = {
-  locale: 'de-DE',
-  common: {
-    cancel: 'Abbrechen',
-    save: 'Speichern',
-    add: 'Hinzufügen',
-    name: 'Name',
-    size: 'Größe',
-    status: 'Status',
-    user: 'Benutzer',
-    password: 'Passwort',
-    remove: (name: string) => `${name} entfernen`,
-    pause: (name: string) => `${name} pausieren`,
-    resume: (name: string) => `${name} fortsetzen`,
-    files: (n: number) => plural(n, 'Datei', 'Dateien'),
-    links: (n: number) => plural(n, 'Link', 'Links'),
-  },
-  app: {
-    serverUnreachable: (msg: string) => `Server nicht erreichbar: ${msg}`,
-  },
-  nav: {
-    main: 'Hauptnavigation',
-    downloads: 'Downloads',
-    collector: 'Linksammler',
-    done: 'Fertig',
-    accounts: 'Accounts & Plugins',
-    settings: 'Einstellungen',
-    storageAria: 'Speicherplatz',
-    storage: 'Speicher',
-    connected: (host: string) => `${host} verbunden`,
-    disconnected: 'Verbindung getrennt',
-    language: 'Sprache',
-  },
-  /** Names of the disks in the storage box, by the server's id. */
-  disks: { tmp: 'tmp', fertig: 'fertig' } as Record<string, string>,
-  status: {
-    finished: 'Fertig',
-    downloading: 'Lädt',
-    resolving: 'Verbinde …',
-    paused: 'Pausiert',
-    crawling: 'Ordner wird gelesen …',
-    captcha: 'Wartet auf Captcha',
-    password: 'Wartet auf Passwort',
-    verifying: 'Prüfe Datei …',
-    verifyWait: 'Wartet auf Prüfung',
-    offline: 'Datei offline',
-    online: 'Online',
-    unchecked: 'Ungeprüft',
-    error: 'Fehler',
-    waiting: 'Wartend',
-    retryIn: (time: string) => `Neuer Versuch in ${time}`,
-  },
-  hash: {
-    ok: 'geprüft',
-    bad: 'Prüfsumme falsch',
-    okTitle: (kind: string) => `${kind} stimmt mit dem Wert des Hosters überein: die Datei ist unversehrt.`,
-    badTitle: (kind: string) => `${kind} stimmt nicht mit dem Wert des Hosters überein: die Datei ist beschädigt.`,
-  },
-  captcha: {
-    waiting: (n: number) => (n === 1 ? 'Ein Captcha wartet auf dich' : `${n} Captchas warten auf dich`),
-    item: (host: string, plugin: string, minutes: number) => `${host} (${plugin}) · noch ${minutes} min`,
-    solve: 'Lösen',
-    cancel: 'Abbrechen',
-    hint: 'Öffnet die Seite des Hosters in einem neuen Tab; das Userscript zeigt dort das Captcha.',
-    setup: 'Userscript einrichten',
-    notify: (host: string) => `Captcha für ${host} wartet`,
-    passwordsWaiting: (n: number) => (n === 1 ? 'Ein Download braucht ein Passwort' : `${n} Downloads brauchen ein Passwort`),
-    passwordFor: (name: string, plugin: string, minutes: number) => `Passwort für ${name} (${plugin}) · noch ${minutes} min`,
-    passwordWrong: 'Das Passwort war falsch.',
-    passwordLabel: (name: string) => `Passwort für ${name}`,
-    passwordOk: 'OK',
-    notifyPassword: (name: string) => `Passwort für ${name} gesucht`,
-    archivesWaiting: (n: number) => (n === 1 ? 'Ein Archiv braucht ein Passwort' : `${n} Archive brauchen ein Passwort`),
-    archiveHint: 'Keines der gespeicherten Archiv-Passwörter passt. Ein richtiges merkt sich Haul unter Einstellungen → Archiv-Passwörter.',
-    archivePasswordFor: (name: string, pkg: string, minutes: number) =>
-      `Archiv-Passwort für ${name}${pkg ? ` (${pkg})` : ''} · noch ${minutes} min`,
-    imageHint: 'Den Text aus dem Bild eintippen.',
-    imageAlt: 'Captcha-Bild',
-    imageLabel: 'Text aus dem Captcha-Bild',
-    title: 'Captchas',
-    intro:
-      'reCaptcha, hCaptcha und Turnstile gelten nur auf der Seite des Hosters. Haul öffnet sie deshalb in deinem Browser, ' +
-      'wo ein kleines Userscript das Captcha anzeigt und die Lösung an Haul zurückschickt.',
-    step1:
-      'Tampermonkey oder Violentmonkey im Browser installieren (Brave: Chrome Web Store). ' +
-      'In Chrome, Edge und Brave danach unter chrome://extensions → Details „Nutzerscripts zulassen“ einschalten, sonst läuft das Userscript nicht.',
-    step2: 'Das Userscript installieren:',
-    install: 'haul-captcha.user.js installieren',
-    step3: 'Wartet ein Captcha, erscheint oben ein Hinweis; „Lösen“ öffnet es. Nach dem Lösen lädt Haul weiter, der Tab kann zu.',
-    notifications: 'Browser-Benachrichtigung bei neuen Captchas',
-    notificationsOn: 'Benachrichtigungen sind an.',
-    notificationsBlocked: 'Benachrichtigungen sind im Browser blockiert.',
-    notificationsEnable: 'Benachrichtigungen erlauben',
-  },
-  login: {
-    setup: 'Erster Start: Lege den Benutzer für die Weboberfläche an.',
-    title: 'Anmelden',
-    userName: 'Benutzername',
-    minLength: 'Mindestens 8 Zeichen.',
-    createUser: 'Benutzer anlegen',
-    submit: 'Anmelden',
-  },
-  downloads: {
-    title: 'Downloads',
-    subtitle: (active: number, queued: number, failed: number) =>
-      `${active} aktiv · ${queued} in der Warteschlange · ${failed} Fehler`,
-    filters: { all: 'Alle', active: 'Aktiv', waiting: 'Wartend', finished: 'Fertig', failed: 'Fehler' },
-    filterAria: 'Filter',
-    colHoster: 'Hoster',
-    colProgress: 'Fortschritt',
-    colSpeed: 'Speed',
-    colEta: 'ETA',
-    progressOf: (name: string) => `Fortschritt ${name}`,
-    total: 'Gesamt',
-    limit: (value: string) => `Limit ${value}`,
-    noLimit: 'kein Limit',
-    pauseAll: 'Alle pausieren',
-    resumeAll: 'Alle fortsetzen',
-    addLinks: 'Links hinzufügen',
-    noExtractorTitle: 'Kein Entpacker installiert.',
-    noExtractorText: 'Fertige Archive werden nicht entpackt. Empfohlen sind 7-Zip und unrar, unter Ubuntu/Debian:',
-    noUnrarTitle: 'unrar fehlt.',
-    noUnrarText:
-      'RAR-Archive entpackt jetzt 7-Zip; dessen RAR-Modul stürzt bei manchen Archiven ab (7-Zip 23.01). Für RAR ist unrar zuverlässiger, unter Ubuntu/Debian (Paketquelle multiverse):',
-    noExtractorThen: 'Danach an betroffenen Paketen auf „Erneut entpacken“ klicken.',
-    statActive: 'Aktiv',
-    slots: 'Slots',
-    statQueue: 'Warteschlange',
-    statToday: 'Heute fertig',
-    premium: 'Premium',
-    left: (unit: string) => `${unit} übrig`,
-    trafficUnknown: 'Traffic unbekannt',
-    addAccount: 'Account hinzufügen',
-    clearFinished: 'Fertige entfernen',
-    search: 'Suchen',
-    searchPlaceholder: 'Dateiname …',
-    nothingFound: 'Nichts gefunden',
-    adjustFilter: 'Filter oder Suche anpassen.',
-    empty: 'Noch keine Downloads',
-    emptyHint: "Links einfügen oder per Click'n'Load schicken.",
-    parallel: (n: number | string) => `${n} parallel`,
-    connections: (n: number | string) => `${n} Verbindungen/Datei`,
-    tmpDir: 'tmp',
-    doneDir: 'fertig',
-    liveUpdates: 'Live-Updates per SSE',
-  },
-  pkg: {
-    toggle: (name: string) => `${name} auf- oder zuklappen`,
-    extractingPct: (pct: number) => `entpackt ${pct} %`,
-    extracting: 'entpackt …',
-    extracted: 'entpackt',
-    extractFailed: 'Entpacken fehlgeschlagen',
-    beingExtracted: (name: string) => `${name} wird entpackt`,
-    extract: 'Entpacken',
-    extractName: (name: string) => `${name} entpacken`,
-    extractAgain: 'Erneut entpacken',
-  },
-  collector: {
-    title: 'Linksammler',
-    subtitle: (packages: number, links: number) =>
-      `${plural(packages, 'Paket', 'Pakete')} · ${plural(links, 'Link', 'Links')} · Click'n'Load landet hier und startet nie automatisch`,
-    startAll: 'Alle starten',
-    paste: 'Links einfügen',
-    linksLabel: 'Links, einer pro Zeile oder beliebig gemischter Text',
-    linksPlaceholder: 'https://ddownload.com/abc123def456\nhttps://example.org/datei.iso',
-    packageName: 'Paketname',
-    packageNamePlaceholder: 'aus Dateinamen ableiten',
-    targetDir: 'Zielordner (relativ zu fertig)',
-    targetDirPlaceholder: '= Paketname',
-    password: 'Passwort (optional)',
-    passwordPlaceholder: 'z. B. das „PW:“ von der Webseite mit den Links',
-    passwordHelp: 'Für geschützte Downloads und Archive. Fehlt es oder passt es nicht, fragt Haul nach; die Liste für alle Archive steht unter Einstellungen → Archiv-Passwörter.',
-    startNow: 'Direkt starten, ohne Linksammler',
-    addN: (n: number) => (n > 0 ? `${plural(n, 'Link', 'Links')} hinzufügen` : 'Links hinzufügen'),
-    packageAria: (name: string) => `Paket ${name}`,
-    target: 'Zielordner',
-    manual: 'manuell',
-    extension: 'Browser-Erweiterung',
-    from: 'von',
-    withPassword: 'mit Passwort',
-    offline: (n: number) => `${n} offline`,
-    check: 'Online-Check',
-    discard: 'Verwerfen',
-    start: 'Starten',
-    startN: (n: number) => `${n} starten`,
-    startSome: (n: number, total: number) => `${n} von ${total} starten`,
-    startChecked: 'Angehakte starten',
-    checkAll: 'Alle Dateien',
-    checkedOf: (n: number, total: number) => `${n} von ${total} angehakt`,
-    include: (name: string) => `${name} herunterladen`,
-    partialArchive: (name: string, n: number, total: number) =>
-      `${name}: nur ${n} von ${total} Teilen angehakt. So lässt sich das Archiv nicht entpacken.`,
-    checkAllParts: 'Alle Teile anhaken',
-  },
-  accounts: {
-    title: 'Accounts & Plugins',
-    subtitle: 'Premium-Accounts für Hoster und die geladenen Hoster-Plugins',
-    status: { unchecked: 'Ungeprüft', checking: 'Prüfe …', valid: 'Gültig', invalid: 'Ungültig', error: 'Fehler' },
-    add: 'Account hinzufügen',
-    defaultHelp: 'Benutzer und Passwort des Hoster-Accounts.',
-    encrypted: 'Gespeichert wird verschlüsselt mit',
-    hoster: 'Hoster',
-    newSecret: (label: string) => `Neu: ${label}`,
-    saveAndCheck: 'Speichern und prüfen',
-    list: 'Accounts',
-    none: 'Noch keine Accounts.',
-    sessionCookie: 'Sitzungs-Cookie',
-    premium: 'Premium',
-    noPremium: 'Kein Premium',
-    typeUnknown: 'Typ unbekannt',
-    until: (date: string) => ` bis ${date}`,
-    trafficLeft: (amount: string) => ` · ${amount} Traffic übrig`,
-    checked: (when: string) => ` · geprüft ${when}`,
-    enabled: 'Aktiv',
-    changeLogin: 'Zugang ändern',
-    checkAria: 'Account prüfen',
-    check: 'Prüfen',
-    deleteAria: 'Account löschen',
-    plugins: 'Plugins',
-    reload: 'Neu laden',
-    builtin: 'In Haul enthalten',
-    custom: 'Eigene Datei',
-    patterns: (n: number) => (n === 1 ? 'Linkmuster anzeigen' : `${n} Linkmuster anzeigen`),
-    premiumRequired: 'Nur mit Premium-Account',
-    noAccountNeeded: 'Geht ohne Account',
-    accountPossible: 'Account möglich',
-    supports: (domains: string) => `Unterstützt: ${domains}`,
-    noPlugins: 'Keine Plugins geladen.',
-    replacesNewer: (builtin: string, own: string) =>
-      `Veraltet: Diese eigene Datei (v${own}) verdeckt das in Haul enthaltene Plugin v${builtin}. ` +
-      'Datei löschen und „Neu laden“, um das enthaltene zu nutzen.',
-    replaces: (builtin: string) => `Ersetzt das in Haul enthaltene Plugin v${builtin}.`,
-  },
-  settings: {
-    title: 'Einstellungen',
-    downloads: 'Downloads',
-    parallel: 'Parallele Downloads',
-    connections: 'Verbindungen pro Datei',
-    limit: 'Bandbreitenlimit (KiB/s)',
-    limitHelp: '0 = kein Limit',
-    retries: 'Wiederholungen',
-    autoExtract: 'Fertige Pakete automatisch entpacken',
-    deleteArchives: 'Archive nach erfolgreichem Entpacken löschen',
-    removeArchiveDownloads: 'Downloads nach erfolgreichem Entpacken aus der Liste entfernen',
-    askArchivePassword: 'Beim Entpacken nach dem Passwort fragen, wenn keines passt',
-    verifyChecksums: 'Prüfsumme nach dem Download prüfen, wenn der Hoster eine angibt',
-    archivePasswords: 'Archiv-Passwörter',
-    archivePasswordsIntro:
-      'Haul probiert diese Passwörter bei jedem geschützten Archiv durch, nach denen des Pakets. ' +
-      'Ein Passwort, das ein Archiv geöffnet hat, steht danach ganz oben.',
-    archivePasswordsLabel: 'Ein Passwort pro Zeile',
-    archivePasswordsCount: (n: number) => (n === 1 ? '1 Passwort' : `${n} Passwörter`),
-    saved: 'Gespeichert.',
-    folders: 'Ordner',
-    tmpDir: 'Laufende Downloads',
-    doneDir: 'Fertige Dateien',
-    pluginDir: 'Eigene Plugins',
-    extractors: 'Entpacker',
-    noExtractor: 'keiner gefunden: sudo apt install 7zip unrar',
-    language: 'Sprache',
-    languageHelp: 'Gilt für diesen Browser, auch für Meldungen von Server und Hostern.',
-    cnlTitle: "Click'n'Load vom Desktop",
-    cnlIntroA: 'Webseiten schicken Links an',
-    cnlIntroB:
-      'des Browser-Rechners. Die Browser-Erweiterung von Haul fängt sie ab und schickt sie mit einem API-Token an diesen Server; ohne Erweiterung leitet',
-    cnlIntroC: 'sie weiter. Empfangene Links landen im Linksammler.',
-    tokenOnce: 'Token nur jetzt sichtbar. Kopieren und in die Browser-Erweiterung oder haul-cnl eintragen:',
-    tokenSet: 'Ein Token ist gesetzt. Ein neues ersetzt das alte.',
-    tokenNone: 'Noch kein Token erstellt.',
-    sshComment: '# Zum Testen ohne haul-cnl:',
-    cnlTest: "Click'n'Load im Browser testen",
-    newToken: 'Neues Token erstellen',
-    createToken: 'Token erstellen',
-    cnlOther: (status: number) => `Auf Port 9666 antwortet etwas anderes als Haul (HTTP ${status}).`,
-    cnlForwarder: 'Port 9666 erreichbar: haul-cnl läuft und leitet an den Server weiter.',
-    cnlLocal: 'Port 9666 erreichbar: Haul selbst lauscht auf diesem Rechner.',
-    cnlExtension: "Die Browser-Erweiterung von Haul übernimmt Click'n'Load in diesem Browser.",
-    cnlUnreachable:
-      'Port 9666 ist von diesem Browser aus nicht erreichbar. Läuft Haul auf einem anderen Rechner, ' +
-      'die Browser-Erweiterung installieren oder auf diesem Rechner haul-cnl starten (oder den SSH-Tunnel). Fragt der Browser nach Zugriff aufs lokale Netzwerk, erlauben.',
-    loginTitle: 'Zugang',
-    currentPassword: 'Aktuelles Passwort',
-    newPassword: 'Neues Passwort',
-    passwordChanged: 'Passwort geändert.',
-    changePassword: 'Passwort ändern',
-    logout: 'Abmelden',
-  },
-  done: {
-    title: 'Fertig',
-    root: 'Fertig',
-    topLevel: 'Fertig (oberste Ebene)',
-    archives: (n: number) => plural(n, 'Archivdatei', 'Archivdateien'),
-    stateArchive: 'Archiv',
-    stateFailed: 'Entpacken fehlgeschlagen',
-    stateLeft: (archives: string) => `${archives} übrig`,
-    stateNotExtracted: (archives: string) => `${archives}, nicht entpackt`,
-    stateExtracted: 'entpackt',
-    stateFinished: 'fertig',
-    stateForeign: 'nicht von Haul',
-    pathAria: 'Ordnerpfad',
-    newFolder: 'Neuer Ordner',
-    inFolder: (path: string) => `in ${path}`,
-    create: 'Anlegen',
-    moveOne: (name: string) => `„${name}“ verschieben`,
-    moveMany: (n: number) => `${n} Einträge verschieben`,
-    targetFolder: 'Zielordner',
-    searchFolders: 'Ordner suchen …',
-    optionalNew: 'Optional: neuer Ordner darin',
-    newFolderName: 'Name des neuen Ordners',
-    target: (path: string) => `Ziel: ${path}`,
-    move: 'Verschieben',
-    moveEllipsis: 'Verschieben …',
-    confirmDeleteArchives: (folders: number) =>
-      `Alle Archivdateien in ${folders === 1 ? 'diesem Ordner' : `${folders} Ordnern`} löschen?`,
-    confirmDeleteOne: (name: string, dir: boolean) => `„${name}“${dir ? ' mit allem Inhalt' : ''} endgültig löschen?`,
-    confirmDeleteMany: (n: number) => `${n} Einträge endgültig löschen?`,
-    entries: (n: number) => plural(n, 'Eintrag', 'Einträge'),
-    free: (amount: string) => `${amount} frei`,
-    actionsAria: 'Aktionen für die Auswahl',
-    selectHint: 'Einträge auswählen, um sie zu entpacken, zu verschieben oder zu löschen.',
-    selected: (n: number) => `${n} ausgewählt`,
-    extract: 'Entpacken',
-    deleteArchives: 'Archive löschen',
-    delete: 'Löschen',
-    clearSelection: 'Auswahl aufheben',
-    extractingHere: (pct: number) => `In diesem Ordner wird entpackt: ${pct} %`,
-    selectAll: 'Alle auswählen',
-    select: (name: string) => `${name} auswählen`,
-    colState: 'Zustand',
-    colModified: 'Geändert',
-    beingExtracted: (name: string) => `${name} wird entpackt`,
-    empty: 'Leer',
-    emptyFolder: 'Dieser Ordner ist leer.',
-    emptyRoot: 'Fertige Downloads landen hier, ein Ordner pro Paket.',
-  },
-};
-
-export type Messages = typeof de;
-
-const en: Messages = {
-  locale: 'en-GB',
-  common: {
-    cancel: 'Cancel',
-    save: 'Save',
-    add: 'Add',
-    name: 'Name',
-    size: 'Size',
-    status: 'Status',
-    user: 'User',
-    password: 'Password',
-    remove: (name) => `Remove ${name}`,
-    pause: (name) => `Pause ${name}`,
-    resume: (name) => `Resume ${name}`,
-    files: (n) => plural(n, 'file', 'files'),
-    links: (n) => plural(n, 'link', 'links'),
-  },
-  app: {
-    serverUnreachable: (msg) => `Server not reachable: ${msg}`,
-  },
-  nav: {
-    main: 'Main navigation',
-    downloads: 'Downloads',
-    collector: 'Link grabber',
-    done: 'Done',
-    accounts: 'Accounts & plugins',
-    settings: 'Settings',
-    storageAria: 'Disk space',
-    storage: 'Storage',
-    connected: (host) => `connected to ${host}`,
-    disconnected: 'Disconnected',
-    language: 'Language',
-  },
-  disks: { tmp: 'tmp', fertig: 'done' },
-  status: {
-    finished: 'Finished',
-    downloading: 'Downloading',
-    resolving: 'Connecting …',
-    paused: 'Paused',
-    crawling: 'Reading folder …',
-    captcha: 'Waiting for captcha',
-    password: 'Waiting for password',
-    verifying: 'Verifying file …',
-    verifyWait: 'Waiting for verification',
-    offline: 'File offline',
-    online: 'Online',
-    unchecked: 'Unchecked',
-    error: 'Error',
-    waiting: 'Waiting',
-    retryIn: (time) => `Retrying in ${time}`,
-  },
-  hash: {
-    ok: 'verified',
-    bad: 'checksum wrong',
-    okTitle: (kind) => `${kind} matches the hoster's value: the file is intact.`,
-    badTitle: (kind) => `${kind} does not match the hoster's value: the file is damaged.`,
-  },
-  captcha: {
-    waiting: (n) => (n === 1 ? 'A captcha is waiting for you' : `${n} captchas are waiting for you`),
-    item: (host, plugin, minutes) => `${host} (${plugin}) · ${minutes} min left`,
-    solve: 'Solve',
-    cancel: 'Cancel',
-    hint: 'Opens the hoster’s page in a new tab; the userscript shows the captcha there.',
-    setup: 'Set up the userscript',
-    notify: (host) => `Captcha for ${host} is waiting`,
-    passwordsWaiting: (n) => (n === 1 ? 'A download needs a password' : `${n} downloads need a password`),
-    passwordFor: (name, plugin, minutes) => `Password for ${name} (${plugin}) · ${minutes} min left`,
-    passwordWrong: 'The password was wrong.',
-    passwordLabel: (name) => `Password for ${name}`,
-    passwordOk: 'OK',
-    notifyPassword: (name) => `Password needed for ${name}`,
-    archivesWaiting: (n) => (n === 1 ? 'An archive needs a password' : `${n} archives need a password`),
-    archiveHint: 'None of the saved archive passwords fits. Haul remembers a correct one under Settings → Archive passwords.',
-    archivePasswordFor: (name, pkg, minutes) => `Archive password for ${name}${pkg ? ` (${pkg})` : ''} · ${minutes} min left`,
-    imageHint: 'Type the text shown in the picture.',
-    imageAlt: 'Captcha picture',
-    imageLabel: 'Text from the captcha picture',
-    title: 'Captchas',
-    intro:
-      'reCaptcha, hCaptcha and Turnstile are only valid on the hoster’s own page. So Haul opens them in your browser, ' +
-      'where a small userscript shows the captcha and sends the answer back to Haul.',
-    step1:
-      'Install Tampermonkey or Violentmonkey in the browser (Brave: Chrome Web Store). ' +
-      'In Chrome, Edge and Brave, then turn on “Allow user scripts” under chrome://extensions → Details, or the userscript does not run.',
-    step2: 'Install the userscript:',
-    install: 'Install haul-captcha.user.js',
-    step3: 'When a captcha waits, a notice shows at the top; “Solve” opens it. Once solved, Haul continues and the tab can be closed.',
-    notifications: 'Browser notification for new captchas',
-    notificationsOn: 'Notifications are on.',
-    notificationsBlocked: 'Notifications are blocked in the browser.',
-    notificationsEnable: 'Allow notifications',
-  },
-  login: {
-    setup: 'First start: create the user for the web interface.',
-    title: 'Log in',
-    userName: 'User name',
-    minLength: 'At least 8 characters.',
-    createUser: 'Create user',
-    submit: 'Log in',
-  },
-  downloads: {
-    title: 'Downloads',
-    subtitle: (active, queued, failed) => `${active} active · ${queued} queued · ${failed} failed`,
-    filters: { all: 'All', active: 'Active', waiting: 'Waiting', finished: 'Finished', failed: 'Failed' },
-    filterAria: 'Filter',
-    colHoster: 'Host',
-    colProgress: 'Progress',
-    colSpeed: 'Speed',
-    colEta: 'ETA',
-    progressOf: (name) => `Progress of ${name}`,
-    total: 'Total',
-    limit: (value) => `limit ${value}`,
-    noLimit: 'no limit',
-    pauseAll: 'Pause all',
-    resumeAll: 'Resume all',
-    addLinks: 'Add links',
-    noExtractorTitle: 'No extractor installed.',
-    noExtractorText: 'Finished archives are not extracted. 7-Zip and unrar are recommended, on Ubuntu/Debian:',
-    noUnrarTitle: 'unrar is missing.',
-    noUnrarText:
-      'RAR archives are now extracted by 7-Zip, whose RAR module crashes on some archives (7-Zip 23.01). unrar is more reliable for RAR, on Ubuntu/Debian (multiverse):',
-    noExtractorThen: 'Then click “Extract again” on the affected packages.',
-    statActive: 'Active',
-    slots: 'slots',
-    statQueue: 'Queue',
-    statToday: 'Finished today',
-    premium: 'Premium',
-    left: (unit) => `${unit} left`,
-    trafficUnknown: 'Traffic unknown',
-    addAccount: 'Add account',
-    clearFinished: 'Remove finished',
-    search: 'Search',
-    searchPlaceholder: 'File name …',
-    nothingFound: 'Nothing found',
-    adjustFilter: 'Adjust the filter or search.',
-    empty: 'No downloads yet',
-    emptyHint: "Paste links or send them via Click'n'Load.",
-    parallel: (n) => `${n} parallel`,
-    connections: (n) => `${n} connections/file`,
-    tmpDir: 'tmp',
-    doneDir: 'done',
-    liveUpdates: 'Live updates via SSE',
-  },
-  pkg: {
-    toggle: (name) => `Expand or collapse ${name}`,
-    extractingPct: (pct) => `extracting ${pct} %`,
-    extracting: 'extracting …',
-    extracted: 'extracted',
-    extractFailed: 'Extraction failed',
-    beingExtracted: (name) => `${name} is being extracted`,
-    extract: 'Extract',
-    extractName: (name) => `Extract ${name}`,
-    extractAgain: 'Extract again',
-  },
-  collector: {
-    title: 'Link grabber',
-    subtitle: (packages, links) =>
-      `${plural(packages, 'package', 'packages')} · ${plural(links, 'link', 'links')} · Click'n'Load lands here and never starts on its own`,
-    startAll: 'Start all',
-    paste: 'Paste links',
-    linksLabel: 'Links, one per line or mixed into any text',
-    linksPlaceholder: 'https://ddownload.com/abc123def456\nhttps://example.org/file.iso',
-    packageName: 'Package name',
-    packageNamePlaceholder: 'derived from the file names',
-    targetDir: 'Target folder (relative to done)',
-    targetDirPlaceholder: '= package name',
-    password: 'Password (optional)',
-    passwordPlaceholder: 'e.g. the “PW:” from the page with the links',
-    passwordHelp: 'For protected downloads and archives. If it is missing or wrong, Haul asks; the list for all archives is under Settings → Archive passwords.',
-    startNow: 'Start right away, skip the link grabber',
-    addN: (n) => (n > 0 ? `Add ${plural(n, 'link', 'links')}` : 'Add links'),
-    packageAria: (name) => `Package ${name}`,
-    target: 'Target folder',
-    manual: 'manual',
-    extension: 'browser extension',
-    from: 'from',
-    withPassword: 'with password',
-    offline: (n) => `${n} offline`,
-    check: 'Check online',
-    discard: 'Discard',
-    start: 'Start',
-    startN: (n) => `Start ${n}`,
-    startSome: (n, total) => `Start ${n} of ${total}`,
-    startChecked: 'Start checked',
-    checkAll: 'All files',
-    checkedOf: (n, total) => `${n} of ${total} checked`,
-    include: (name) => `Download ${name}`,
-    partialArchive: (name, n, total) => `${name}: only ${n} of ${total} parts checked. The archive cannot be extracted like this.`,
-    checkAllParts: 'Check all parts',
-  },
-  accounts: {
-    title: 'Accounts & plugins',
-    subtitle: 'Premium accounts for hosters and the loaded hoster plugins',
-    status: { unchecked: 'Unchecked', checking: 'Checking …', valid: 'Valid', invalid: 'Invalid', error: 'Error' },
-    add: 'Add account',
-    defaultHelp: 'User name and password of the hoster account.',
-    encrypted: 'Stored encrypted with',
-    hoster: 'Host',
-    newSecret: (label) => `New: ${label}`,
-    saveAndCheck: 'Save and check',
-    list: 'Accounts',
-    none: 'No accounts yet.',
-    sessionCookie: 'Session cookie',
-    premium: 'Premium',
-    noPremium: 'No premium',
-    typeUnknown: 'Type unknown',
-    until: (date) => ` until ${date}`,
-    trafficLeft: (amount) => ` · ${amount} traffic left`,
-    checked: (when) => ` · checked ${when}`,
-    enabled: 'Active',
-    changeLogin: 'Change login',
-    checkAria: 'Check account',
-    check: 'Check',
-    deleteAria: 'Delete account',
-    plugins: 'Plugins',
-    reload: 'Reload',
-    builtin: 'Included in Haul',
-    custom: 'Custom file',
-    patterns: (n) => (n === 1 ? 'Show link pattern' : `Show ${n} link patterns`),
-    premiumRequired: 'Premium account only',
-    noAccountNeeded: 'Works without an account',
-    accountPossible: 'account possible',
-    supports: (domains) => `Supports: ${domains}`,
-    noPlugins: 'No plugins loaded.',
-    replacesNewer: (builtin, own) =>
-      `Outdated: this custom file (v${own}) hides the plugin v${builtin} included in Haul. ` +
-      'Delete the file and click “Reload” to use the included one.',
-    replaces: (builtin) => `Replaces the plugin v${builtin} included in Haul.`,
-  },
-  settings: {
-    title: 'Settings',
-    downloads: 'Downloads',
-    parallel: 'Parallel downloads',
-    connections: 'Connections per file',
-    limit: 'Bandwidth limit (KiB/s)',
-    limitHelp: '0 = no limit',
-    retries: 'Retries',
-    autoExtract: 'Extract finished packages automatically',
-    deleteArchives: 'Delete archives after successful extraction',
-    removeArchiveDownloads: 'Remove the downloads from the list after successful extraction',
-    askArchivePassword: 'Ask for the archive password when none fits',
-    verifyChecksums: 'Verify the checksum after the download when the hoster publishes one',
-    archivePasswords: 'Archive passwords',
-    archivePasswordsIntro:
-      'Haul tries these passwords on every protected archive, after the package’s own. ' +
-      'A password that opened an archive moves to the top.',
-    archivePasswordsLabel: 'One password per line',
-    archivePasswordsCount: (n) => (n === 1 ? '1 password' : `${n} passwords`),
-    saved: 'Saved.',
-    folders: 'Folders',
-    tmpDir: 'Running downloads',
-    doneDir: 'Finished files',
-    pluginDir: 'Custom plugins',
-    extractors: 'Extractors',
-    noExtractor: 'none found: sudo apt install 7zip unrar',
-    language: 'Language',
-    languageHelp: 'Applies to this browser, including messages from the server and hosters.',
-    cnlTitle: "Click'n'Load from the desktop",
-    cnlIntroA: 'Web pages send links to',
-    cnlIntroB:
-      'on the browser’s machine. Haul’s browser extension catches them and sends them to this server with an API token; without the extension,',
-    cnlIntroC: 'forwards them. Received links land in the link grabber.',
-    tokenOnce: 'The token is shown only now. Copy it into the browser extension or haul-cnl:',
-    tokenSet: 'A token is set. A new one replaces it.',
-    tokenNone: 'No token created yet.',
-    sshComment: '# For testing without haul-cnl:',
-    cnlTest: "Test Click'n'Load in this browser",
-    newToken: 'Create new token',
-    createToken: 'Create token',
-    cnlOther: (status) => `Something other than Haul answers on port 9666 (HTTP ${status}).`,
-    cnlForwarder: 'Port 9666 reachable: haul-cnl is running and forwards to the server.',
-    cnlLocal: 'Port 9666 reachable: Haul itself listens on this machine.',
-    cnlExtension: "Haul’s browser extension handles Click'n'Load in this browser.",
-    cnlUnreachable:
-      'Port 9666 is not reachable from this browser. If Haul runs on another machine, install the browser extension ' +
-      'or start haul-cnl (or the SSH tunnel) on this one. If the browser asks for access to the local network, allow it.',
-    loginTitle: 'Login',
-    currentPassword: 'Current password',
-    newPassword: 'New password',
-    passwordChanged: 'Password changed.',
-    changePassword: 'Change password',
-    logout: 'Log out',
-  },
-  done: {
-    title: 'Done',
-    root: 'Done',
-    topLevel: 'Done (top level)',
-    archives: (n) => plural(n, 'archive file', 'archive files'),
-    stateArchive: 'Archive',
-    stateFailed: 'Extraction failed',
-    stateLeft: (archives) => `${archives} left`,
-    stateNotExtracted: (archives) => `${archives}, not extracted`,
-    stateExtracted: 'extracted',
-    stateFinished: 'finished',
-    stateForeign: 'not from Haul',
-    pathAria: 'Folder path',
-    newFolder: 'New folder',
-    inFolder: (path) => `in ${path}`,
-    create: 'Create',
-    moveOne: (name) => `Move “${name}”`,
-    moveMany: (n) => `Move ${n} items`,
-    targetFolder: 'Target folder',
-    searchFolders: 'Search folders …',
-    optionalNew: 'Optional: new folder inside',
-    newFolderName: 'Name of the new folder',
-    target: (path) => `Target: ${path}`,
-    move: 'Move',
-    moveEllipsis: 'Move …',
-    confirmDeleteArchives: (folders) =>
-      `Delete all archive files in ${folders === 1 ? 'this folder' : `${folders} folders`}?`,
-    confirmDeleteOne: (name, dir) => `Delete “${name}”${dir ? ' with everything in it' : ''} permanently?`,
-    confirmDeleteMany: (n) => `Delete ${n} items permanently?`,
-    entries: (n) => plural(n, 'item', 'items'),
-    free: (amount) => `${amount} free`,
-    actionsAria: 'Actions for the selection',
-    selectHint: 'Select items to extract, move or delete them.',
-    selected: (n) => `${n} selected`,
-    extract: 'Extract',
-    deleteArchives: 'Delete archives',
-    delete: 'Delete',
-    clearSelection: 'Clear selection',
-    extractingHere: (pct) => `Extracting in this folder: ${pct} %`,
-    selectAll: 'Select all',
-    select: (name) => `Select ${name}`,
-    colState: 'State',
-    colModified: 'Modified',
-    beingExtracted: (name) => `${name} is being extracted`,
-    empty: 'Empty',
-    emptyFolder: 'This folder is empty.',
-    emptyRoot: 'Finished downloads land here, one folder per package.',
-  },
-};
-
-export const messages: Record<Lang, Messages> = { de, en };
 const STORAGE_KEY = 'haul.lang';
 
 function initialLang(): Lang {
@@ -698,58 +28,66 @@ function initialLang(): Lang {
   return browser?.toLowerCase().startsWith('de') ? 'de' : 'en';
 }
 
-let current: Lang = initialLang();
-const listeners = new Set<() => void>();
+const current: Lang = initialLang();
 if (typeof document !== 'undefined') document.documentElement.lang = current;
+// Paraglide's m.*() ask getLocale(): answer with the language picked here.
+overwriteGetLocale(() => current);
 
 export function getLang(): Lang {
   return current;
 }
 
+/** Saves the choice and reloads, so every text, including live data, comes in the new language. */
 export function setLang(lang: Lang) {
   if (lang === current) return;
-  current = lang;
   try {
     localStorage.setItem(STORAGE_KEY, lang);
   } catch {
-    /* storage blocked: the choice lasts for this page */
+    /* storage blocked: nothing to keep the choice in */
   }
-  document.documentElement.lang = lang;
-  listeners.forEach((l) => l());
+  location.reload();
 }
 
-function subscribe(l: () => void) {
-  listeners.add(l);
-  return () => listeners.delete(l);
-}
-
-/** The current language; re-renders the component when it changes. */
+/** The current language. */
 export function useLang(): Lang {
-  return useSyncExternalStore(subscribe, getLang);
+  return current;
 }
 
-/** The texts of the current language. */
-export function useT(): Messages {
-  return messages[useLang()];
-}
+/** Intl locale of the current language. */
+export const localeOf = (lang: Lang = current) => (lang === 'de' ? 'de-DE' : 'en-US');
 
-/** Texts outside of components (formatting helpers). */
-export function currentMessages(): Messages {
-  return messages[current];
-}
+type Inputs = Record<string, string | number>;
+const messages = m as unknown as Record<string, ((inputs: Inputs, options: { locale: Lang }) => string) | undefined>;
 
-/**
- * A message from the server or a plugin in the viewer's language. Messages carry both languages
- * as `\u0002` de `\u001f` en `\u0003`, possibly inside other text; plain text stays as it is.
- */
+// eslint-disable-next-line no-control-regex
+const MARKED = /\u0002([^\u001f\u0003]*)(?:\u001f([^\u0003]*))?(?:\u0003|$)/g;
+
+/** A message from the server or a plugin in the viewer's language; plain text stays as it is. */
 export function localize(text: string, lang?: Lang): string;
 export function localize(text: string | null | undefined, lang?: Lang): string | null;
 export function localize(text: string | null | undefined, lang: Lang = current): string | null {
   if (text == null) return null;
   if (!text.includes('\u0002')) return text;
-  return text.replace(/\u0002([^\u0003]*?)(?:\u001f([^\u0003]*))?(?:\u0003|$)/g, (_, de: string, en?: string) =>
-    lang === 'en' ? (en ?? de) : de,
-  );
+  return text.replace(MARKED, (whole, body: string, en?: string) => {
+    if (en === undefined && body.startsWith('[')) {
+      try {
+        const [key, inputs] = JSON.parse(body) as [string, Inputs | undefined];
+        // Inputs can be messages themselves (a tool's line inside an extraction error).
+        const resolved = Object.fromEntries(
+          Object.entries(inputs ?? {}).map(([k, v]) => [k, typeof v === 'string' ? localize(v, lang) : v]),
+        );
+        return messages[key]?.(resolved, { locale: lang }) ?? key;
+      } catch {
+        return whole;
+      }
+    }
+    return lang === 'en' ? (en ?? body) : body;
+  });
+}
+
+/** A message picked by a runtime key (status, filter …); unknown keys come back as they are. */
+export function pickMsg(map: Record<string, () => string>, key: string): string {
+  return map[key]?.() ?? key;
 }
 
 /** A text from a plugin: plain, or one per language (`{ de, en }`). */

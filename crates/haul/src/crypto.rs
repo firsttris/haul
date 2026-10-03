@@ -38,21 +38,13 @@ impl SecretBox {
     pub fn decrypt(&self, stored: &str) -> Result<String> {
         let raw = B64.decode(stored)?;
         if raw.len() < 12 {
-            return Err(anyhow!(crate::tr!(
-                "gespeichertes Passwort zu kurz",
-                "stored secret too short"
-            )));
+            return Err(anyhow!(crate::msg!("server_crypto_secretTooShort")));
         }
         let (nonce, ct) = raw.split_at(12);
         let plain = self
             .cipher
             .decrypt(Nonce::from_slice(nonce), ct)
-            .map_err(|_| {
-                anyhow!(crate::tr!(
-                    "Account-Passwort nicht entschlüsselbar; wurde APP_SECRET geändert?",
-                    "cannot decrypt account secret; was APP_SECRET changed?"
-                ))
-            })?;
+            .map_err(|_| anyhow!(crate::msg!("server_crypto_cannotDecrypt")))?;
         Ok(String::from_utf8(plain)?)
     }
 }

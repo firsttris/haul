@@ -47,7 +47,7 @@ pub enum Failure {
 
 impl From<std::io::Error> for Failure {
     fn from(e: std::io::Error) -> Self {
-        Failure::Retry(crate::tr!("Dateifehler: {}", "File error: {}", e))
+        Failure::Retry(crate::msg!("server_download_fileError", error = e))
     }
 }
 
@@ -59,7 +59,7 @@ impl From<anyhow::Error> for Failure {
 
 impl From<sqlx::Error> for Failure {
     fn from(e: sqlx::Error) -> Self {
-        Failure::Retry(crate::tr!("Datenbankfehler: {}", "Database error: {}", e))
+        Failure::Retry(crate::msg!("server_download_databaseError", error = e))
     }
 }
 
@@ -81,26 +81,18 @@ impl From<PluginError> for Failure {
 
 fn http_failure(code: StatusCode) -> Failure {
     match code.as_u16() {
-        404 | 410 => Failure::Offline(crate::tr!(
-            "Datei offline (HTTP {})",
-            "File offline (HTTP {})",
-            code.as_u16()
+        404 | 410 => Failure::Offline(crate::msg!(
+            "server_download_offline",
+            status = code.as_u16()
         )),
-        403 => Failure::Retry(crate::tr!(
-            "HTTP 403: Direktlink abgelaufen oder Zugriff verweigert",
-            "HTTP 403: direct link expired or access denied"
-        )),
-        429 | 503 => Failure::Retry(crate::tr!(
-            "HTTP {}: Server ausgelastet oder zu viele Verbindungen",
-            "HTTP {}: server busy or too many connections",
-            code.as_u16()
-        )),
+        403 => Failure::Retry(crate::msg!("server_download_forbidden")),
+        429 | 503 => Failure::Retry(crate::msg!("server_download_busy", status = code.as_u16())),
         _ => Failure::Retry(format!("HTTP {}", code.as_u16())),
     }
 }
 
 fn net_failure(e: reqwest::Error) -> Failure {
-    Failure::Retry(crate::tr!("Netzwerkfehler: {}", "Network error: {}", e))
+    Failure::Retry(crate::msg!("server_download_networkError", error = e))
 }
 
 /// Where the bytes come from, after the plugin resolved the link.
@@ -212,7 +204,7 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
             d.attempts + 1,
             format!(
                 "{m} {}",
-                crate::tr!("(nach {} Versuchen)", "(after {} attempts)", d.attempts + 1)
+                crate::msg!("server_download_afterAttempts", attempts = d.attempts + 1)
             ),
         ),
         Failure::Retry(m) => {
@@ -251,7 +243,7 @@ async fn record_failure(engine: &Engine, id: i64, f: Failure) -> Result<()> {
         id,
         status = new_status,
         "download: {}",
-        crate::i18n::pick(&msg, false)
+        crate::i18n::plain(&msg)
     );
     sqlx::query(
         "UPDATE downloads SET status = ?, online = ?, retry_at = ?, attempts = ?, error = ?
@@ -296,7 +288,7 @@ async fn save_plugin_pages(
     }
     tracing::debug!(
         id,
-        error = %crate::i18n::pick(&error.message, true),
+        error = %crate::i18n::plain(&error.message),
         "plugin failed; the hoster's pages it got: {}",
         files.join(", ")
     );
@@ -344,10 +336,9 @@ async fn execute(
                 .await
                 .map_err(|e| Failure::Fail(format!("{e:#}")))?;
             if plugin.account_required && acc.is_none() {
-                return Err(Failure::Fail(crate::tr!(
-                    "Kein aktiver Account für {}",
-                    "No active account for {}",
-                    plugin.name
+                return Err(Failure::Fail(crate::msg!(
+                    "server_download_noAccount",
+                    plugin = plugin.name
                 )));
             }
             let password = crate::captcha::Password::new(d.password.clone());
@@ -457,10 +448,9 @@ async fn execute(
             }
         }
         let text = text.chars().take(160).collect::<String>();
-        return Err(Failure::Retry(crate::tr!(
-            "Server lieferte eine Webseite statt der Datei: {}",
-            "The server sent a web page instead of the file: {}",
-            text
+        return Err(Failure::Retry(crate::msg!(
+            "server_download_webPage",
+            text = text
         )));
     }
     let probe = probe_from(&resp);
@@ -630,7 +620,7 @@ async fn execute(
                 }
                 Some(Err(e)) => {
                     seg_cancel.cancel();
-                    failure.get_or_insert(Failure::Retry(crate::tr!("interner Fehler: {}", "internal error: {}", e)));
+                    failure.get_or_insert(Failure::Retry(crate::msg!("server_download_internalError", error = e)));
                 }
             },
             _ = persist.tick() => {
@@ -648,11 +638,10 @@ async fn execute(
     let written: u64 = segs.iter().map(|s| s.done.load(Ordering::Relaxed)).sum();
     if let Some(t) = total {
         if written != t {
-            return Err(Failure::Retry(crate::tr!(
-                "unvollständig: {} von {} Bytes",
-                "incomplete: {} of {} bytes",
-                written,
-                t
+            return Err(Failure::Retry(crate::msg!(
+                "server_download_incomplete",
+                written = written,
+                total = t
             )));
         }
     }
@@ -687,10 +676,9 @@ async fn execute(
             .await?;
         if !ok {
             if d.hash_ok == Some(false) {
-                return Err(Failure::Fail(crate::tr!(
-                    "Prüfsumme ({}) stimmt auch beim zweiten Mal nicht",
-                    "Checksum ({}) wrong again on the second try",
-                    spec.kind.to_uppercase()
+                return Err(Failure::Fail(crate::msg!(
+                    "server_download_checksumWrongAgain",
+                    kind = spec.kind.to_uppercase()
                 )));
             }
             // Start over: the next attempt plans fresh segments into a new file.
@@ -703,10 +691,9 @@ async fn execute(
                 .bind(id)
                 .execute(&engine.db)
                 .await?;
-            return Err(Failure::Retry(crate::tr!(
-                "Prüfsumme ({}) falsch, lade die Datei neu",
-                "Checksum ({}) wrong, loading the file again",
-                spec.kind.to_uppercase()
+            return Err(Failure::Retry(crate::msg!(
+                "server_download_checksumWrong",
+                kind = spec.kind.to_uppercase()
             )));
         }
         progress.phase.store(PHASE_DOWNLOAD, Ordering::Relaxed);
@@ -857,10 +844,9 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
                         cancellable(&ctx.cancel, tokio::time::sleep(BUSY_WAIT)).await?;
                         continue;
                     }
-                    Ok(r) if r.status().is_success() => Err(Failure::Retry(crate::tr!(
-                        "Server ignoriert Range-Anfrage",
-                        "Server ignores the range request"
-                    ))),
+                    Ok(r) if r.status().is_success() => {
+                        Err(Failure::Retry(crate::msg!("server_download_rangeIgnored")))
+                    }
                     // Refused (the other segments may not have connected yet) or a network
                     // error: the segment retry below. Anything else (403: link expired, 404)
                     // ends the download now.
@@ -888,10 +874,7 @@ async fn run_segment(ctx: SegCtx, mut first: Option<Response>) -> Result<(), Fai
                         Some(e) if seg.start + seg.done.load(Ordering::Relaxed) >= e => {
                             return Ok(())
                         }
-                        Some(_) => Failure::Retry(crate::tr!(
-                            "Verbindung vorzeitig geschlossen",
-                            "Connection closed early"
-                        )),
+                        Some(_) => Failure::Retry(crate::msg!("server_download_closedEarly")),
                     },
                     Err(e) => e,
                 }
@@ -924,12 +907,7 @@ async fn pump(ctx: &SegCtx, resp: Response, file: &mut tokio::fs::File) -> Resul
         )
         .await?;
         let chunk = match next {
-            Err(_) => {
-                return Err(Failure::Retry(crate::tr!(
-                    "Zeitüberschreitung beim Lesen",
-                    "Read timed out"
-                )))
-            }
+            Err(_) => return Err(Failure::Retry(crate::msg!("server_download_readTimeout"))),
             Ok(None) => return Ok(()),
             Ok(Some(Err(e))) => return Err(net_failure(e)),
             Ok(Some(Ok(c))) => c,

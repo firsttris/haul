@@ -364,9 +364,9 @@ fn causes(run: &Run) -> Causes {
 /// One line for a failed run: the tool, how it ended and its error lines.
 fn describe_run(tool: &Tool, run: &Run) -> String {
     let how = match (run.signal, run.code) {
-        (Some(sig), _) => crate::tr!("abgestürzt (Signal {})", "crashed (signal {})", sig),
-        (None, Some(c)) if c > 128 => crate::tr!("abgestürzt (Code {})", "crashed (code {})", c),
-        (None, Some(c)) => crate::tr!("Code {}", "code {}", c),
+        (Some(sig), _) => crate::msg!("server_extract_crashedSignal", signal = sig),
+        (None, Some(c)) if c > 128 => crate::msg!("server_extract_crashedCode", code = c),
+        (None, Some(c)) => crate::msg!("server_extract_code", code = c),
         (None, None) => String::new(),
     };
     let mut lines = error_lines(run);
@@ -529,10 +529,9 @@ fn merge_into(from: &Path, to: &Path) -> std::io::Result<()> {
         match std::fs::symlink_metadata(&dst) {
             Ok(m) if m.is_dir() && is_dir => merge_into(&src, &dst)?,
             Ok(m) if m.is_dir() || is_dir => {
-                return Err(std::io::Error::other(crate::tr!(
-                    "{} gibt es schon als Datei oder Ordner",
-                    "{} already exists as a file or folder",
-                    dst.display()
+                return Err(std::io::Error::other(crate::msg!(
+                    "server_extract_exists",
+                    path = dst.display()
                 )))
             }
             _ => std::fs::rename(&src, &dst)?,
@@ -567,12 +566,7 @@ async fn extract_one(
         .collect();
     if tools.is_empty() {
         return Err(Failed {
-            message: crate::tr!(
-                "kein Entpacker gefunden. Empfohlen: 7-Zip und unrar, unter Ubuntu/Debian \
-                 „sudo apt install 7zip unrar“; im Docker-Image ist alles enthalten",
-                "no extractor found. Recommended: 7-Zip and unrar, on Ubuntu/Debian \
-                 “sudo apt install 7zip unrar”; the Docker image has everything"
-            ),
+            message: crate::msg!("server_extract_noTool"),
             wrong_password: false,
         });
     }
@@ -603,11 +597,7 @@ async fn extract_one(
                 return match moved {
                     Ok(()) => Ok(pw.clone()),
                     Err(e) => Err(Failed {
-                        message: crate::tr!(
-                            "Entpackt, aber nicht verschoben: {}",
-                            "Extracted, but not moved: {}",
-                            e
-                        ),
+                        message: crate::msg!("server_extract_notMoved", error = e),
                         wrong_password: false,
                     }),
                 };
@@ -686,46 +676,22 @@ fn clean_passwords(list: Vec<String>) -> Vec<String> {
 /// extractor said.
 fn failure_message(rar: bool, has_unrar: bool, found: Causes, failures: Vec<String>) -> String {
     let hint = if found.no_space {
-        Some(crate::tr!(
-            "kein Speicherplatz mehr frei",
-            "no space left on the disk"
-        ))
+        Some(crate::msg!("server_extract_noSpace"))
     } else if found.wrong_password {
-        Some(crate::tr!(
-            "Passwort fehlt oder ist falsch: unter Einstellungen → Archiv-Passwörter eintragen oder beim erneuten Entpacken eingeben",
-            "password missing or wrong: add it under Settings → Archive passwords or enter it when extracting again"
-        ))
+        Some(crate::msg!("server_extract_wrongPassword"))
     } else if rar && !has_unrar && (found.crashed || found.unsupported) {
-        Some(crate::tr!(
-            "7-Zip kann dieses RAR-Archiv nicht entpacken; unrar installieren („sudo apt install unrar“), Haul nimmt es für RAR zuerst",
-            "7-Zip cannot extract this RAR archive; install unrar (“sudo apt install unrar”), Haul uses it first for RAR"
-        ))
+        Some(crate::msg!("server_extract_rarNeedsUnrar"))
     } else if found.crashed {
-        Some(crate::tr!(
-            "der Entpacker ist abgestürzt",
-            "the extractor crashed"
-        ))
+        Some(crate::msg!("server_extract_crashed"))
     } else if found.damaged {
-        Some(crate::tr!(
-            "Archiv beschädigt oder unvollständig",
-            "archive damaged or incomplete"
-        ))
+        Some(crate::msg!("server_extract_damaged"))
     } else {
         None
     };
     let detail = failures.join("; ");
     match hint {
-        Some(h) => crate::tr!(
-            "Entpacken fehlgeschlagen: {}. {}",
-            "Extraction failed: {}. {}",
-            h,
-            detail
-        ),
-        None => crate::tr!(
-            "Entpacken fehlgeschlagen: {}",
-            "Extraction failed: {}",
-            detail
-        ),
+        Some(h) => crate::msg!("server_extract_failedHint", hint = h, detail = detail),
+        None => crate::msg!("server_extract_failed", detail = detail),
     }
 }
 
@@ -798,7 +764,7 @@ impl Engine {
     pub async fn extract_package(&self, package_id: i64) -> Result<()> {
         let pkg = db::get_package(&self.db, package_id)
             .await?
-            .ok_or_else(|| anyhow!(crate::tr!("Paket nicht gefunden", "Package not found")))?;
+            .ok_or_else(|| anyhow!(crate::msg!("server_package_notFound")))?;
         let dir = self.package_dir(&pkg);
         let sets = self.package_sets(package_id, &dir).await;
         if sets.is_empty() {
@@ -872,22 +838,20 @@ impl Engine {
         let mut all = Vec::new();
         for (f, members) in sets {
             if let Some(names) = self.loading_volumes(&members, &loading) {
-                incomplete.push(crate::tr!(
-                    "{}: Archiv unvollständig, noch nicht heruntergeladen: {}",
-                    "{}: archive incomplete, not downloaded yet: {}",
-                    f,
-                    names.join(", ")
+                incomplete.push(crate::msg!(
+                    "server_extract_notDownloaded",
+                    archive = f,
+                    names = names.join(", ")
                 ));
                 continue;
             }
             let missing = missing_volumes(dir, &members);
             if !missing.is_empty() {
                 tracing::info!(archive = %f, missing = ?missing, "extract: archive incomplete");
-                incomplete.push(crate::tr!(
-                    "{}: Archiv unvollständig, es fehlt: {}",
-                    "{}: archive incomplete, missing: {}",
-                    f,
-                    missing.join(", ")
+                incomplete.push(crate::msg!(
+                    "server_extract_partsMissing",
+                    archive = f,
+                    missing = missing.join(", ")
                 ));
                 continue;
             }
@@ -1107,18 +1071,14 @@ impl Engine {
             } else {
                 let dir = path
                     .parent()
-                    .ok_or_else(|| anyhow!(crate::tr!("ungültiger Pfad", "invalid path")))?
+                    .ok_or_else(|| anyhow!(crate::msg!("server_files_invalidPath")))?
                     .to_path_buf();
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 let set = archive_set(&files::file_names(&dir), &name).ok_or_else(|| {
-                    anyhow!(crate::tr!(
-                        "{} ist kein Archiv oder der erste Teil fehlt",
-                        "{} is not an archive or its first part is missing",
-                        name
-                    ))
+                    anyhow!(crate::msg!("server_extract_notArchive", name = name))
                 })?;
                 (dir, Some(set))
             };
@@ -1135,20 +1095,16 @@ impl Engine {
             }
         }
         if jobs.is_empty() {
-            anyhow::bail!(crate::tr!(
-                "nichts zum Entpacken ausgewählt",
-                "nothing selected to extract"
-            ));
+            anyhow::bail!(crate::msg!("server_extract_nothingSelected"));
         }
         for (dir, _) in &jobs {
             if self
                 .extract_progress_of(&files::relative(&self.cfg.done_dir, dir))
                 .is_some()
             {
-                anyhow::bail!(crate::tr!(
-                    "in {} wird bereits entpackt",
-                    "{} is already being extracted",
-                    dir.display()
+                anyhow::bail!(crate::msg!(
+                    "server_extract_alreadyRunning",
+                    path = dir.display()
                 ));
             }
         }
@@ -1465,6 +1421,7 @@ mod tool_tests {
             .await
             .unwrap_err()
             .message;
+        let err = crate::i18n::german(&err);
         assert!(err.contains("kein Entpacker gefunden"), "{err}");
         assert!(err.contains("apt install 7zip unrar"), "{err}");
 
@@ -1511,7 +1468,7 @@ mod tool_tests {
             .await
             .unwrap_err();
         assert!(!err.wrong_password);
-        let de = crate::i18n::pick(&err.message, false);
+        let de = crate::i18n::german(&err.message);
         assert!(de.contains("Signal 11"), "{de}");
         assert!(de.contains("unrar installieren"), "{de}");
         match saved_path {
@@ -1553,20 +1510,20 @@ mod message_tests {
         assert!(c.crashed);
         let line = describe_run(&SEVEN, &r);
         assert_eq!(
-            crate::i18n::pick(&line, false),
+            crate::i18n::german(&line),
             "7-Zip (abgestürzt (Signal 11)): Multivolume = - · Volumes = 1"
         );
         let msg = failure_message(true, false, c, vec![line.clone()]);
-        let de = crate::i18n::pick(&msg, false);
+        let de = crate::i18n::german(&msg);
         assert!(de.contains("unrar installieren"), "{de}");
         assert!(de.contains("Signal 11"), "{de}");
         // With unrar present (it failed too) or for a zip, no unrar advice.
         assert!(
-            !crate::i18n::pick(&failure_message(true, true, c, vec![line.clone()]), false)
+            !crate::i18n::german(&failure_message(true, true, c, vec![line.clone()]))
                 .contains("unrar installieren")
         );
         assert!(
-            !crate::i18n::pick(&failure_message(false, false, c, vec![line]), false)
+            !crate::i18n::german(&failure_message(false, false, c, vec![line]))
                 .contains("unrar installieren")
         );
         // A shell reports the same crash as 139.
@@ -1583,14 +1540,14 @@ mod message_tests {
         );
         let c = causes(&r);
         assert!(c.wrong_password && !c.crashed);
-        let line = crate::i18n::pick(&describe_run(&SEVEN, &r), false);
+        let line = crate::i18n::german(&describe_run(&SEVEN, &r));
         assert!(
             line.starts_with(
                 "7-Zip (Code 2): ERROR: Data Error in encrypted file. Wrong password? : film.mkv"
             ),
             "{line}"
         );
-        let msg = crate::i18n::pick(&failure_message(false, false, c, vec![]), false);
+        let msg = crate::i18n::german(&failure_message(false, false, c, vec![]));
         assert!(msg.contains("Archiv-Passwörter"), "{msg}");
         // unrar's wordings.
         for out in [

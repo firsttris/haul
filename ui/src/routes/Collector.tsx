@@ -8,10 +8,10 @@ import { partialArchives } from '../components/archive';
 import { loadUnchecked, pruneUnchecked, saveUnchecked, type Unchecked } from '../components/unchecked';
 import { describe, toneColor } from '../components/status';
 import { bytes } from '../format';
-import { localize, useT } from '../i18n';
+import { localize } from '../i18n';
+import * as m from '../paraglide/messages';
 
 function AddLinksForm() {
-  const t = useT();
   const navigate = useNavigate();
   const [links, setLinks] = useState('');
   const [packageName, setPackageName] = useState('');
@@ -38,13 +38,13 @@ function AddLinksForm() {
 
   return (
     <form className="card" onSubmit={submit}>
-      <h2>{t.collector.paste}</h2>
+      <h2>{m.collector_paste()}</h2>
       <div className="field">
-        <label htmlFor="links">{t.collector.linksLabel}</label>
+        <label htmlFor="links">{m.collector_linksLabel()}</label>
         <textarea
           id="links"
           className="textarea"
-          placeholder={t.collector.linksPlaceholder}
+          placeholder={m.collector_linksPlaceholder()}
           value={links}
           onChange={(e) => setLinks(e.target.value)}
           required
@@ -52,35 +52,35 @@ function AddLinksForm() {
       </div>
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="pkg">{t.collector.packageName}</label>
-          <input id="pkg" className="input" placeholder={t.collector.packageNamePlaceholder} value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+          <label htmlFor="pkg">{m.collector_packageName()}</label>
+          <input id="pkg" className="input" placeholder={m.collector_packageNamePlaceholder()} value={packageName} onChange={(e) => setPackageName(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="dir">{t.collector.targetDir}</label>
-          <input id="dir" className="input" placeholder={t.collector.targetDirPlaceholder} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
+          <label htmlFor="dir">{m.collector_targetDir()}</label>
+          <input id="dir" className="input" placeholder={m.collector_targetDirPlaceholder()} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
         </div>
       </div>
       <div className="field">
-        <label htmlFor="pw">{t.collector.password}</label>
+        <label htmlFor="pw">{m.collector_password()}</label>
         <input
           id="pw"
           className="input"
           autoComplete="off"
-          placeholder={t.collector.passwordPlaceholder}
+          placeholder={m.collector_passwordPlaceholder()}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <span className="help">{t.collector.passwordHelp}</span>
+        <span className="help">{m.collector_passwordHelp()}</span>
       </div>
       {add.error && <div className="notice" role="alert">{add.error.message}</div>}
       <div className="toolbar">
         <label className="checkbox">
           <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} />
-          {t.collector.startNow}
+          {m.collector_startNow()}
         </label>
         <div className="spacer" />
         <button type="submit" className="btn primary" disabled={add.isPending || count === 0}>
-          {t.collector.addN(count)}
+          {count > 0 ? m.collector_addN({ n: count }) : m.collector_add()}
         </button>
       </div>
     </form>
@@ -98,7 +98,6 @@ function startPackage(pkg: Package, unchecked: Set<number>) {
 }
 
 function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unchecked: Set<number>; setUnchecked: (s: Set<number>) => void }) {
-  const t = useT();
   const [name, setName] = useState(pkg.name);
   const [targetDir, setTargetDir] = useState(pkg.targetDir);
   const last = useRef<number | null>(null);
@@ -137,10 +136,10 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
   }
 
   return (
-    <section className="card" aria-label={t.collector.packageAria(pkg.name)}>
+    <section className="card" aria-label={m.collector_packageAria({ name: pkg.name })}>
       <div className="grid-2">
         <div className="field">
-          <label htmlFor={`name-${pkg.id}`}>{t.collector.packageName}</label>
+          <label htmlFor={`name-${pkg.id}`}>{m.collector_packageName()}</label>
           <input
             id={`name-${pkg.id}`}
             className="input"
@@ -150,7 +149,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
           />
         </div>
         <div className="field">
-          <label htmlFor={`dir-${pkg.id}`}>{t.collector.target}</label>
+          <label htmlFor={`dir-${pkg.id}`}>{m.collector_target()}</label>
           <input
             id={`dir-${pkg.id}`}
             className="input mono"
@@ -161,17 +160,17 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
         </div>
       </div>
       <div className="subtitle" style={{ fontSize: 13 }}>
-        {pkg.source === 'cnl' ? "Click'n'Load" : pkg.source === 'extension' ? t.collector.extension : t.collector.manual}
+        {pkg.source === 'cnl' ? "Click'n'Load" : pkg.source === 'extension' ? m.collector_extension() : m.collector_manual()}
         {pkg.sourcePage && (
           <>
             {' '}
-            {t.collector.from} <span className="mono">{pkg.sourcePage}</span>
+            {m.collector_from()} <span className="mono">{pkg.sourcePage}</span>
           </>
         )}
         {' · '}
-        {t.common.files(pkg.downloads.length)} · {bytes(total)}
-        {pkg.hasPasswords && ` · ${t.collector.withPassword}`}
-        {offline > 0 && <span style={{ color: 'var(--err)' }}> · {t.collector.offline(offline)}</span>}
+        {m.common_files({ n: pkg.downloads.length })} · {bytes(total)}
+        {pkg.hasPasswords && ` · ${m.collector_withPassword()}`}
+        {offline > 0 && <span style={{ color: 'var(--err)' }}> · {m.collector_offline({ n: offline })}</span>}
       </div>
       <div className="list">
         {pkg.downloads.length > 1 && (
@@ -189,22 +188,22 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
               }}
             />
             <span className="grow">
-              <span className="title">{t.collector.checkAll}</span>
+              <span className="title">{m.collector_checkAll()}</span>
             </span>
             <span className="subtitle" style={{ fontSize: 13 }}>
-              {t.collector.checkedOf(checked.length, pkg.downloads.length)}
+              {m.collector_checkedOf({ n: checked.length, total: pkg.downloads.length })}
             </span>
           </label>
         )}
         {pkg.downloads.map((d, i) => {
-          const s = describe(d, t);
+          const s = describe(d);
           const on = !unchecked.has(d.id);
           return (
             <div className={`list-row pick${on ? '' : ' unchecked'}`} key={d.id} onClick={(e) => toggle(i, e.shiftKey)}>
               <input
                 type="checkbox"
                 className="row-check"
-                aria-label={t.collector.include(d.name)}
+                aria-label={m.collector_include({ name: d.name })}
                 checked={on}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -227,7 +226,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
               <button
                 type="button"
                 className="icon-btn"
-                aria-label={t.common.remove(d.name)}
+                aria-label={m.common_remove({ name: d.name })}
                 onClick={(e) => {
                   e.stopPropagation();
                   api(`/downloads/${d.id}`, { method: 'DELETE' });
@@ -241,7 +240,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
       </div>
       {partial.map((a) => (
         <div className="notice" role="status" key={a.label}>
-          {t.collector.partialArchive(a.label, a.checked, a.total)}{' '}
+          {m.collector_partialArchive({ name: a.label, n: a.checked, total: a.total })}{' '}
           <button
             type="button"
             className="btn small"
@@ -251,7 +250,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
               setUnchecked(next);
             }}
           >
-            {t.collector.checkAllParts}
+            {m.collector_checkAllParts()}
           </button>
         </div>
       ))}
@@ -259,16 +258,16 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
       <div className="toolbar">
         <button type="button" className="btn small" onClick={() => act.mutate(`/packages/${pkg.id}/check`)}>
           <IconRefresh size={16} />
-          {t.collector.check}
+          {m.collector_check()}
         </button>
         <button type="button" className="btn small danger" onClick={() => remove.mutate()}>
           <IconTrash size={16} />
-          {t.collector.discard}
+          {m.collector_discard()}
         </button>
         <div className="spacer" />
         <button type="button" className="btn primary small" disabled={startable === 0 || start.isPending} onClick={() => start.mutate()}>
           <IconPlay size={16} />
-          {!allChecked ? t.collector.startSome(startable, online) : offline > 0 ? t.collector.startN(startable) : t.collector.start}
+          {!allChecked ? m.collector_startSome({ n: startable, total: online }) : offline > 0 ? m.collector_startN({ n: startable }) : m.collector_start()}
         </button>
       </div>
     </section>
@@ -276,14 +275,13 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
 }
 
 export function CollectorPage() {
-  const t = useT();
   const { data: packages = [], isSuccess } = usePackages('collector');
   // Kept in this browser, so a reload does not check everything again.
   const [unchecked, setUnchecked] = useState<Unchecked>(loadUnchecked);
   useEffect(() => saveUnchecked(unchecked), [unchecked]);
   // Started, discarded or deleted: forget their checkboxes (only once the list is loaded).
   useEffect(() => {
-    if (isSuccess) setUnchecked((m) => pruneUnchecked(m, packages));
+    if (isSuccess) setUnchecked((prev) => pruneUnchecked(prev, packages));
   }, [isSuccess, packages]);
   const uncheckedOf = (p: Package) => unchecked.get(p.id) ?? new Set<number>();
   const someUnchecked = packages.some((p) => p.downloads.some((d) => uncheckedOf(p).has(d.id)));
@@ -300,13 +298,13 @@ export function CollectorPage() {
   return (
     <>
       <PageHeader
-        title={t.collector.title}
-        subtitle={t.collector.subtitle(packages.length, links)}
+        title={m.collector_title()}
+        subtitle={m.collector_subtitle({ packages: packages.length, links })}
       >
         {packages.length > 0 && (
           <button type="button" className="btn primary" onClick={() => startAll.mutate()} disabled={startAll.isPending}>
             <IconPlay size={16} />
-            {someUnchecked ? t.collector.startChecked : t.collector.startAll}
+            {someUnchecked ? m.collector_startChecked() : m.collector_startAll()}
           </button>
         )}
       </PageHeader>
@@ -317,7 +315,7 @@ export function CollectorPage() {
             key={p.id}
             pkg={p}
             unchecked={uncheckedOf(p)}
-            setUnchecked={(s) => setUnchecked((m) => new Map(m).set(p.id, s))}
+            setUnchecked={(s) => setUnchecked((prev) => new Map(prev).set(p.id, s))}
           />
         ))}
       </div>

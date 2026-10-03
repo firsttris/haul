@@ -3,11 +3,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { post } from '../api';
 import { Logo } from '../components/icons';
 import { LanguageSwitch } from '../components/Layout';
-import { useT } from '../i18n';
+import * as m from '../paraglide/messages';
+
 
 export function Login({ setup }: { setup: boolean }) {
   const qc = useQueryClient();
-  const t = useT();
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -36,14 +36,14 @@ export function Login({ setup }: { setup: boolean }) {
           <LanguageSwitch />
         </div>
         <div className="subtitle">
-          {setup ? t.login.setup : t.login.title}
+          {setup ? m.login_setup() : m.login_title()}
         </div>
         <div className="field">
-          <label htmlFor="user">{t.login.userName}</label>
+          <label htmlFor="user">{m.login_userName()}</label>
           <input id="user" className="input" autoComplete="username" value={user} onChange={(e) => setUser(e.target.value)} required />
         </div>
         <div className="field">
-          <label htmlFor="password">{t.common.password}</label>
+          <label htmlFor="password">{m.common_password()}</label>
           <input
             id="password"
             className="input"
@@ -54,11 +54,11 @@ export function Login({ setup }: { setup: boolean }) {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          {setup && <span className="help">{t.login.minLength}</span>}
+          {setup && <span className="help">{m.login_minLength()}</span>}
         </div>
         {error && <div className="notice" role="alert">{error}</div>}
         <button className="btn primary" type="submit" disabled={busy}>
-          {setup ? t.login.createUser : t.login.submit}
+          {setup ? m.login_createUser() : m.login_submit()}
         </button>
       </form>
     </div>

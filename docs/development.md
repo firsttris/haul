@@ -61,6 +61,23 @@ moves finished files into the package folder.
 | Plugins | TypeScript bundled with esbuild, run with rquickjs inside the server |
 | Frontend | Vite, React, TanStack Router, Query and Table; embedded in the binary with rust-embed |
 
+### Texts
+
+All texts of the UI and the server live in `ui/messages/{de,en}.json`
+([Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs)); keys follow
+`area_group_name` (`settings_title`, `server_extract_noSpace`). `pnpm --filter @haul/ui i18n` compiles
+them to `ui/src/paraglide` (dev, build, typecheck and test do that on their own). Components call them
+directly: `m.settings_title()`, `m.done_confirmDeleteOne({ name, dir: String(dir) })`; a key chosen at
+runtime goes through `pickMsg(msgGroup.disks, id)`. Placeholders are `{name}`, a literal brace is `\{`.
+
+The server does not render texts: `crate::msg!("server_files_notFoundAt", path = rel)` sends the key
+and its inputs, and the UI renders them with `localize()` in the viewer's language, also for errors
+stored long ago. Logs show messages as `key {inputs}` (`i18n::plain`). Plugins still write both texts
+side by side (`bilingual()` from the plugin SDK), and the browser extension keeps its own `_locales`.
+
+`ui/src/i18n.test.ts` checks that both languages have the same keys and placeholders, that every
+message is used (UI and server) and every used key exists; `cargo test` checks the server's keys too.
+
 ## Repository layout
 
 ```

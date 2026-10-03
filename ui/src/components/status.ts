@@ -1,7 +1,8 @@
 import type { Captcha, Download } from '../api';
 import type { LiveProgress } from '../live';
 import { duration } from '../format';
-import { localize, type Messages } from '../i18n';
+import { localize } from '../i18n';
+import * as m from '../paraglide/messages';
 
 export type Tone = 'ok' | 'run' | 'wait' | 'err';
 
@@ -16,43 +17,41 @@ export const toneColor: Record<Tone, { color: string; bar: string }> = {
  *  `live`: the download's counters from the SSE stream, with the phase after the last byte. */
 export function describe(
   d: Download,
-  t: Messages,
   waiting?: Map<string, Captcha['kind']>,
   live?: LiveProgress,
   now = Date.now(),
 ): { label: string; tone: Tone } {
-  const s = t.status;
   const asks = (d.status === 'resolving' || d.status === 'crawling') && waiting?.get(d.url);
-  if (asks) return { label: asks === 'password' ? s.password : s.captcha, tone: 'run' };
+  if (asks) return { label: asks === 'password' ? m.status_password() : m.status_captcha(), tone: 'run' };
   const error = localize(d.error);
   switch (d.status) {
     case 'finished':
-      return { label: s.finished, tone: 'ok' };
+      return { label: m.status_finished(), tone: 'ok' };
     case 'downloading':
       // The core says what happens after the last byte (one checksum check at a time).
-      if (live?.phase === 'hashWait') return { label: s.verifyWait, tone: 'wait' };
-      if (live?.phase === 'hashing') return { label: s.verifying, tone: 'run' };
+      if (live?.phase === 'hashWait') return { label: m.status_verifyWait(), tone: 'wait' };
+      if (live?.phase === 'hashing') return { label: m.status_verifying(), tone: 'run' };
       // No live data yet: all bytes there and the hoster published a checksum.
-      if (!live && d.hashType && d.size !== null && d.size > 0 && d.bytesDone >= d.size) return { label: s.verifying, tone: 'run' };
-      return { label: s.downloading, tone: 'run' };
+      if (!live && d.hashType && d.size !== null && d.size > 0 && d.bytesDone >= d.size) return { label: m.status_verifying(), tone: 'run' };
+      return { label: m.status_downloading(), tone: 'run' };
     case 'resolving':
-      return { label: s.resolving, tone: 'run' };
+      return { label: m.status_resolving(), tone: 'run' };
     case 'paused':
-      return { label: s.paused, tone: 'wait' };
+      return { label: m.status_paused(), tone: 'wait' };
     case 'crawling':
-      return { label: s.crawling, tone: 'run' };
+      return { label: m.status_crawling(), tone: 'run' };
     case 'collected':
       return d.online === 'offline'
-        ? { label: s.offline, tone: 'err' }
-        : { label: d.online === 'online' ? s.online : s.unchecked, tone: d.online === 'online' ? 'ok' : 'wait' };
+        ? { label: m.status_offline(), tone: 'err' }
+        : { label: d.online === 'online' ? m.status_online() : m.status_unchecked(), tone: d.online === 'online' ? 'ok' : 'wait' };
     case 'failed':
-      return { label: error || s.error, tone: 'err' };
+      return { label: error || m.status_error(), tone: 'err' };
     case 'queued':
       if (d.retryAt && d.retryAt > now) {
-        const next = s.retryIn(duration((d.retryAt - now) / 1000));
+        const next = m.status_retryIn({ time: duration((d.retryAt - now) / 1000) });
         return { label: error ? `${next} · ${error}` : next, tone: 'err' };
       }
-      return { label: s.waiting, tone: 'wait' };
+      return { label: m.status_waiting(), tone: 'wait' };
   }
 }
 

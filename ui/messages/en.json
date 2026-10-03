@@ -1,0 +1,556 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "common_cancel": "Cancel",
+  "common_save": "Save",
+  "common_add": "Add",
+  "common_name": "Name",
+  "common_size": "Size",
+  "common_status": "Status",
+  "common_user": "User",
+  "common_password": "Password",
+  "common_remove": "Remove {name}",
+  "common_pause": "Pause {name}",
+  "common_resume": "Resume {name}",
+  "common_files": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "{n} file",
+        "nPlural=other": "{n} files"
+      }
+    }
+  ],
+  "app_serverUnreachable": "Server not reachable: {error}",
+  "nav_main": "Main navigation",
+  "nav_downloads": "Downloads",
+  "nav_collector": "Link grabber",
+  "nav_done": "Done",
+  "nav_accounts": "Accounts & plugins",
+  "nav_settings": "Settings",
+  "nav_storageAria": "Disk space",
+  "nav_storage": "Storage",
+  "nav_connected": "connected to {host}",
+  "nav_disconnected": "Disconnected",
+  "nav_language": "Language",
+  "disks_tmp": "tmp",
+  "disks_fertig": "done",
+  "status_finished": "Finished",
+  "status_downloading": "Downloading",
+  "status_resolving": "Connecting …",
+  "status_paused": "Paused",
+  "status_crawling": "Reading folder …",
+  "status_captcha": "Waiting for captcha",
+  "status_password": "Waiting for password",
+  "status_verifying": "Verifying file …",
+  "status_verifyWait": "Waiting for verification",
+  "status_offline": "File offline",
+  "status_online": "Online",
+  "status_unchecked": "Unchecked",
+  "status_error": "Error",
+  "status_waiting": "Waiting",
+  "status_retryIn": "Retrying in {time}",
+  "hash_ok": "verified",
+  "hash_bad": "checksum wrong",
+  "hash_okTitle": "{kind} matches the hoster's value: the file is intact.",
+  "hash_badTitle": "{kind} does not match the hoster's value: the file is damaged.",
+  "captcha_waiting": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "A captcha is waiting for you",
+        "nPlural=other": "{n} captchas are waiting for you"
+      }
+    }
+  ],
+  "captcha_item": "{host} ({plugin}) · {minutes} min left",
+  "captcha_solve": "Solve",
+  "captcha_cancel": "Cancel",
+  "captcha_hint": "Opens the hoster’s page in a new tab; the userscript shows the captcha there.",
+  "captcha_setup": "Set up the userscript",
+  "captcha_notify": "Captcha for {host} is waiting",
+  "captcha_passwordsWaiting": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "A download needs a password",
+        "nPlural=other": "{n} downloads need a password"
+      }
+    }
+  ],
+  "captcha_passwordFor": "Password for {name} ({plugin}) · {minutes} min left",
+  "captcha_passwordWrong": "The password was wrong.",
+  "captcha_passwordLabel": "Password for {name}",
+  "captcha_passwordOk": "OK",
+  "captcha_notifyPassword": "Password needed for {name}",
+  "captcha_archivesWaiting": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "An archive needs a password",
+        "nPlural=other": "{n} archives need a password"
+      }
+    }
+  ],
+  "captcha_archiveHint": "None of the saved archive passwords fits. Haul remembers a correct one under Settings → Archive passwords.",
+  "captcha_archivePasswordFor": [
+    {
+      "declarations": [
+        "input name",
+        "input pkg",
+        "input minutes",
+        "input hasPkg"
+      ],
+      "selectors": [
+        "hasPkg"
+      ],
+      "match": {
+        "hasPkg=true": "Archive password for {name} ({pkg}) · {minutes} min left",
+        "hasPkg=*": "Archive password for {name} · {minutes} min left"
+      }
+    }
+  ],
+  "captcha_imageHint": "Type the text shown in the picture.",
+  "captcha_imageAlt": "Captcha picture",
+  "captcha_imageLabel": "Text from the captcha picture",
+  "captcha_title": "Captchas",
+  "captcha_intro": "reCaptcha, hCaptcha and Turnstile are only valid on the hoster’s own page. So Haul opens them in your browser, where a small userscript shows the captcha and sends the answer back to Haul.",
+  "captcha_step1": "Install Tampermonkey or Violentmonkey in the browser (Brave: Chrome Web Store). In Chrome, Edge and Brave, then turn on “Allow user scripts” under chrome://extensions → Details, or the userscript does not run.",
+  "captcha_step2": "Install the userscript:",
+  "captcha_install": "Install haul-captcha.user.js",
+  "captcha_step3": "When a captcha waits, a notice shows at the top; “Solve” opens it. Once solved, Haul continues and the tab can be closed.",
+  "captcha_notifications": "Browser notification for new captchas",
+  "captcha_notificationsOn": "Notifications are on.",
+  "captcha_notificationsBlocked": "Notifications are blocked in the browser.",
+  "captcha_notificationsEnable": "Allow notifications",
+  "login_setup": "First start: create the user for the web interface.",
+  "login_title": "Log in",
+  "login_userName": "User name",
+  "login_minLength": "At least 8 characters.",
+  "login_createUser": "Create user",
+  "login_submit": "Log in",
+  "downloads_title": "Downloads",
+  "downloads_subtitle": "{active} active · {queued} queued · {failed} failed",
+  "downloads_filters_all": "All",
+  "downloads_filters_active": "Active",
+  "downloads_filters_waiting": "Waiting",
+  "downloads_filters_finished": "Finished",
+  "downloads_filters_failed": "Failed",
+  "downloads_filterAria": "Filter",
+  "downloads_colHoster": "Host",
+  "downloads_colProgress": "Progress",
+  "downloads_colSpeed": "Speed",
+  "downloads_colEta": "ETA",
+  "downloads_progressOf": "Progress of {name}",
+  "downloads_total": "Total",
+  "downloads_limit": "limit {value}",
+  "downloads_noLimit": "no limit",
+  "downloads_pauseAll": "Pause all",
+  "downloads_resumeAll": "Resume all",
+  "downloads_addLinks": "Add links",
+  "downloads_noExtractorTitle": "No extractor installed.",
+  "downloads_noExtractorText": "Finished archives are not extracted. 7-Zip and unrar are recommended, on Ubuntu/Debian:",
+  "downloads_noUnrarTitle": "unrar is missing.",
+  "downloads_noUnrarText": "RAR archives are now extracted by 7-Zip, whose RAR module crashes on some archives (7-Zip 23.01). unrar is more reliable for RAR, on Ubuntu/Debian (multiverse):",
+  "downloads_noExtractorThen": "Then click “Extract again” on the affected packages.",
+  "downloads_statActive": "Active",
+  "downloads_slots": "slots",
+  "downloads_statQueue": "Queue",
+  "downloads_statToday": "Finished today",
+  "downloads_premium": "Premium",
+  "downloads_left": "{unit} left",
+  "downloads_trafficUnknown": "Traffic unknown",
+  "downloads_addAccount": "Add account",
+  "downloads_clearFinished": "Remove finished",
+  "downloads_search": "Search",
+  "downloads_searchPlaceholder": "File name …",
+  "downloads_nothingFound": "Nothing found",
+  "downloads_adjustFilter": "Adjust the filter or search.",
+  "downloads_empty": "No downloads yet",
+  "downloads_emptyHint": "Paste links or send them via Click'n'Load.",
+  "downloads_parallel": "{n} parallel",
+  "downloads_connections": "{n} connections/file",
+  "downloads_tmpDir": "tmp",
+  "downloads_doneDir": "done",
+  "downloads_liveUpdates": "Live updates via SSE",
+  "pkg_toggle": "Expand or collapse {name}",
+  "pkg_extractingPct": "extracting {pct} %",
+  "pkg_extracting": "extracting …",
+  "pkg_extracted": "extracted",
+  "pkg_extractFailed": "Extraction failed",
+  "pkg_beingExtracted": "{name} is being extracted",
+  "pkg_extract": "Extract",
+  "pkg_extractName": "Extract {name}",
+  "pkg_extractAgain": "Extract again",
+  "collector_title": "Link grabber",
+  "collector_subtitle": [
+    {
+      "declarations": [
+        "input packages",
+        "input links",
+        "local packagesPlural = packages: plural",
+        "local linksPlural = links: plural"
+      ],
+      "selectors": [
+        "packagesPlural",
+        "linksPlural"
+      ],
+      "match": {
+        "packagesPlural=one, linksPlural=one": "{packages} package · {links} link · Click'n'Load lands here and never starts on its own",
+        "packagesPlural=one, linksPlural=other": "{packages} package · {links} links · Click'n'Load lands here and never starts on its own",
+        "packagesPlural=other, linksPlural=one": "{packages} packages · {links} link · Click'n'Load lands here and never starts on its own",
+        "packagesPlural=other, linksPlural=other": "{packages} packages · {links} links · Click'n'Load lands here and never starts on its own"
+      }
+    }
+  ],
+  "collector_startAll": "Start all",
+  "collector_paste": "Paste links",
+  "collector_linksLabel": "Links, one per line or mixed into any text",
+  "collector_linksPlaceholder": "https://ddownload.com/abc123def456\nhttps://example.org/file.iso",
+  "collector_packageName": "Package name",
+  "collector_packageNamePlaceholder": "derived from the file names",
+  "collector_targetDir": "Target folder (relative to done)",
+  "collector_targetDirPlaceholder": "= package name",
+  "collector_password": "Password (optional)",
+  "collector_passwordPlaceholder": "e.g. the “PW:” from the page with the links",
+  "collector_passwordHelp": "For protected downloads and archives. If it is missing or wrong, Haul asks; the list for all archives is under Settings → Archive passwords.",
+  "collector_startNow": "Start right away, skip the link grabber",
+  "collector_addN": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "Add {n} link",
+        "nPlural=other": "Add {n} links"
+      }
+    }
+  ],
+  "collector_packageAria": "Package {name}",
+  "collector_target": "Target folder",
+  "collector_manual": "manual",
+  "collector_extension": "browser extension",
+  "collector_from": "from",
+  "collector_withPassword": "with password",
+  "collector_offline": "{n} offline",
+  "collector_check": "Check online",
+  "collector_discard": "Discard",
+  "collector_start": "Start",
+  "collector_startN": "Start {n}",
+  "collector_startSome": "Start {n} of {total}",
+  "collector_startChecked": "Start checked",
+  "collector_checkAll": "All files",
+  "collector_checkedOf": "{n} of {total} checked",
+  "collector_include": "Download {name}",
+  "collector_partialArchive": "{name}: only {n} of {total} parts checked. The archive cannot be extracted like this.",
+  "collector_checkAllParts": "Check all parts",
+  "accounts_title": "Accounts & plugins",
+  "accounts_subtitle": "Premium accounts for hosters and the loaded hoster plugins",
+  "accounts_status_unchecked": "Unchecked",
+  "accounts_status_checking": "Checking …",
+  "accounts_status_valid": "Valid",
+  "accounts_status_invalid": "Invalid",
+  "accounts_status_error": "Error",
+  "accounts_add": "Add account",
+  "accounts_defaultHelp": "User name and password of the hoster account.",
+  "accounts_encrypted": "Stored encrypted with",
+  "accounts_hoster": "Host",
+  "accounts_newSecret": "New: {label}",
+  "accounts_saveAndCheck": "Save and check",
+  "accounts_list": "Accounts",
+  "accounts_none": "No accounts yet.",
+  "accounts_sessionCookie": "Session cookie",
+  "accounts_premium": "Premium",
+  "accounts_noPremium": "No premium",
+  "accounts_typeUnknown": "Type unknown",
+  "accounts_until": " until {date}",
+  "accounts_trafficLeft": " · {amount} traffic left",
+  "accounts_checked": " · checked {when}",
+  "accounts_enabled": "Active",
+  "accounts_changeLogin": "Change login",
+  "accounts_checkAria": "Check account",
+  "accounts_check": "Check",
+  "accounts_deleteAria": "Delete account",
+  "accounts_plugins": "Plugins",
+  "accounts_reload": "Reload",
+  "accounts_builtin": "Included in Haul",
+  "accounts_custom": "Custom file",
+  "accounts_patterns": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "Show link pattern",
+        "nPlural=other": "Show {n} link patterns"
+      }
+    }
+  ],
+  "accounts_premiumRequired": "Premium account only",
+  "accounts_noAccountNeeded": "Works without an account",
+  "accounts_accountPossible": "account possible",
+  "accounts_supports": "Supports: {domains}",
+  "accounts_noPlugins": "No plugins loaded.",
+  "accounts_replacesNewer": "Outdated: this custom file (v{own}) hides the plugin v{builtin} included in Haul. Delete the file and click “Reload” to use the included one.",
+  "accounts_replaces": "Replaces the plugin v{builtin} included in Haul.",
+  "settings_title": "Settings",
+  "settings_downloads": "Downloads",
+  "settings_parallel": "Parallel downloads",
+  "settings_connections": "Connections per file",
+  "settings_limit": "Bandwidth limit (KiB/s)",
+  "settings_limitHelp": "0 = no limit",
+  "settings_retries": "Retries",
+  "settings_autoExtract": "Extract finished packages automatically",
+  "settings_deleteArchives": "Delete archives after successful extraction",
+  "settings_removeArchiveDownloads": "Remove the downloads from the list after successful extraction",
+  "settings_askArchivePassword": "Ask for the archive password when none fits",
+  "settings_verifyChecksums": "Verify the checksum after the download when the hoster publishes one",
+  "settings_archivePasswords": "Archive passwords",
+  "settings_archivePasswordsIntro": "Haul tries these passwords on every protected archive, after the package’s own. A password that opened an archive moves to the top.",
+  "settings_archivePasswordsLabel": "One password per line",
+  "settings_archivePasswordsCount": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "1 password",
+        "nPlural=other": "{n} passwords"
+      }
+    }
+  ],
+  "settings_saved": "Saved.",
+  "settings_folders": "Folders",
+  "settings_tmpDir": "Running downloads",
+  "settings_doneDir": "Finished files",
+  "settings_pluginDir": "Custom plugins",
+  "settings_extractors": "Extractors",
+  "settings_noExtractor": "none found: sudo apt install 7zip unrar",
+  "settings_language": "Language",
+  "settings_languageHelp": "Applies to this browser, including messages from the server and hosters.",
+  "settings_cnlTitle": "Click'n'Load from the desktop",
+  "settings_cnlIntroA": "Web pages send links to",
+  "settings_cnlIntroB": "on the browser’s machine. Haul’s browser extension catches them and sends them to this server with an API token; without the extension,",
+  "settings_cnlIntroC": "forwards them. Received links land in the link grabber.",
+  "settings_tokenOnce": "The token is shown only now. Copy it into the browser extension or haul-cnl:",
+  "settings_tokenSet": "A token is set. A new one replaces it.",
+  "settings_tokenNone": "No token created yet.",
+  "settings_sshComment": "# For testing without haul-cnl:",
+  "settings_cnlTest": "Test Click'n'Load in this browser",
+  "settings_newToken": "Create new token",
+  "settings_createToken": "Create token",
+  "settings_cnlOther": "Something other than Haul answers on port 9666 (HTTP {status}).",
+  "settings_cnlForwarder": "Port 9666 reachable: haul-cnl is running and forwards to the server.",
+  "settings_cnlLocal": "Port 9666 reachable: Haul itself listens on this machine.",
+  "settings_cnlExtension": "Haul’s browser extension handles Click'n'Load in this browser.",
+  "settings_cnlUnreachable": "Port 9666 is not reachable from this browser. If Haul runs on another machine, install the browser extension or start haul-cnl (or the SSH tunnel) on this one. If the browser asks for access to the local network, allow it.",
+  "settings_loginTitle": "Login",
+  "settings_currentPassword": "Current password",
+  "settings_newPassword": "New password",
+  "settings_passwordChanged": "Password changed.",
+  "settings_changePassword": "Change password",
+  "settings_logout": "Log out",
+  "done_title": "Done",
+  "done_root": "Done",
+  "done_topLevel": "Done (top level)",
+  "done_archives": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "{n} archive file",
+        "nPlural=other": "{n} archive files"
+      }
+    }
+  ],
+  "done_stateArchive": "Archive",
+  "done_stateFailed": "Extraction failed",
+  "done_stateLeft": "{archives} left",
+  "done_stateNotExtracted": "{archives}, not extracted",
+  "done_stateExtracted": "extracted",
+  "done_stateFinished": "finished",
+  "done_stateForeign": "not from Haul",
+  "done_pathAria": "Folder path",
+  "done_newFolder": "New folder",
+  "done_inFolder": "in {path}",
+  "done_create": "Create",
+  "done_moveOne": "Move “{name}”",
+  "done_moveMany": "Move {n} items",
+  "done_targetFolder": "Target folder",
+  "done_searchFolders": "Search folders …",
+  "done_optionalNew": "Optional: new folder inside",
+  "done_newFolderName": "Name of the new folder",
+  "done_target": "Target: {path}",
+  "done_move": "Move",
+  "done_moveEllipsis": "Move …",
+  "done_confirmDeleteArchives": [
+    {
+      "declarations": [
+        "input folders",
+        "local foldersPlural = folders: plural"
+      ],
+      "selectors": [
+        "foldersPlural"
+      ],
+      "match": {
+        "foldersPlural=one": "Delete all archive files in this folder?",
+        "foldersPlural=other": "Delete all archive files in {folders} folders?"
+      }
+    }
+  ],
+  "done_confirmDeleteOne": [
+    {
+      "declarations": [
+        "input name",
+        "input dir"
+      ],
+      "selectors": [
+        "dir"
+      ],
+      "match": {
+        "dir=true": "Delete “{name}” with everything in it permanently?",
+        "dir=*": "Delete “{name}” permanently?"
+      }
+    }
+  ],
+  "done_confirmDeleteMany": "Delete {n} items permanently?",
+  "done_entries": [
+    {
+      "declarations": [
+        "input n",
+        "local nPlural = n: plural"
+      ],
+      "selectors": [
+        "nPlural"
+      ],
+      "match": {
+        "nPlural=one": "{n} item",
+        "nPlural=other": "{n} items"
+      }
+    }
+  ],
+  "done_free": "{amount} free",
+  "done_actionsAria": "Actions for the selection",
+  "done_selectHint": "Select items to extract, move or delete them.",
+  "done_selected": "{n} selected",
+  "done_extract": "Extract",
+  "done_deleteArchives": "Delete archives",
+  "done_delete": "Delete",
+  "done_clearSelection": "Clear selection",
+  "done_extractingHere": "Extracting in this folder: {pct} %",
+  "done_selectAll": "Select all",
+  "done_select": "Select {name}",
+  "done_colState": "State",
+  "done_colModified": "Modified",
+  "done_beingExtracted": "{name} is being extracted",
+  "done_empty": "Empty",
+  "done_emptyFolder": "This folder is empty.",
+  "done_emptyRoot": "Finished downloads land here, one folder per package.",
+  "collector_add": "Add links",
+  "server_auth_notLoggedIn": "not logged in",
+  "server_auth_userExists": "The user already exists",
+  "server_auth_credentialsRequired": "Enter a user name and a password with at least 8 characters",
+  "server_auth_wrongCredentials": "Wrong user name or password",
+  "server_auth_wrongCurrentPassword": "wrong current password",
+  "server_auth_newPasswordTooShort": "the new password needs at least 8 characters",
+  "server_files_invalidPath": "invalid path",
+  "server_files_notFoundAt": "not found: {path}",
+  "server_files_outsideDone": "path is outside the done folder",
+  "server_files_doneFolderItself": "the done folder itself cannot be changed",
+  "server_files_invalidName": "invalid name",
+  "server_files_moveIntoItself": "a folder cannot be moved into itself",
+  "server_cnl_noHexKey": "jk returns no hex key",
+  "server_cnl_keyLength": "the key has {len} instead of 16 bytes",
+  "server_cnl_notBase64": "crypted is not base64: {error}",
+  "server_cnl_decryptFailed": "decryption failed",
+  "server_crypto_secretTooShort": "stored secret too short",
+  "server_crypto_cannotDecrypt": "cannot decrypt account secret; was APP_SECRET changed?",
+  "server_api_notFound": "not found",
+  "server_api_unknownPlugin": "unknown plugin",
+  "server_api_secretMissing": "password or API key missing",
+  "server_api_pluginNotLoaded": "plugin {plugin} not loaded",
+  "server_api_loginFailed": "Login failed",
+  "server_api_notAFolder": "not a folder",
+  "server_api_extracting": "{path}: extraction in progress",
+  "server_api_targetNotAFolder": "the target is not a folder",
+  "server_api_alreadyExists": "“{name}” already exists here",
+  "server_download_fileError": "File error: {error}",
+  "server_download_databaseError": "Database error: {error}",
+  "server_download_offline": "File offline (HTTP {status})",
+  "server_download_forbidden": "HTTP 403: direct link expired or access denied",
+  "server_download_busy": "HTTP {status}: server busy or too many connections",
+  "server_download_networkError": "Network error: {error}",
+  "server_download_afterAttempts": "(after {attempts} attempts)",
+  "server_download_noAccount": "No active account for {plugin}",
+  "server_download_webPage": "The server sent a web page instead of the file: {text}",
+  "server_download_internalError": "internal error: {error}",
+  "server_download_incomplete": "incomplete: {written} of {total} bytes",
+  "server_download_checksumWrongAgain": "Checksum ({kind}) wrong again on the second try",
+  "server_download_checksumWrong": "Checksum ({kind}) wrong, loading the file again",
+  "server_download_rangeIgnored": "Server ignores the range request",
+  "server_download_closedEarly": "Connection closed early",
+  "server_download_readTimeout": "Read timed out",
+  "server_links_noneValid": "no valid links found",
+  "server_links_folderEmpty": "Folder is empty",
+  "server_package_notFound": "Package not found",
+  "server_package_noFileSelected": "no file selected",
+  "server_extract_crashedSignal": "crashed (signal {signal})",
+  "server_extract_crashedCode": "crashed (code {code})",
+  "server_extract_code": "code {code}",
+  "server_extract_exists": "{path} already exists as a file or folder",
+  "server_extract_noTool": "no extractor found. Recommended: 7-Zip and unrar, on Ubuntu/Debian “sudo apt install 7zip unrar”; the Docker image has everything",
+  "server_extract_notMoved": "Extracted, but not moved: {error}",
+  "server_extract_noSpace": "no space left on the disk",
+  "server_extract_wrongPassword": "password missing or wrong: add it under Settings → Archive passwords or enter it when extracting again",
+  "server_extract_rarNeedsUnrar": "7-Zip cannot extract this RAR archive; install unrar (“sudo apt install unrar”), Haul uses it first for RAR",
+  "server_extract_crashed": "the extractor crashed",
+  "server_extract_damaged": "archive damaged or incomplete",
+  "server_extract_failedHint": "Extraction failed: {hint}. {detail}",
+  "server_extract_failed": "Extraction failed: {detail}",
+  "server_extract_notDownloaded": "{archive}: archive incomplete, not downloaded yet: {names}",
+  "server_extract_partsMissing": "{archive}: archive incomplete, missing: {missing}",
+  "server_extract_notArchive": "{name} is not an archive or its first part is missing",
+  "server_extract_nothingSelected": "nothing selected to extract",
+  "server_extract_alreadyRunning": "{path} is already being extracted",
+  "server_plugin_timeout": "plugin timed out"
+}
