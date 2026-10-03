@@ -4,7 +4,9 @@ import { api, post, type Account, type PluginList } from '../api';
 import { PageHeader } from '../components/Layout';
 import { IconRefresh, IconTrash } from '../components/icons';
 import { bytes, date, dateTime } from '../format';
-import { localize, pluginText, useLang, useT } from '../i18n';
+import { localize, pluginText, useLang, pickMsg } from '../i18n';
+import * as m from '../paraglide/messages';
+import { msgGroup } from '../msg-groups';
 
 const statusColor: Record<Account['status'], string> = {
   unchecked: 'var(--muted-2)',
@@ -15,7 +17,6 @@ const statusColor: Record<Account['status'], string> = {
 };
 
 function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
-  const t = useT();
   const lang = useLang();
   const withAccounts = plugins.filter((p) => p.accountRequired || p.hasCheckAccount);
   const [pluginId, setPluginId] = useState('');
@@ -37,14 +38,14 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
   const form = selected.account ?? {};
   return (
     <form className="card" onSubmit={submit}>
-      <h2>{t.accounts.add}</h2>
+      <h2>{m.accounts_add()}</h2>
       <div className="card-sub">
-        {pluginText(form.help, lang) ?? t.accounts.defaultHelp} {t.accounts.encrypted}{' '}
+        {pluginText(form.help, lang) ?? m.accounts_defaultHelp()} {m.accounts_encrypted()}{' '}
         <span className="mono">APP_SECRET</span>.
       </div>
       <div className="grid-4" style={{ gridTemplateColumns: `repeat(${form.secretMultiline ? 2 : 3}, minmax(0, 1fr)) auto`, alignItems: 'end' }}>
         <div className="field">
-          <label htmlFor="acc-plugin">{t.accounts.hoster}</label>
+          <label htmlFor="acc-plugin">{m.accounts_hoster()}</label>
           <select id="acc-plugin" className="select" value={pluginId || withAccounts[0]?.id} onChange={(e) => setPluginId(e.target.value)}>
             {withAccounts.map((p) => (
               <option key={p.id} value={p.id}>
@@ -54,22 +55,22 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="acc-user">{pluginText(form.userLabel, lang) ?? t.common.user}</label>
+          <label htmlFor="acc-user">{pluginText(form.userLabel, lang) ?? m.common_user()}</label>
           <input id="acc-user" className="input" autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} />
         </div>
         {!form.secretMultiline && (
           <div className="field">
-            <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
+            <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? m.common_password()}</label>
             <input id="acc-secret" className="input" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} required />
           </div>
         )}
         <button type="submit" className="btn primary" disabled={add.isPending}>
-          {t.common.add}
+          {m.common_add()}
         </button>
       </div>
       {form.secretMultiline && (
         <div className="field">
-          <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? t.common.password}</label>
+          <label htmlFor="acc-secret">{pluginText(form.secretLabel, lang) ?? m.common_password()}</label>
           <textarea
             id="acc-secret"
             className="textarea mono secret-area"
@@ -88,7 +89,6 @@ function AddAccount({ plugins }: { plugins: PluginList['plugins'] }) {
 }
 
 function EditSecret({ account, label, multiline, onDone }: { account: Account; label: string; multiline?: boolean; onDone: () => void }) {
-  const t = useT();
   const [secret, setSecret] = useState('');
   const save = useMutation({
     mutationFn: () => api(`/accounts/${account.id}`, { method: 'PATCH', body: { secret } }),
@@ -104,7 +104,7 @@ function EditSecret({ account, label, multiline, onDone }: { account: Account; l
       }}
     >
       <label htmlFor={`secret-${account.id}`} className="subtitle" style={{ fontSize: 13 }}>
-        {t.accounts.newSecret(label)}
+        {m.accounts_newSecret({ label })}
       </label>
       {multiline ? (
         <textarea
@@ -131,10 +131,10 @@ function EditSecret({ account, label, multiline, onDone }: { account: Account; l
         />
       )}
       <button type="submit" className="btn small primary" disabled={save.isPending}>
-        {t.accounts.saveAndCheck}
+        {m.accounts_saveAndCheck()}
       </button>
       <button type="button" className="btn small" onClick={onDone}>
-        {t.common.cancel}
+        {m.common_cancel()}
       </button>
       {save.error && <div className="notice" role="alert">{save.error.message}</div>}
     </form>
@@ -142,7 +142,6 @@ function EditSecret({ account, label, multiline, onDone }: { account: Account; l
 }
 
 export function AccountsPage() {
-  const t = useT();
   const lang = useLang();
   const [editing, setEditing] = useState<number | null>(null);
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => api<Account[]>('/accounts') });
@@ -152,27 +151,27 @@ export function AccountsPage() {
 
   return (
     <>
-      <PageHeader title={t.accounts.title} subtitle={t.accounts.subtitle} />
+      <PageHeader title={m.accounts_title()} subtitle={m.accounts_subtitle()} />
       <div className="content">
         <AddAccount plugins={plugins.data?.plugins ?? []} />
 
         <section className="card" aria-labelledby="acc-title">
-          <h2 id="acc-title">{t.accounts.list}</h2>
-          {accounts.data?.length === 0 && <div className="subtitle">{t.accounts.none}</div>}
+          <h2 id="acc-title">{m.accounts_list()}</h2>
+          {accounts.data?.length === 0 && <div className="subtitle">{m.accounts_none()}</div>}
           <div className="list">
             {accounts.data?.map((a) => {
-              const s = { label: t.accounts.status[a.status], color: statusColor[a.status] };
+              const s = { label: pickMsg(msgGroup.accounts_status, a.status), color: statusColor[a.status] };
               return (
                 <div className="list-row" key={a.id}>
                   <div className="grow">
                     <span className="title">
-                      {a.pluginName ?? a.pluginId} · {a.user || t.accounts.sessionCookie}
+                      {a.pluginName ?? a.pluginId} · {a.user || m.accounts_sessionCookie()}
                     </span>
                     <span className="sub">
-                      {a.premium === true ? t.accounts.premium : a.premium === false ? t.accounts.noPremium : t.accounts.typeUnknown}
-                      {a.validUntil ? t.accounts.until(date(a.validUntil)) : ''}
-                      {a.trafficLeft !== null ? t.accounts.trafficLeft(bytes(a.trafficLeft)) : ''}
-                      {a.checkedAt ? t.accounts.checked(dateTime(a.checkedAt)) : ''}
+                      {a.premium === true ? m.accounts_premium() : a.premium === false ? m.accounts_noPremium() : m.accounts_typeUnknown()}
+                      {a.validUntil ? m.accounts_until({ date: date(a.validUntil) }) : ''}
+                      {a.trafficLeft !== null ? m.accounts_trafficLeft({ amount: bytes(a.trafficLeft) }) : ''}
+                      {a.checkedAt ? m.accounts_checked({ when: dateTime(a.checkedAt) }) : ''}
                     </span>
                     {a.error && <span className="sub" style={{ color: 'var(--err)' }}>{localize(a.error)}</span>}
                   </div>
@@ -186,21 +185,21 @@ export function AccountsPage() {
                       checked={a.enabled}
                       onChange={(e) => act.mutate({ path: `/accounts/${a.id}`, method: 'PATCH', body: { enabled: e.target.checked } })}
                     />
-                    {t.accounts.enabled}
+                    {m.accounts_enabled()}
                   </label>
                   <button type="button" className="btn small" onClick={() => setEditing(editing === a.id ? null : a.id)}>
-                    {t.accounts.changeLogin}
+                    {m.accounts_changeLogin()}
                   </button>
-                  <button type="button" className="icon-btn" aria-label={t.accounts.checkAria} title={t.accounts.check} onClick={() => act.mutate({ path: `/accounts/${a.id}/check` })}>
+                  <button type="button" className="icon-btn" aria-label={m.accounts_checkAria()} title={m.accounts_check()} onClick={() => act.mutate({ path: `/accounts/${a.id}/check` })}>
                     <IconRefresh size={16} />
                   </button>
-                  <button type="button" className="icon-btn" aria-label={t.accounts.deleteAria} onClick={() => act.mutate({ path: `/accounts/${a.id}`, method: 'DELETE' })}>
+                  <button type="button" className="icon-btn" aria-label={m.accounts_deleteAria()} onClick={() => act.mutate({ path: `/accounts/${a.id}`, method: 'DELETE' })}>
                     <IconTrash size={16} />
                   </button>
                   {editing === a.id && (
                     <EditSecret
                       account={a}
-                      label={pluginText(plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel, lang) ?? t.common.password}
+                      label={pluginText(plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretLabel, lang) ?? m.common_password()}
                       multiline={plugins.data?.plugins.find((p) => p.id === a.pluginId)?.account?.secretMultiline}
                       onDone={() => setEditing(null)}
                     />
@@ -214,11 +213,11 @@ export function AccountsPage() {
 
         <section className="card" aria-labelledby="plugins-title">
           <div className="toolbar">
-            <h2 id="plugins-title">{t.accounts.plugins}</h2>
+            <h2 id="plugins-title">{m.accounts_plugins()}</h2>
             <div className="spacer" />
             <button type="button" className="btn small" onClick={() => reload.mutate()} disabled={reload.isPending}>
               <IconRefresh size={16} />
-              {t.accounts.reload}
+              {m.accounts_reload()}
             </button>
           </div>
           <div className="list">
@@ -228,35 +227,35 @@ export function AccountsPage() {
                   <span className="title">
                     {p.name} <span className="pill">v{p.version}</span>
                   </span>
-                  {p.domains && p.domains.length > 0 && <span className="sub wrap-any">{t.accounts.supports(p.domains.join(', '))}</span>}
+                  {p.domains && p.domains.length > 0 && <span className="sub wrap-any">{m.accounts_supports({ domains: p.domains.join(', ') })}</span>}
                   <span className="sub mono wrap-any">{p.file}</span>
                   {p.replaces && (
                     <span className="sub" style={{ color: p.replaces.newer ? 'var(--err)' : undefined }} role={p.replaces.newer ? 'alert' : undefined}>
-                      {p.replaces.newer ? t.accounts.replacesNewer(p.replaces.version, p.version) : t.accounts.replaces(p.replaces.version)}
+                      {p.replaces.newer ? m.accounts_replacesNewer({ builtin: p.replaces.version, own: p.version }) : m.accounts_replaces({ builtin: p.replaces.version })}
                     </span>
                   )}
                   <details className="patterns">
-                    <summary>{t.accounts.patterns(p.matches.length)}</summary>
+                    <summary>{m.accounts_patterns({ n: p.matches.length })}</summary>
                     <ul>
-                      {p.matches.map((m) => (
-                        <li key={m.source} className="mono wrap-any">{`/${m.source}/${m.flags}`}</li>
+                      {p.matches.map((re) => (
+                        <li key={re.source} className="mono wrap-any">{`/${re.source}/${re.flags}`}</li>
                       ))}
                     </ul>
                   </details>
                 </div>
                 <div className="plugin-meta">
-                  <span className="pill">{p.builtin ? t.accounts.builtin : t.accounts.custom}</span>
+                  <span className="pill">{p.builtin ? m.accounts_builtin() : m.accounts_custom()}</span>
                   <span className="subtitle" style={{ fontSize: 13 }}>
                     {p.accountRequired
-                      ? t.accounts.premiumRequired
+                      ? m.accounts_premiumRequired()
                       : p.hasCheckAccount
-                        ? `${t.accounts.noAccountNeeded} · ${t.accounts.accountPossible}`
-                        : t.accounts.noAccountNeeded}
+                        ? `${m.accounts_noAccountNeeded()} · ${m.accounts_accountPossible()}`
+                        : m.accounts_noAccountNeeded()}
                   </span>
                 </div>
               </div>
             ))}
-            {plugins.data?.plugins.length === 0 && <div className="subtitle">{t.accounts.noPlugins}</div>}
+            {plugins.data?.plugins.length === 0 && <div className="subtitle">{m.accounts_noPlugins()}</div>}
           </div>
           {plugins.data?.errors.map((e) => (
             <div className="notice" key={e.file}>

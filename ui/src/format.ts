@@ -1,9 +1,9 @@
-import { currentMessages } from './i18n';
+import { localeOf } from './i18n';
 
 const formats = new Map<string, { nf0: Intl.NumberFormat; nf1: Intl.NumberFormat }>();
 /** Number formats of the current language. */
 function nf() {
-  const locale = currentMessages().locale;
+  const locale = localeOf();
   let f = formats.get(locale);
   if (!f) {
     f = {
@@ -49,10 +49,10 @@ export function percent(done: number, size: number | null | undefined): number {
 
 export function date(ms: number | null | undefined): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleDateString(currentMessages().locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(ms).toLocaleDateString(localeOf(), { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 export function dateTime(ms: number | null | undefined): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleString(currentMessages().locale);
+  return new Date(ms).toLocaleString(localeOf());
 }

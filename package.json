@@ -10,7 +10,7 @@
     "build": "pnpm build:plugins && pnpm --filter @haul/ui build",
     "build:plugins": "node scripts/build-plugins.mjs",
     "build:extension": "pnpm --filter @haul/extension build",
-    "test": "vitest run",
+    "test": "pnpm --filter @haul/ui i18n && vitest run",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

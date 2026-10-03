@@ -7,3 +7,6 @@ node_modules/
 .env
 /.data
 /extension/dist
+
+# Paraglide (generated from ui/messages/*.json)
+ui/src/paraglide

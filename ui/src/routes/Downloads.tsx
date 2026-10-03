@@ -16,8 +16,10 @@ import { HashBadge } from '../components/HashBadge';
 import { describe, isActive, isWaiting, toneColor } from '../components/status';
 import { useLive, type LiveProgress } from '../live';
 import { bytes, duration, percent, speed } from '../format';
-import { localize, useT } from '../i18n';
+import { localize, pickMsg } from '../i18n';
 import { useCaptchas } from '../components/Captchas';
+import * as m from '../paraglide/messages';
+import { msgGroup } from '../msg-groups';
 
 type Filter = 'all' | 'active' | 'waiting' | 'finished' | 'failed';
 
@@ -41,7 +43,6 @@ function progressOf(d: Download, live: Map<number, LiveProgress>) {
 const col = createColumnHelper<Row>();
 
 export function DownloadsPage() {
-  const t = useT();
   const { data: packages = [], isPending } = usePackages('queue');
   const captchas = useCaptchas().data;
   const captchaLinks = useMemo(() => new Map((captchas ?? []).map((c) => [c.link ?? '', c.kind])), [captchas]);
@@ -76,7 +77,7 @@ export function DownloadsPage() {
     () => [
       col.display({
         id: 'name',
-        header: t.common.name,
+        header: m.common_name(),
         cell: ({ row }) => row.original.kind === 'dl' && (
           <div className="name-with-badge">
             <div className="cell-name" title={row.original.d.url}>{row.original.d.name}</div>
@@ -86,12 +87,12 @@ export function DownloadsPage() {
       }),
       col.display({
         id: 'hoster',
-        header: t.downloads.colHoster,
+        header: m.downloads_colHoster(),
         cell: ({ row }) => row.original.kind === 'dl' && <span className="pill">{row.original.d.pluginId ?? 'http'}</span>,
       }),
       col.display({
         id: 'size',
-        header: t.common.size,
+        header: m.common_size(),
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
           return <span className="cell-mono">{bytes(progressOf(row.original.d, live.items).size)}</span>;
@@ -99,15 +100,15 @@ export function DownloadsPage() {
       }),
       col.display({
         id: 'progress',
-        header: t.downloads.colProgress,
+        header: m.downloads_colProgress(),
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
           const d = row.original.d;
           const p = progressOf(d, live.items);
           const pct = d.status === 'finished' ? 100 : percent(p.done, p.size);
-          const tone = describe(d, t, undefined, live.items.get(d.id)).tone;
+          const tone = describe(d, undefined, live.items.get(d.id)).tone;
           return (
-            <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={t.downloads.progressOf(d.name)}>
+            <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={m.downloads_progressOf({ name: d.name })}>
               <div className="bar">
                 <div style={{ width: `${pct}%`, background: toneColor[tone].bar }} />
               </div>
@@ -118,7 +119,7 @@ export function DownloadsPage() {
       }),
       col.display({
         id: 'speed',
-        header: t.downloads.colSpeed,
+        header: m.downloads_colSpeed(),
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
           const p = progressOf(row.original.d, live.items);
@@ -127,7 +128,7 @@ export function DownloadsPage() {
       }),
       col.display({
         id: 'eta',
-        header: t.downloads.colEta,
+        header: m.downloads_colEta(),
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
           const p = progressOf(row.original.d, live.items);
@@ -137,10 +138,10 @@ export function DownloadsPage() {
       }),
       col.display({
         id: 'status',
-        header: t.common.status,
+        header: m.common_status(),
         cell: ({ row }) => {
           if (row.original.kind !== 'dl') return null;
-          const s = describe(row.original.d, t, captchaLinks, live.items.get(row.original.d.id));
+          const s = describe(row.original.d, captchaLinks, live.items.get(row.original.d.id));
           return (
             <div className="status" style={{ color: toneColor[s.tone].color }} title={localize(row.original.d.error) ?? s.label}>
               <span className="dot" style={{ background: toneColor[s.tone].color }} />
@@ -162,7 +163,7 @@ export function DownloadsPage() {
               <button
                 type="button"
                 className="icon-btn"
-                aria-label={running ? t.common.pause(d.name) : t.common.resume(d.name)}
+                aria-label={running ? m.common_pause({ name: d.name }) : m.common_resume({ name: d.name })}
                 disabled={!running && !canResume}
                 onClick={() => action.mutate(`/downloads/${d.id}/${running ? 'pause' : 'resume'}`)}
               >
@@ -171,7 +172,7 @@ export function DownloadsPage() {
               <button
                 type="button"
                 className="icon-btn"
-                aria-label={t.common.remove(d.name)}
+                aria-label={m.common_remove({ name: d.name })}
                 onClick={() => remove.mutate(`/downloads/${d.id}`)}
               >
                 <IconX size={16} />
@@ -181,7 +182,7 @@ export function DownloadsPage() {
         },
       }),
     ],
-    [live.items, action, remove, t, captchaLinks],
+    [live.items, action, remove, captchaLinks],
   );
 
   const table = useReactTable({
@@ -203,78 +204,78 @@ export function DownloadsPage() {
 
   return (
     <>
-      <PageHeader title={t.downloads.title} subtitle={t.downloads.subtitle(active, waiting, failed)}>
+      <PageHeader title={m.downloads_title()} subtitle={m.downloads_subtitle({ active, queued: waiting, failed })}>
         <div className="speed-total" aria-live="polite">
           <div className="value">
             {speed(live.totalSpeed).replace('/s', '')} <small>/s</small>
           </div>
           <div className="hint">
-            {t.downloads.total} · {stats?.speedLimitKib ? t.downloads.limit(`${bytes(stats.speedLimitKib * 1024)}/s`) : t.downloads.noLimit}
+            {m.downloads_total()} · {stats?.speedLimitKib ? m.downloads_limit({ value: `${bytes(stats.speedLimitKib * 1024)}/s` }) : m.downloads_noLimit()}
           </div>
         </div>
         <button type="button" className="btn" onClick={() => action.mutate(anyRunning ? '/downloads/pause-all' : '/downloads/resume-all')}>
           {anyRunning ? <IconPause size={16} /> : <IconPlay size={16} />}
-          {anyRunning ? t.downloads.pauseAll : t.downloads.resumeAll}
+          {anyRunning ? m.downloads_pauseAll() : m.downloads_resumeAll()}
         </button>
         <Link to="/linksammler" className="btn primary">
           <IconPlus size={16} strokeWidth={2.5} />
-          {t.downloads.addLinks}
+          {m.downloads_addLinks()}
         </Link>
       </PageHeader>
 
       <div className="content">
         {settings && settings.autoExtract && settings.extractors.length === 0 && (
           <div className="notice" role="alert">
-            <strong>{t.downloads.noExtractorTitle}</strong> {t.downloads.noExtractorText}{' '}
-            <code className="mono">sudo apt install 7zip unrar</code>. {t.downloads.noExtractorThen}
+            <strong>{m.downloads_noExtractorTitle()}</strong> {m.downloads_noExtractorText()}{' '}
+            <code className="mono">sudo apt install 7zip unrar</code>. {m.downloads_noExtractorThen()}
           </div>
         )}
         {settings && settings.autoExtract && settings.extractors.length > 0 && !settings.extractors.some((p) => /(^|\/)(unrar|unar)$/.test(p)) && (
           <div className="notice info">
-            <strong>{t.downloads.noUnrarTitle}</strong> {t.downloads.noUnrarText} <code className="mono">sudo apt install unrar</code>.{' '}
-            {t.downloads.noExtractorThen}
+            <strong>{m.downloads_noUnrarTitle()}</strong> {m.downloads_noUnrarText()} <code className="mono">sudo apt install unrar</code>.{' '}
+            {m.downloads_noExtractorThen()}
           </div>
         )}
         <div className="grid-4">
           <div className="stat">
-            <div className="k">{t.downloads.statActive}</div>
+            <div className="k">{m.downloads_statActive()}</div>
             <div className="v">
-              {stats?.active ?? active} <small>/ {stats?.slots ?? '–'} {t.downloads.slots}</small>
+              {stats?.active ?? active} <small>/ {stats?.slots ?? '–'} {m.downloads_slots()}</small>
             </div>
           </div>
           <div className="stat">
-            <div className="k">{t.downloads.statQueue}</div>
+            <div className="k">{m.downloads_statQueue()}</div>
             <div className="v">
               {stats?.queued ?? waiting} <small>· {bytes(stats?.queuedBytes ?? 0)}</small>
             </div>
           </div>
           <div className="stat">
-            <div className="k">{t.downloads.statToday}</div>
+            <div className="k">{m.downloads_statToday()}</div>
             <div className="v">
               {stats?.finishedToday ?? 0} <small>· {bytes(stats?.finishedTodayBytes ?? 0)}</small>
             </div>
           </div>
           <div className="stat">
-            <div className="k">{premium ? `${premium.pluginId} ${t.downloads.premium}` : t.downloads.premium}</div>
+            <div className="k">{premium ? `${premium.pluginId} ${m.downloads_premium()}` : m.downloads_premium()}</div>
             <div className="v">
               {premium ? (
                 premium.trafficLeft !== null ? (
                   <>
-                    {bytes(premium.trafficLeft).split(' ')[0]} <small>{t.downloads.left(bytes(premium.trafficLeft).split(' ')[1])}</small>
+                    {bytes(premium.trafficLeft).split(' ')[0]} <small>{m.downloads_left({ unit: bytes(premium.trafficLeft).split(' ')[1] })}</small>
                   </>
                 ) : (
-                  <small>{t.downloads.trafficUnknown}</small>
+                  <small>{m.downloads_trafficUnknown()}</small>
                 )
               ) : (
                 <small>
-                  <Link to="/accounts">{t.downloads.addAccount}</Link>
+                  <Link to="/accounts">{m.downloads_addAccount()}</Link>
                 </small>
               )}
             </div>
           </div>
         </div>
 
-        <div className="toolbar" role="group" aria-label={t.downloads.filterAria}>
+        <div className="toolbar" role="group" aria-label={m.downloads_filterAria()}>
           {filters.map((f) => (
             <button
               key={f.id}
@@ -283,23 +284,23 @@ export function DownloadsPage() {
               aria-pressed={filter === f.id}
               onClick={() => setFilter(f.id)}
             >
-              {t.downloads.filters[f.id]} {counts[f.id]}
+              {pickMsg(msgGroup.downloads_filters, f.id)} {counts[f.id]}
             </button>
           ))}
           <div className="spacer" />
           {counts.finished > 0 && (
             <button type="button" className="btn small" onClick={() => action.mutate('/downloads/clear-finished')}>
-              {t.downloads.clearFinished}
+              {m.downloads_clearFinished()}
             </button>
           )}
           <label htmlFor="search" className="subtitle" style={{ fontSize: 13 }}>
-            {t.downloads.search}
+            {m.downloads_search()}
           </label>
           <input
             id="search"
             type="search"
             className="input search"
-            placeholder={t.downloads.searchPlaceholder}
+            placeholder={m.downloads_searchPlaceholder()}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -337,8 +338,8 @@ export function DownloadsPage() {
             )}
             {!isPending && rows.length === 0 && (
               <div className="empty">
-                <strong>{all.length ? t.downloads.nothingFound : t.downloads.empty}</strong>
-                {all.length ? t.downloads.adjustFilter : <Link to="/linksammler">{t.downloads.emptyHint}</Link>}
+                <strong>{all.length ? m.downloads_nothingFound() : m.downloads_empty()}</strong>
+                {all.length ? m.downloads_adjustFilter() : <Link to="/linksammler">{m.downloads_emptyHint()}</Link>}
               </div>
             )}
           </div>
@@ -347,15 +348,15 @@ export function DownloadsPage() {
 
       <footer className="footer">
         <span>
-          {t.downloads.parallel(settings?.maxParallel ?? '–')} · {t.downloads.connections(settings?.connectionsPerFile ?? '–')}
+          {m.downloads_parallel({ n: settings?.maxParallel ?? '–' })} · {m.downloads_connections({ n: settings?.connectionsPerFile ?? '–' })}
         </span>
         <span>
-          {t.downloads.tmpDir} → {settings?.tmpDir}
+          {m.downloads_tmpDir()} → {settings?.tmpDir}
         </span>
         <span>
-          {t.downloads.doneDir} → {settings?.doneDir}
+          {m.downloads_doneDir()} → {settings?.doneDir}
         </span>
-        <span className="right">{t.downloads.liveUpdates}</span>
+        <span className="right">{m.downloads_liveUpdates()}</span>
       </footer>
     </>
   );
@@ -376,7 +377,6 @@ function PackageRow({
   onAction: (path: string) => void;
   onDelete: () => void;
 }) {
-  const t = useT();
   const total = pkg.downloads.reduce((n, d) => n + (progressOf(d, live).size ?? 0), 0);
   const done = pkg.downloads.reduce((n, d) => n + (d.status === 'finished' ? (d.size ?? 0) : progressOf(d, live).done), 0);
   const running = pkg.downloads.some((d) => isActive(d) || d.status === 'queued');
@@ -385,24 +385,24 @@ function PackageRow({
   const extract =
     pkg.extract === 'running'
       ? extractPercent !== undefined
-        ? t.pkg.extractingPct(extractPercent)
-        : t.pkg.extracting
+        ? m.pkg_extractingPct({ pct: extractPercent })
+        : m.pkg_extracting()
       : pkg.extract === 'done'
-        ? t.pkg.extracted
+        ? m.pkg_extracted()
         : pkg.extract === 'failed'
-          ? t.pkg.extractFailed
+          ? m.pkg_extractFailed()
           : null;
   const n = pkg.downloads.length;
   return (
     <>
     <div className="pkg-row" role="row">
-      <button type="button" className="icon-btn toggle" aria-expanded={open} aria-label={t.pkg.toggle(pkg.name)} onClick={onToggle}>
+      <button type="button" className="icon-btn toggle" aria-expanded={open} aria-label={m.pkg_toggle({ name: pkg.name })} onClick={onToggle}>
         <IconChevron size={14} strokeWidth={2.5} open={open} />
       </button>
       <IconFolder size={16} style={{ color: 'var(--accent)' }} />
       <div className="name">{pkg.name}</div>
       <div className="meta">
-        {t.common.files(n)} · {bytes(total)} · {percent(done, total)} %
+        {m.common_files({ n })} · {bytes(total)} · {percent(done, total)} %
         {extract && (
           <span style={{ color: pkg.extract === 'failed' ? 'var(--err)' : undefined }} title={localize(pkg.extractError) ?? undefined}>
             {' '}
@@ -415,7 +415,7 @@ function PackageRow({
         <div
           className="extract-bar"
           role="progressbar"
-          aria-label={t.pkg.beingExtracted(pkg.name)}
+          aria-label={m.pkg_beingExtracted({ name: pkg.name })}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={extractPercent ?? 0}
@@ -430,8 +430,8 @@ function PackageRow({
         <button
           type="button"
           className="icon-btn"
-          aria-label={t.pkg.extractName(pkg.name)}
-          title={t.pkg.extract}
+          aria-label={m.pkg_extractName({ name: pkg.name })}
+          title={m.pkg_extract()}
           disabled={pkg.extract === 'running' || !pkg.downloads.every((d) => d.status === 'finished')}
           onClick={() => onAction(`/packages/${pkg.id}/extract`)}
         >
@@ -440,23 +440,23 @@ function PackageRow({
         <button
           type="button"
           className="icon-btn"
-          aria-label={running ? t.common.pause(pkg.name) : t.common.resume(pkg.name)}
+          aria-label={running ? m.common_pause({ name: pkg.name }) : m.common_resume({ name: pkg.name })}
           disabled={!running && !resumable}
           onClick={() => onAction(`/packages/${pkg.id}/${running ? 'pause' : 'resume'}`)}
         >
           {running ? <IconPause size={16} /> : <IconPlay size={16} />}
         </button>
-        <button type="button" className="icon-btn" aria-label={t.common.remove(pkg.name)} onClick={onDelete}>
+        <button type="button" className="icon-btn" aria-label={m.common_remove({ name: pkg.name })} onClick={onDelete}>
           <IconTrash size={16} />
         </button>
       </div>
     </div>
     {pkg.extract === 'failed' && (
       <div className="pkg-error" role="row">
-        <span role="alert">{localize(pkg.extractError) ?? t.pkg.extractFailed}</span>
+        <span role="alert">{localize(pkg.extractError) ?? m.pkg_extractFailed()}</span>
         <button type="button" className="btn small" onClick={() => onAction(`/packages/${pkg.id}/extract`)}>
           <IconArchive size={16} />
-          {t.pkg.extractAgain}
+          {m.pkg_extractAgain()}
         </button>
       </div>
     )}

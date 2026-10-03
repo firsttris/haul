@@ -1,6 +1,7 @@
 import type { Download } from '../api';
-import { useT } from '../i18n';
+
 import { IconShieldAlert, IconShieldCheck } from './icons';
+import * as m from '../paraglide/messages';
 
 const KIND: Record<NonNullable<Download['hashType']>, string> = {
   md5: 'MD5',
@@ -11,19 +12,18 @@ const KIND: Record<NonNullable<Download['hashType']>, string> = {
 
 /** The result of the checksum check after the download (JD: "CRC OK"). */
 export function HashBadge({ d }: { d: Download }) {
-  const t = useT();
   if (d.hashOk === null || !d.hashType) return null;
   const kind = KIND[d.hashType] ?? d.hashType.toUpperCase();
   return d.hashOk ? (
-    <span className="hash-badge ok" title={t.hash.okTitle(kind)}>
+    <span className="hash-badge ok" title={m.hash_okTitle({ kind })}>
       <IconShieldCheck size={13} />
-      {t.hash.ok}
+      {m.hash_ok()}
       <span className="hash-kind">{kind}</span>
     </span>
   ) : (
-    <span className="hash-badge bad" title={t.hash.badTitle(kind)}>
+    <span className="hash-badge bad" title={m.hash_badTitle({ kind })}>
       <IconShieldAlert size={13} />
-      {t.hash.bad}
+      {m.hash_bad()}
     </span>
   );
 }
