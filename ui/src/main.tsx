@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { Outlet, RouterProvider, createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
+import { Outlet, RouterProvider, createRootRoute, createRoute, createRouter, lazyRouteComponent } from '@tanstack/react-router';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import './styles.css';
@@ -9,11 +9,6 @@ import { ApiError, api, type AuthState } from './api';
 import { useLiveEvents } from './live';
 import { Layout } from './components/Layout';
 import { Login } from './routes/Login';
-import { DownloadsPage } from './routes/Downloads';
-import { CollectorPage } from './routes/Collector';
-import { AccountsPage } from './routes/Accounts';
-import { SettingsPage } from './routes/Settings';
-import { DonePage } from './routes/Done';
 import { useLang } from './i18n';
 import * as m from './paraglide/messages';
 
@@ -42,6 +37,14 @@ function Root() {
     </Layout>
   );
 }
+
+// Each page is its own chunk (the table code only comes with the pages that use it); the router
+// loads it before it renders the route.
+const DownloadsPage = lazyRouteComponent(() => import('./routes/Downloads'), 'DownloadsPage');
+const CollectorPage = lazyRouteComponent(() => import('./routes/Collector'), 'CollectorPage');
+const AccountsPage = lazyRouteComponent(() => import('./routes/Accounts'), 'AccountsPage');
+const SettingsPage = lazyRouteComponent(() => import('./routes/Settings'), 'SettingsPage');
+const DonePage = lazyRouteComponent(() => import('./routes/Done'), 'DonePage');
 
 const rootRoute = createRootRoute({ component: Root });
 const routeTree = rootRoute.addChildren([
