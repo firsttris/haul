@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "haul"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "haul-cnl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
