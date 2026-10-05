@@ -18,6 +18,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::Router;
 use tokio::net::TcpListener;
+use tower_http::compression::predicate::{NotForContentType, Predicate};
+use tower_http::compression::{CompressionLayer, DefaultPredicate};
+use tower_http::CompressionLevel;
 use tracing_subscriber::EnvFilter;
 
 use crate::api::App;
@@ -73,7 +76,16 @@ async fn main() -> Result<()> {
 
     let router = Router::new()
         .nest("/api", api::router(app.clone()))
-        .fallback(ui::serve);
+        .fallback(ui::serve)
+        // gzip/br for the UI bundle and JSON. The default predicate already leaves out
+        // `text/event-stream` (the live events stay unbuffered), images and tiny bodies;
+        // woff2 fonts are compressed already. Level 6 is gzip's default; brotli's default in
+        // tower-http (4) is hardly smaller than gzip, 6 is about 6% smaller and still fast.
+        .layer(
+            CompressionLayer::new()
+                .quality(CompressionLevel::Precise(6))
+                .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/"))),
+        );
     let listener = TcpListener::bind(cfg.listen)
         .await
         .with_context(|| format!("binding {}", cfg.listen))?;
