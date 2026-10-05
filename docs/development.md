@@ -113,8 +113,12 @@ All endpoints are under `/api` and speak JSON. Authentication with the session c
 
 ## Releases
 
-A version is a tag that matches `version` in `Cargo.toml` (`[workspace.package]`): raise the version
-there, commit, then
+A version is a tag that matches `version` in `Cargo.toml` (`[workspace.package]`). The simplest way:
+*Actions → Bump version → Run workflow* with patch, minor or major
+([`bump.yml`](../.github/workflows/bump.yml), the shared
+[`bump-version`](https://github.com/firsttris/workflows#bump-version)). It raises the version in
+`Cargo.toml` and `Cargo.lock`, commits it as `Release vX.Y.Z`, tags it and starts the release. By hand:
+raise the version there, commit, then
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
