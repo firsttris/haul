@@ -64,13 +64,16 @@ form.addEventListener('submit', (e) => {
     return;
   }
   const allowed = requestPermissions(s);
+  // Saved right away, not after the permission prompt: on the first save the prompt can be
+  // dismissed or take the page's focus, and the settings would be lost with it.
+  const saved = saveSettings(s);
   void (async () => {
-    if (!(await allowed)) {
+    await saved;
+    server.value = s.server;
+    if (!(await allowed.catch(() => false))) {
       show(false, t('noPermission'));
       return;
     }
-    await saveSettings(s);
-    server.value = s.server;
     await check(s);
   })();
 });
@@ -85,7 +88,7 @@ $<HTMLButtonElement>('test').addEventListener('click', () => {
   }
   const allowed = requestPermissions(s);
   void (async () => {
-    if (!(await allowed)) return show(false, t('noPermission'));
+    if (!(await allowed.catch(() => false))) return show(false, t('noPermission'));
     await check(s);
   })();
 });
