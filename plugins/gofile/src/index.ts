@@ -12,8 +12,9 @@
  *   must match the hashed values. Two sources disagree on the current salt, so both variants
  *   are kept exactly as their source sends them, and the one that worked last goes first.
  * - Like pyLoad (and JD's stored direct URL), the crawled file link carries the direct URL and
- *   its token, so `resolve` normally needs no API call; JD's checkDirectLink tests it first and
- *   only an expired link lists the folder again.
+ *   a fingerprint of its token (never the token: links are stored and shown), so `resolve`
+ *   normally needs no API call; JD's checkDirectLink tests it first and only an expired link,
+ *   or one made with another token, lists the folder again.
  * - The download needs the cookie `accountToken=<token>` and a gofile Referer.
  * - Account (JD GofileIo.getAndSetToken / fetchAccountInfo): the API token from the gofile
  *   profile replaces the guest token everywhere; download links are bound to the token, so
@@ -78,12 +79,20 @@ interface ApiResponse {
   data: Item & { token?: string };
 }
 
-/** What a crawled link carries after `#`: file id, and the direct URL with its token. */
+/**
+ * What a crawled link carries after `#`: file id, the direct URL, and which token it is bound
+ * to. Only a fingerprint of the token: links are stored, shown and logged, the token is not.
+ */
 interface Fragment {
   file?: string;
   dl?: string;
+  k?: string;
+  /** Links from before 0.1.2 carried the token itself. */
   t?: string;
 }
+
+/** Tells two tokens apart without revealing them. */
+const fingerprint = (ctx: Ctx, token: string) => ctx.hash.sha256(`gofile-link::${token}`).slice(0, 12);
 
 function folderCode(link: string): string {
   const m = LINK.exec(link);
@@ -101,11 +110,22 @@ function fragment(link: string): Fragment {
   return out;
 }
 
-function fileLink(code: string, item: Item, token: string): string {
+function fileLink(ctx: Ctx, code: string, item: Item, token: string): string {
   const url = item.link || item.directLink;
   let link = `${SITE}/d/${code}#file=${item.id}`;
-  if (url && !item.viruses?.length) link += `&t=${token}&dl=${encodeURIComponent(url)}`;
+  if (url && !item.viruses?.length) link += `&k=${fingerprint(ctx, token)}&dl=${encodeURIComponent(url)}`;
   return link;
+}
+
+/**
+ * The crawl's direct URL, if it was made with the token this call uses (the account's, or the
+ * guest token kept in the jar): links are bound to their token (JD).
+ */
+async function crawledLink(ctx: Ctx, f: Fragment): Promise<{ url: string; token: string } | null> {
+  const key = f.k ?? (f.t ? fingerprint(ctx, f.t) : undefined);
+  if (!f.dl || !key) return null;
+  const token = await tokenFor(ctx);
+  return fingerprint(ctx, token) === key ? { url: f.dl, token } : null;
 }
 
 /** JD's 500 ms request interval for gofile (setRequestIntervalLimitGlobal). */
@@ -394,7 +414,7 @@ export default definePlugin({
       // The folder's short code, so an expired link can be listed again.
       const parent = data.type === 'folder' ? (data.code ?? code) : code;
       for (const item of filesOf(data)) {
-        files.push({ url: fileLink(parent, item, token), name: item.name, size: item.size, hash: md5Of(item) });
+        files.push({ url: fileLink(ctx, parent, item, token), name: item.name, size: item.size, hash: md5Of(item) });
       }
       if (only) return;
       for (const [, sub] of Object.entries(data.children ?? {})) {
@@ -407,7 +427,8 @@ export default definePlugin({
 
   async check(link, ctx) {
     const f = fragment(link);
-    if (f.dl && f.t && (await directLinkWorks(ctx, f.dl, f.t))) return { online: true };
+    const direct = await crawledLink(ctx, f);
+    if (direct && (await directLinkWorks(ctx, direct.url, direct.token))) return { online: true };
     const listed = await listing(ctx, folderCode(link), false);
     // Protected and no password known yet: online; name and size come with the download.
     if (!listed) return { online: true };
@@ -418,11 +439,9 @@ export default definePlugin({
 
   async resolve(link, ctx) {
     const f = fragment(link);
-    // The link from the crawl, as long as it still works: no API request at all. Links are
-    // bound to their token: with an account only one made with its token (JD).
-    const acc = ctx.account.get();
-    const usable = !acc || f.t === acc.secret.trim();
-    if (usable && f.dl && f.t && (await directLinkWorks(ctx, f.dl, f.t))) return download(f.dl, f.t);
+    // The link from the crawl, as long as it still works: no API request at all.
+    const direct = await crawledLink(ctx, f);
+    if (direct && (await directLinkWorks(ctx, direct.url, direct.token))) return download(direct.url, direct.token);
     const { data, token } = await contents(ctx, folderCode(link));
     const file = pick(data, link);
     if (!file) {
