@@ -8,6 +8,13 @@ use sqlx::{FromRow, SqlitePool};
 
 pub type Db = SqlitePool;
 
+/// A transaction that writes: it takes SQLite's write lock at `BEGIN`, waiting for it with
+/// the busy timeout. A deferred transaction that has read first and then writes after another
+/// writer gets `SQLITE_BUSY` at once instead, without waiting.
+pub async fn write_tx(db: &Db) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    db.begin_with("BEGIN IMMEDIATE").await
+}
+
 pub async fn connect(path: &Path) -> Result<Db> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
         .create_if_missing(true)
