@@ -538,6 +538,11 @@ impl Engine {
         let target_dir = given_dir
             .map(|d| util::sanitize_rel_dir(&d))
             .unwrap_or_else(|| util::sanitize_filename(&name));
+        // Click'n'Load is open to every web page the user visits: its links reach the server
+        // without the user's doing. A direct link is probed with a request from the server's
+        // network (to anything, `http://192.168.1.1/…` included), so those wait until the user
+        // checks or starts the package; hoster links only go to their plugin's hoster.
+        let probe_direct = req.source.as_deref() != Some("cnl");
         let now = now_ms();
         let mut tx = self.db.begin().await?;
         let pkg_id: i64 = sqlx::query_scalar(
@@ -600,7 +605,7 @@ impl Engine {
             if !req.start {
                 // Files from a folder crawl are known already; checking each one again would
                 // only cost the hoster's rate limit.
-                if let Err(e) = this.check_downloads(pkg_id, true).await {
+                if let Err(e) = this.check_downloads(pkg_id, true, probe_direct).await {
                     tracing::warn!("online check: {e:#}");
                 }
             }
@@ -805,14 +810,21 @@ impl Engine {
 
     /// Online check for all downloads of a package: plugin `check` or an HTTP probe.
     pub async fn check_package(self: &Arc<Self>, package_id: i64) -> Result<()> {
-        self.check_downloads(package_id, false).await
+        self.check_downloads(package_id, false, true).await
     }
 
-    async fn check_downloads(self: &Arc<Self>, package_id: i64, only_unknown: bool) -> Result<()> {
+    /// `probe_direct`: also check links no plugin handles, with an HTTP request.
+    async fn check_downloads(
+        self: &Arc<Self>,
+        package_id: i64,
+        only_unknown: bool,
+        probe_direct: bool,
+    ) -> Result<()> {
         let downloads = db::package_downloads(&self.db, package_id)
             .await?
             .into_iter()
             .filter(|d| d.status != status::CRAWLING)
+            .filter(|d| probe_direct || self.plugins.find_for(&d.url).is_some())
             .filter(|d| !only_unknown || (d.online == "unknown" && d.error.is_none()));
         futures::stream::iter(downloads)
             .for_each_concurrent(4, |d| {
@@ -1503,6 +1515,32 @@ mod engine_tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("HTML response was not reported");
+    }
+
+    /// Click'n'Load links come from any web page: direct links are not probed from the server
+    /// until the user checks the package.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn click_n_load_links_are_not_probed_on_their_own() {
+        let requests = Arc::new(AtomicU64::new(0));
+        let base = range_server(Arc::new(vec![0u8; 16]), requests.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin"),
+                source: Some("cnl".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        e.check_package(pkg).await.unwrap();
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+        assert_eq!(d.online, "online");
+        e.shutdown().await;
     }
 
     /// The file id from a crypter link is only a placeholder: even when the online check
