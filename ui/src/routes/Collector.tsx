@@ -101,15 +101,16 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
   const [name, setName] = useState(pkg.name);
   const [targetDir, setTargetDir] = useState(pkg.targetDir);
   const last = useRef<number | null>(null);
-  useEffect(() => {
-    setName(pkg.name);
-    setTargetDir(pkg.targetDir);
-  }, [pkg.name, pkg.targetDir]);
+  // Each field follows the server on its own: a new folder must not reset a name being typed.
+  useEffect(() => setName(pkg.name), [pkg.name]);
+  useEffect(() => setTargetDir(pkg.targetDir), [pkg.targetDir]);
 
   const save = useMutation({ mutationFn: (body: object) => api(`/packages/${pkg.id}`, { method: 'PATCH', body }) });
   const act = useMutation({ mutationFn: (path: string) => post(path) });
   const start = useMutation({ mutationFn: () => startPackage(pkg, unchecked), onSuccess: () => setUnchecked(new Set()) });
   const remove = useMutation({ mutationFn: () => api(`/packages/${pkg.id}`, { method: 'DELETE' }) });
+  const removeOne = useMutation({ mutationFn: (id: number) => api(`/downloads/${id}`, { method: 'DELETE' }) });
+  const failed = [start, save, act, remove, removeOne].find((x) => x.error)?.error;
 
   const total = pkg.downloads.reduce((n, d) => n + (d.size ?? 0), 0);
   const offline = pkg.downloads.filter((d) => d.online === 'offline').length;
@@ -229,7 +230,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
                 aria-label={m.common_remove({ name: d.name })}
                 onClick={(e) => {
                   e.stopPropagation();
-                  api(`/downloads/${d.id}`, { method: 'DELETE' });
+                  removeOne.mutate(d.id);
                 }}
               >
                 <IconTrash size={16} />
@@ -254,7 +255,7 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
           </button>
         </div>
       ))}
-      {start.error && <div className="notice" role="alert">{localize(start.error.message)}</div>}
+      {failed && <div className="notice" role="alert">{localize(failed.message)}</div>}
       <div className="toolbar">
         <button type="button" className="btn small" onClick={() => act.mutate(`/packages/${pkg.id}/check`)}>
           <IconRefresh size={16} />

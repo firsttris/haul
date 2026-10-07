@@ -224,6 +224,8 @@ export function DownloadsPage() {
       </PageHeader>
 
       <div className="content">
+        {action.error && <div className="notice" role="alert">{action.error.message}</div>}
+        {remove.error && <div className="notice" role="alert">{remove.error.message}</div>}
         {settings && settings.autoExtract && settings.extractors.length === 0 && (
           <div className="notice" role="alert">
             <strong>{m.downloads_noExtractorTitle()}</strong> {m.downloads_noExtractorText()}{' '}
