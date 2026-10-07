@@ -121,6 +121,12 @@ const DEFAULT_OFFLINE = [
   />\s*(?:[*-]\s*)?File is not? longer available as it/i,
 ];
 
+/**
+ * Seconds of free countdowns one call waits out, all steps together. The host ends a call after
+ * 300 s; what is left is for the requests.
+ */
+const MAX_COUNTDOWN = 180;
+
 /** JD's getPremiumOnlyErrorMessage texts. */
 const PREMIUM_ONLY = [
   /\s*(?:The file you requested reached max downloads|This file reached max downloads)[^<]*/i,
@@ -737,6 +743,18 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     const post = (u: string, fields: Record<string, string>, headers?: Record<string, string>) =>
       ctx.http.post(u, fields, { followRedirects: false, headers: headers ? { ...cfg.headers, ...headers } : cfg.headers });
     const countdownOf = (html: string) => hooks.countdown?.(html) ?? countdown(html);
+    // The host ends a call after 5 minutes (time with a captcha or password question not
+    // counted): longer countdowns go back to the queue with the wait, like 1fichier's, instead
+    // of ending as a "plugin timeout" that is tried again at once.
+    let waitBudget = MAX_COUNTDOWN;
+    const waitOut = async (seconds: number) => {
+      if (seconds > waitBudget) {
+        const s = Math.ceil(seconds);
+        throw new HosterLimitError({ de: `${cfg.name}: Free-Download in ${s} s`, en: `${cfg.name}: free download in ${s} s` }, s);
+      }
+      waitBudget -= seconds;
+      await ctx.wait(seconds);
+    };
     const found = async (res: HttpResponse): Promise<{ link?: string; page: HttpResponse }> => {
       for (let hop = 0; hop < 5; hop++) {
         if (res.file) return { link: res.url, page: res };
@@ -778,7 +796,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       // solves such forms in handleCaptcha). The user solves it in the browser.
       if (findCaptcha(download1.html)) await tokenCaptcha(ctx, download1.html, fields, res);
       const wait = countdownOf(res.body);
-      if (wait) await ctx.wait(wait);
+      if (wait) await waitOut(wait);
       steps.push('download1');
       // A form goes where it stands, like in a browser (JD: an empty action is the current URL):
       // datanodes.to redirects the file link to /download (2026-09) and only takes it there.
@@ -806,7 +824,7 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       await solveCaptcha(ctx, download2, fields, res);
       const wait = countdownOf(res.body);
       const left = wait ? wait - (Date.now() - started) / 1000 : 0;
-      if (left > 0) await ctx.wait(left);
+      if (left > 0) await waitOut(left);
       steps.push(fields.op ?? 'download2');
       for (const name of download2.omit ?? []) delete fields[name];
       ({ link: dl, page: res } = await found(await post(resolveUrl(res.url || url, download2.action || res.url || url), fields, download2.headers)));

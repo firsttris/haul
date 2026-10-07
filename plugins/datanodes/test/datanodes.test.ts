@@ -54,6 +54,15 @@ describe('datanodes', () => {
     expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 1 });
   });
 
+  it('sends a countdown longer than a plugin call back to the queue', async () => {
+    const ctx = fakeCtx({
+      'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+      'POST https://datanodes.to/abcdefghijkl': { body: PAGE2_JS.replace('countdown="7"', 'countdown="600"') },
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 600 });
+    expect(ctx.waits).toEqual([]);
+  });
+
   it('adds g_captch__a to a normal download2 form', async () => {
     const page2 = `<form name="F1" method="POST" action=""><input type="hidden" name="op" value="download2">
       <input type="hidden" name="id" value="abcdefghijkl"><input type="hidden" name="rand" value="x"></form>`;
