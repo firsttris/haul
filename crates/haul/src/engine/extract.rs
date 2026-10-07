@@ -1,7 +1,7 @@
 //! Unpacks finished packages with `7z` (and `unrar` as fallback for RAR).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{anyhow, Result};
 use regex::Regex;
@@ -12,21 +12,31 @@ use crate::db::{self, status};
 use crate::events::Topic;
 use crate::files;
 
+/// [`files::file_names`] off the async runtime.
+async fn file_names(dir: &Path) -> Vec<String> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || files::file_names(&dir))
+        .await
+        .unwrap_or_default()
+}
+
 /// First volume of each archive set among `names`, plus every file belonging to a set.
 /// Which archive set a file belongs to, and whether it is the set's first volume
 /// (`x.part3.rar` → set `x` of `.partN.rar`, not first).
 fn set_key(name: &str) -> Option<(String, bool)> {
     let lower = name.to_lowercase();
-    let part = Regex::new(r"^(.*)\.part0*(\d+)\.rar$").unwrap();
-    let split = Regex::new(r"^(.*\.(?:7z|zip|rar))\.0*(\d+)$").unwrap();
-    let rar_old = Regex::new(r"^(.*)\.r\d{2}$").unwrap();
-    if let Some(c) = part.captures(&lower) {
+    static PART: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(.*)\.part0*(\d+)\.rar$").unwrap());
+    static SPLIT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(.*\.(?:7z|zip|rar))\.0*(\d+)$").unwrap());
+    static RAR_OLD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(.*)\.r\d{2}$").unwrap());
+    if let Some(c) = PART.captures(&lower) {
         return Some((format!("{}|part", &c[1]), &c[2] == "1"));
     }
-    if let Some(c) = split.captures(&lower) {
+    if let Some(c) = SPLIT.captures(&lower) {
         return Some((format!("{}|split", &c[1]), &c[2] == "1"));
     }
-    if let Some(c) = rar_old.captures(&lower) {
+    if let Some(c) = RAR_OLD.captures(&lower) {
         return Some((format!("{}|rar", &c[1]), false));
     }
     if let Some(stem) = lower.strip_suffix(".rar") {
@@ -65,21 +75,24 @@ enum Numbering {
 /// A volume's place in its set: `base`, numbering, index (`x.rar` is 0 and `x.r00` 1 in the
 /// old RAR naming) and the width of its number.
 fn volume(name: &str) -> Option<(String, Numbering, u32, usize)> {
-    let part = Regex::new(r"(?i)^(.*)\.part(\d+)\.rar$").unwrap();
-    let split = Regex::new(r"(?i)^(.*\.(?:7z|zip|rar))\.(\d+)$").unwrap();
-    let rar_old = Regex::new(r"(?i)^(.*)\.r(\d{2})$").unwrap();
-    let rar = Regex::new(r"(?i)^(.*)\.rar$").unwrap();
+    static PART: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(.*)\.part(\d+)\.rar$").unwrap());
+    static SPLIT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(.*\.(?:7z|zip|rar))\.(\d+)$").unwrap());
+    static RAR_OLD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(.*)\.r(\d{2})$").unwrap());
+    static RAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(.*)\.rar$").unwrap());
     let num = |s: &str| s.parse::<u32>().ok();
-    if let Some(c) = part.captures(name) {
+    if let Some(c) = PART.captures(name) {
         return Some((c[1].to_string(), Numbering::Part, num(&c[2])?, c[2].len()));
     }
-    if let Some(c) = split.captures(name) {
+    if let Some(c) = SPLIT.captures(name) {
         return Some((c[1].to_string(), Numbering::Split, num(&c[2])?, c[2].len()));
     }
-    if let Some(c) = rar_old.captures(name) {
+    if let Some(c) = RAR_OLD.captures(name) {
         return Some((c[1].to_string(), Numbering::OldRar, num(&c[2])? + 1, 2));
     }
-    rar.captures(name)
+    RAR.captures(name)
         .map(|c| (c[1].to_string(), Numbering::OldRar, 0, 2))
 }
 
@@ -214,24 +227,26 @@ fn missing_volumes(dir: &Path, members: &[String]) -> Vec<String> {
 }
 
 pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
-    let part = Regex::new(r"(?i)\.part0*(\d+)\.rar$").unwrap();
-    let rar_old = Regex::new(r"(?i)\.r\d{2}$").unwrap();
-    let split = Regex::new(r"(?i)\.(7z|zip|rar)\.0*(\d+)$").unwrap();
+    static PART: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\.part0*(\d+)\.rar$").unwrap());
+    static RAR_OLD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\.r\d{2}$").unwrap());
+    static SPLIT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\.(7z|zip|rar)\.0*(\d+)$").unwrap());
     let mut first = Vec::new();
     let mut all = Vec::new();
     for n in names {
         let lower = n.to_lowercase();
-        if let Some(c) = part.captures(n) {
+        if let Some(c) = PART.captures(n) {
             all.push(n.clone());
             if &c[1] == "1" {
                 first.push(n.clone());
             }
-        } else if let Some(c) = split.captures(n) {
+        } else if let Some(c) = SPLIT.captures(n) {
             all.push(n.clone());
             if &c[2] == "1" {
                 first.push(n.clone());
             }
-        } else if rar_old.is_match(n) {
+        } else if RAR_OLD.is_match(n) {
             all.push(n.clone());
         } else if lower.ends_with(".rar") || lower.ends_with(".zip") || lower.ends_with(".7z") {
             all.push(n.clone());
@@ -243,8 +258,9 @@ pub fn find_archives(names: &[String]) -> (Vec<String>, Vec<String>) {
 
 /// Last `NN%` in a chunk of tool output (7-Zip `-bsp1` and unrar redraw it with `\b`/`\r`).
 fn last_percent(text: &str) -> Option<u8> {
-    let re = Regex::new(r"(\d{1,3})%").unwrap();
-    re.captures_iter(text)
+    static PERCENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d{1,3})%").unwrap());
+    PERCENT
+        .captures_iter(text)
         .filter_map(|c| c[1].parse::<u8>().ok())
         .filter(|p| *p <= 100)
         .last()
@@ -328,15 +344,14 @@ struct Causes {
 /// The lines of a failed run that say what went wrong: everything on stderr, and the lines
 /// of stdout that read like an error (7-Zip and unrar print a lot of archive info there).
 fn error_lines(run: &Run) -> Vec<String> {
-    let re = Regex::new(
-        r"(?i)error|cannot|can't|wrong password|incorrect password|unsupported|crc failed|checksum|corrupt|damaged|no space|denied|unexpected end|failed|is not supported",
-    )
-    .unwrap();
+    static ERROR: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)error|cannot|can't|wrong password|incorrect password|unsupported|crc failed|checksum|corrupt|damaged|no space|denied|unexpected end|failed|is not supported").unwrap()
+    });
     let mut lines: Vec<String> = run.stderr.lines().map(str::to_string).collect();
     lines.extend(
         run.stdout
             .lines()
-            .filter(|l| re.is_match(l))
+            .filter(|l| ERROR.is_match(l))
             .map(str::to_string),
     );
     let mut seen = std::collections::HashSet::new();
@@ -574,13 +589,17 @@ async fn extract_one(
     let mut failures: Vec<(Kind, String)> = Vec::new();
     let mut found = Causes::default();
     let staging = staging_dir(archive, dest);
-    let reset = |dir: &Path| {
-        let _ = std::fs::remove_dir_all(dir);
-        std::fs::create_dir_all(dir)
+    // Removing a large extraction takes a while: off the async runtime.
+    let remove = |dir: &Path| {
+        let dir = dir.to_path_buf();
+        async move {
+            let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(dir)).await;
+        }
     };
     for pw in candidates {
         for tool in &tools {
-            if let Err(e) = reset(&staging) {
+            remove(&staging).await;
+            if let Err(e) = tokio::fs::create_dir_all(&staging).await {
                 return Err(Failed {
                     message: format!("{}: {e}", staging.display()),
                     wrong_password: false,
@@ -593,7 +612,7 @@ async fn extract_one(
                     .await
                     .map_err(std::io::Error::other)
                     .and_then(|r| r);
-                let _ = std::fs::remove_dir_all(&staging);
+                remove(&staging).await;
                 return match moved {
                     Ok(()) => Ok(pw.clone()),
                     Err(e) => Err(Failed {
@@ -602,7 +621,7 @@ async fn extract_one(
                     }),
                 };
             }
-            let _ = std::fs::remove_dir_all(&staging);
+            remove(&staging).await;
             let line = match run {
                 Ok(run) => {
                     let c = causes(&run);
@@ -640,8 +659,9 @@ async fn extract_one(
 /// The archive's name without volume and type (`x.part01.rar`, `x.7z.001` → `x`), which JD
 /// tries as a password too (ExtractionController: `passwordList.add(archive.getName())`).
 fn archive_name(file: &str) -> String {
-    let re = Regex::new(r"(?i)(?:\.part0*\d+)?\.(?:rar|zip|7z)(?:\.\d+)?$").unwrap();
-    re.replace(file, "").to_string()
+    static TYPE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(?:\.part0*\d+)?\.(?:rar|zip|7z)(?:\.\d+)?$").unwrap());
+    TYPE.replace(file, "").to_string()
 }
 
 /// The passwords to try, in JD's order (ExtractionController): none, the package's, the
@@ -742,7 +762,7 @@ impl Engine {
     /// extracted twice nor, half downloaded, the reason this package fails. If none of the
     /// package's files is there any more (renamed or moved in Fertig): every set in the folder.
     async fn package_sets(&self, package_id: i64, dir: &Path) -> Vec<ArchiveSet> {
-        let names = files::file_names(dir);
+        let names = file_names(dir).await;
         let own: Vec<String> = db::package_downloads(&self.db, package_id)
             .await
             .unwrap_or_default()
@@ -824,7 +844,7 @@ impl Engine {
         let sets: Vec<ArchiveSet> = match only {
             Some(sets) => sets,
             None => {
-                let names = files::file_names(dir);
+                let names = file_names(dir).await;
                 find_archives(&names)
                     .0
                     .iter()

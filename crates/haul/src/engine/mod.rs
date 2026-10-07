@@ -1097,13 +1097,13 @@ pub fn parse_links(text: &str) -> Vec<String> {
 
 /// `Foo.part1.rar`, `Foo.part2.rar` → `Foo`; mixed files → `first (+n)`.
 pub fn guess_package_name(names: &[String]) -> String {
-    let re = regex::Regex::new(
-        r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$",
-    )
-    .unwrap();
+    static TYPE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$")
+            .unwrap()
+    });
     let stems: Vec<String> = names
         .iter()
-        .map(|n| re.replace(n, "").to_string())
+        .map(|n| TYPE.replace(n, "").to_string())
         .collect();
     if let Some(first) = stems.first() {
         if !first.is_empty() && stems.iter().all(|s| s == first) {
