@@ -1206,6 +1206,18 @@ mod engine_tests {
                     )
                 }),
             )
+            // A web page that never ends: only its start may be read.
+            .route(
+                "/endless.html",
+                get(|| async {
+                    let chunk = axum::body::Bytes::from_static(b"<p>Link expired</p>\n");
+                    let stream = futures::stream::repeat(chunk).map(Ok::<_, std::io::Error>);
+                    (
+                        [(header::CONTENT_TYPE, "text/html")],
+                        Body::from_stream(stream),
+                    )
+                }),
+            )
             .route(
                 "/page.bin",
                 get(|| async {
@@ -1489,7 +1501,7 @@ mod engine_tests {
 
         let pkg = e
             .add_links(AddLinks {
-                links: format!("{base}/file.bin\n{base}/page.bin"),
+                links: format!("{base}/file.bin\n{base}/page.bin\n{base}/endless.html"),
                 package_name: Some("One".into()),
                 start: true,
                 ..Default::default()
@@ -1502,19 +1514,26 @@ mod engine_tests {
         assert!(std::fs::read(dir.path().join("done/One/file.bin")).unwrap() == *data);
 
         // A web page instead of the file is an error, not a finished download.
+        let mut reported = 0;
         for _ in 0..100 {
-            let d = db::get_download(&e.db, ids[1]).await.unwrap().unwrap();
-            if let Some(err) = d.error {
-                let err = crate::i18n::german(&err);
-                assert!(err.contains("Webseite statt der Datei"), "{err}");
-                assert!(err.contains("Link expired"), "{err}");
-                assert_ne!(d.status, status::FINISHED);
+            reported = 0;
+            for &id in &ids[1..] {
+                let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+                if let Some(err) = d.error {
+                    let err = crate::i18n::german(&err);
+                    assert!(err.contains("Webseite statt der Datei"), "{err}");
+                    assert!(err.contains("Link expired"), "{err}");
+                    assert_ne!(d.status, status::FINISHED);
+                    reported += 1;
+                }
+            }
+            if reported == 2 {
                 e.shutdown().await;
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("HTML response was not reported");
+        panic!("HTML responses were not reported ({reported} of 2)");
     }
 
     /// Click'n'Load links come from any web page: direct links are not probed from the server

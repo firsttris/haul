@@ -172,6 +172,23 @@ pub async fn probe_direct(client: &Client, url: &str) -> Result<Probe> {
     Ok(p)
 }
 
+/// What is read of a web page in place of a file: enough for its text and the debug log.
+const PAGE_LIMIT: usize = 64 << 10;
+
+/// The first [`PAGE_LIMIT`] bytes of a response, as text.
+async fn page_start(resp: Response) -> String {
+    let mut stream = resp.bytes_stream();
+    let mut buf = Vec::new();
+    while let Some(Ok(chunk)) = stream.next().await {
+        buf.extend_from_slice(&chunk);
+        if buf.len() >= PAGE_LIMIT {
+            buf.truncate(PAGE_LIMIT);
+            break;
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 pub async fn run(
     engine: &Arc<Engine>,
     id: i64,
@@ -428,7 +445,8 @@ async fn execute(
         .is_some_and(|v| v.starts_with("text/html"));
     if html && resp.headers().get(CONTENT_DISPOSITION).is_none() {
         let resp_url = resp.url().to_string();
-        let body = resp.text().await.unwrap_or_default();
+        // Only the start: the "page" may be the whole file with a wrong type.
+        let body = cancellable(cancel, page_start(resp)).await?;
         let text: String = body
             .split('<')
             .filter_map(|t| t.split_once('>').map(|(_, rest)| rest.trim()))
