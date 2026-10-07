@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 const PRELUDE: &str = include_str!("prelude.js");
 const MAX_BODY: usize = 16 * 1024 * 1024;
 const CALL_TIMEOUT: Duration = Duration::from_secs(300);
+/// Loading a plugin only defines its functions; anything slower is a broken plugin.
+const META_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// HTTP clients handed to one plugin call; both share the same cookie jar.
 #[derive(Clone)]
@@ -377,7 +379,10 @@ async fn new_context() -> Result<(AsyncRuntime, AsyncContext)> {
 
 /// Evaluates the plugin once and returns its metadata as JSON.
 pub async fn read_meta(code: &str) -> Result<String> {
-    let (_rt, ctx) = new_context().await?;
+    let (rt, ctx) = new_context().await?;
+    let deadline = Instant::now() + META_TIMEOUT;
+    rt.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)))
+        .await;
     let code = code.to_string();
     async_with!(ctx => |ctx| {
         let run = || -> rquickjs::Result<String> {
@@ -424,10 +429,32 @@ pub async fn invoke_with(
     clients: HttpClients,
     asker: Option<crate::captcha::Asker>,
 ) -> std::result::Result<serde_json::Value, PluginError> {
+    invoke_timed(
+        plugin_id,
+        code,
+        method,
+        args,
+        env,
+        clients,
+        asker,
+        CALL_TIMEOUT,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn invoke_timed(
+    plugin_id: &str,
+    code: &str,
+    method: &str,
+    args: serde_json::Value,
+    env: serde_json::Value,
+    clients: HttpClients,
+    asker: Option<crate::captcha::Asker>,
+    timeout: Duration,
+) -> std::result::Result<serde_json::Value, PluginError> {
     // The time limit does not count time spent waiting for the user to solve a captcha.
-    let deadline = Arc::new(std::sync::Mutex::new(
-        tokio::time::Instant::now() + CALL_TIMEOUT,
-    ));
+    let deadline = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now() + timeout));
     let fut = invoke_inner(
         plugin_id,
         code,
@@ -457,6 +484,15 @@ pub async fn invoke_with(
     };
     let raw = match raw {
         Ok(raw) => raw,
+        // Stopped by the interrupt handler: the same as running out of time at an `await`.
+        Err(_) if *deadline.lock().unwrap() <= tokio::time::Instant::now() => {
+            return Err(PluginError {
+                kind: ErrorKind::Temporary,
+                message: crate::msg!("server_plugin_timeout"),
+                wait_secs: None,
+                hoster_wide: false,
+            });
+        }
         Err(e) => return Err(PluginError::fatal(format!("plugin error: {e}"))),
     };
     let res: InvokeResult = serde_json::from_str(&raw)
@@ -489,6 +525,14 @@ async fn invoke_inner(
     deadline: Arc<std::sync::Mutex<tokio::time::Instant>>,
 ) -> Result<String> {
     let (rt, ctx) = new_context().await?;
+    // The timeout in `invoke_with` only fires when the script yields at an `await`;
+    // the interrupt handler also stops a script stuck in synchronous code (a regex
+    // backtracking on an unexpected page), which would otherwise hold a runtime thread.
+    let d = deadline.clone();
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        tokio::time::Instant::now() > *d.lock().unwrap()
+    })))
+    .await;
     let code = code.to_string();
     let method = method.to_string();
     let plugin_id = plugin_id.to_string();
@@ -763,6 +807,33 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(e.kind, ErrorKind::Offline);
+    }
+
+    #[tokio::test]
+    async fn synchronous_loop_hits_the_time_limit() {
+        const BUSY: &str = r#"
+            var __plugin = { default: {
+                id: "busy", version: 1, matches: [/busy/],
+                async resolve(link) { while (true) {} },
+            }};
+        "#;
+        let started = std::time::Instant::now();
+        let e = invoke_timed(
+            "busy",
+            BUSY,
+            "resolve",
+            serde_json::json!(["busy"]),
+            serde_json::json!({}),
+            clients(),
+            None,
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Temporary);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // A plugin that never finishes loading is stopped, too.
+        assert!(read_meta("while (true) {}").await.is_err());
     }
 }
 
