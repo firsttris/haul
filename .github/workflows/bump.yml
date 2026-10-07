@@ -12,7 +12,7 @@ on:
 
 jobs:
   bump:
-    uses: firsttris/workflows/.github/workflows/bump-version.yml@v1
+    uses: firsttris/workflows/.github/workflows/bump-version.yml@e338199e719aa8187493b3a2e2020b340e230af5 # v1
     with:
       bump: ${{ inputs.bump }}
       version-file: Cargo.toml
