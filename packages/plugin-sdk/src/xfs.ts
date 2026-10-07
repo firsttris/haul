@@ -369,10 +369,28 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
     return (res.status === 403 || res.status === 503) && /cf-chl|Just a moment|challenge-platform/i.test(res.body);
   }
 
+  /**
+   * A 404 that is not the site saying the file is gone: Cloudflare's error and challenge pages
+   * and maintenance pages answer 404 for a whole outage too, and offline is final.
+   */
+  function outage404(res: HttpResponse): boolean {
+    return res.status === 404 && /cf-chl|Just a moment|challenge-platform|cf-error-details|maintenance mode|under maintenance|Technical Maintenance/i.test(res.body);
+  }
+
+  /** The file is gone: the site's offline texts, or a 404 that is not an outage. */
+  function gone(res: HttpResponse, html: string): boolean {
+    return offline.some((p) => p.test(html)) || (res.status === 404 && !outage404(res));
+  }
+
+  function outageError(): TemporaryError {
+    return new TemporaryError({ de: `${cfg.name}: Seite nicht erreichbar (HTTP 404), später erneut`, en: `${cfg.name}: site unavailable (HTTP 404), trying later` });
+  }
+
   /** Errors that are certain wherever they show up. */
   function assertOnline(res: HttpResponse) {
     const html = visible(res.body);
-    if (res.status === 404 || offline.some((p) => p.test(html))) throw new OfflineError();
+    if (gone(res, html)) throw new OfflineError();
+    if (outage404(res)) throw outageError();
     if (isCloudflare(res)) {
       throw new TemporaryError({
         de: `${cfg.name}: Cloudflare-Prüfung, später erneut`,
@@ -605,7 +623,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       throw new TemporaryError({ de: `${n}: Fehler beim Erzeugen des Download-Links`, en: `${n}: error generating the download link` }, 10 * 60);
     }
     for (const p of PREMIUM_ONLY) {
-      const m = new RegExp(`>(${p.source})`, 'i').exec(res.body);
+      // The visible page: XFS templates keep these texts in comments too.
+      const m = new RegExp(`>(${p.source})`, 'i').exec(html);
       if (m) {
         throw new PluginError('fatal', {
           de: `${n}: nur mit Premium („${decodeHtml(m[1]).trim()}“)`,
@@ -886,7 +905,8 @@ export function createXfsPlugin(cfg: XfsConfig): PluginDefinition {
       // name and size. Never follow redirects here; a redirect may be the file itself.
       const res = await web(ctx, m?.kind === 'cookie' ? m : null).get(fileUrl(link), { followRedirects: false, headers: cfg.headers });
       const html = visible(res.body);
-      if (res.status === 404 || offline.some((p) => p.test(html))) return { online: false };
+      if (gone(res, html)) return { online: false };
+      if (outage404(res)) throw outageError();
       const name = match(html, ...names) ?? parseForms(html).map((f) => f.fields.fname).find((n) => !!n && n.trim().length > 0);
       if (!name) ctx.log.warn(`${cfg.name}: kein Dateiname auf der Dateiseite gefunden (HTTP ${res.status}, ${match(res.body, /<title>\s*([^<]*)</i) ?? 'ohne Titel'})`);
       return { online: true, name, size: parseSize(match(html, ...sizes)), hash: sha256Of(html) };

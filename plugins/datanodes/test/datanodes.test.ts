@@ -54,6 +54,17 @@ describe('datanodes', () => {
     expect(r).toMatchObject({ url: CDN, name: 'Film.part1.rar', maxConnections: 1 });
   });
 
+  it('takes a limit page for a limit, not for premium only', async () => {
+    const limited = (text: string) =>
+      fakeCtx({
+        'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },
+        'POST https://datanodes.to/abcdefghijkl': { body: `<a href="/premium">Premium</a><div class="alert">${text}</div>` },
+      });
+    await expect(plugin.resolve(LINK, limited('All download slots are in use, try again later'))).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 900 });
+    await expect(plugin.resolve(LINK, limited('Download-limit reached. Please wait 2 hours'))).rejects.toMatchObject({ haulKind: 'temporary', haulWait: 7201 });
+    await expect(plugin.resolve(LINK, limited('Buy premium'))).rejects.toMatchObject({ haulKind: 'fatal' });
+  });
+
   it('sends a countdown longer than a plugin call back to the queue', async () => {
     const ctx = fakeCtx({
       'GET https://datanodes.to/abcdefghijkl': { body: PAGE1 },

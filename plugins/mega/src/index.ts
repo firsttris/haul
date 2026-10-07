@@ -372,8 +372,9 @@ function nodeKey(ctx: Ctx, node: FolderNode, root: string | undefined, folderKey
   }
 }
 
-async function listFolder(ctx: Ctx, folder: string): Promise<FolderNode[]> {
-  const r = await api(ctx, { a: 'f', c: 1, r: 1, ca: 1 }, 'check', folder);
+/** `when`: errors 6 and 11 are offline in a crawl, but only "try later" during a download. */
+async function listFolder(ctx: Ctx, folder: string, when: 'check' | 'download'): Promise<FolderNode[]> {
+  const r = await api(ctx, { a: 'f', c: 1, r: 1, ca: 1 }, when, folder);
   return Array.isArray(r.f) ? (r.f as FolderNode[]) : [];
 }
 
@@ -420,7 +421,7 @@ async function resolveFile(ctx: Ctx, t: Target): Promise<Resolved> {
   let name: string | undefined;
   if (t.folder) {
     const folderKey = folderKeyOf(t.key);
-    const nodes = await listFolder(ctx, t.folder);
+    const nodes = await listFolder(ctx, t.folder, 'download');
     const node = nodes.find((n) => n.h === t.id && n.t === 0);
     if (!node) throw new OfflineError({ de: 'MEGA: Datei nicht mehr im Ordner', en: 'MEGA: the file is no longer in the folder' });
     const k = nodeKey(ctx, node, rootOf(nodes), folderKey);
@@ -472,7 +473,7 @@ async function crawlFolder(ctx: Ctx, link: string) {
   const keyText = m[2] ?? m[4];
   const folderKey = folderKeyOf(keyText);
   const only = m[5]?.toLowerCase() === 'folder' ? m[6] : undefined;
-  const nodes = await listFolder(ctx, folder);
+  const nodes = await listFolder(ctx, folder, 'check');
   if (!nodes.length) throw new OfflineError({ de: 'MEGA: Ordner leer oder gelöscht', en: 'MEGA: folder empty or deleted' });
   const root = rootOf(nodes);
   const parent = new Map(nodes.map((n) => [n.h, n.p]));

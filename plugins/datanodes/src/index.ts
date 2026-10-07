@@ -25,8 +25,8 @@
  * Not taken over: JD gives Datanodes a random User-Agent (`UserAgents.generate()`, no reason in
  * the source; the only JD plugin that does so).
  */
-import { decodeHtml, definePlugin, parseForms, PluginError } from '@haul/plugin-sdk';
-import { createXfsPlugin } from '@haul/plugin-sdk/xfs';
+import { decodeHtml, definePlugin, HosterLimitError, match, parseForms, PluginError } from '@haul/plugin-sdk';
+import { createXfsPlugin, parseWait } from '@haul/plugin-sdk/xfs';
 import type { FreeStep } from '@haul/plugin-sdk/xfs';
 
 const SITE = 'https://datanodes.to';
@@ -66,10 +66,22 @@ export default definePlugin(
           en: 'Datanodes: “Not allowed from domain you’re coming from”',
         });
       }
-      // JD isPremiumOnly: a /premium link and no download form at all.
+      // JD isPremiumOnly: a /premium link and no download form at all. Limit pages look the
+      // same (the premium link is on every page), so they are told apart first: JD checks
+      // premium-only after the limits.
       const forms = parseForms(html);
       const hasDownloadForm = forms.some((f) => /id=["']downloadForm["']/i.test(f.html) || (f.fields.op ?? '').startsWith('download'));
       if (/\/premium/i.test(html) && !hasDownloadForm && !/countdown="\d+"/i.test(html)) {
+        const limit = match(
+          html,
+          />\s*((?:You have reached the download[- ]limit|Download[- ]limit reached|You have to wait|[^<>]*\ball (?:download )?slots\b|[^<>]*\bslots? (?:are )?(?:full|in use))[^<>]*)/i,
+        );
+        if (limit) {
+          throw new HosterLimitError(
+            { de: `Datanodes: Download-Limit („${limit}“)`, en: `Datanodes: download limit (“${limit}”)` },
+            /\d+\s*(?:sec|min|hour|day)/i.test(limit) ? parseWait(limit) : 15 * 60,
+          );
+        }
         throw new PluginError('fatal', { de: 'Datanodes: nur mit Premium', en: 'Datanodes: premium only' });
       }
     },
