@@ -14,14 +14,21 @@ async function postConfig() {
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data || typeof e.data !== 'object') return;
-  const msg = e.data as { [TAG]?: string; id?: number; action?: string; body?: string; page?: string };
+  const msg = e.data as { [TAG]?: string; id?: number; action?: string; body?: string };
   if (msg[TAG] === 'hello') {
     void postConfig();
   } else if (msg[TAG] === 'request' && (msg.action === 'add' || msg.action === 'addcrypted2')) {
-    chrome.runtime
-      .sendMessage({ type: 'cnl', action: msg.action, body: String(msg.body ?? ''), page: String(msg.page ?? location.href) })
-      .then((r: { ok?: boolean } | undefined) => window.postMessage({ [TAG]: 'result', id: msg.id, ok: !!r?.ok }, '*'))
-      .catch(() => window.postMessage({ [TAG]: 'result', id: msg.id, ok: false }, '*'));
+    const { action, id } = msg;
+    void (async () => {
+      // Any script on the page can post this message, not only cnl-page.ts: with Click'n'Load
+      // turned off nothing goes to Haul, and the page is where the message came from, not what
+      // the message says.
+      const { cnl, server, token } = await loadSettings();
+      if (!cnl || !server || !token) return { ok: false };
+      return chrome.runtime.sendMessage({ type: 'cnl', action, body: String(msg.body ?? ''), page: location.href });
+    })()
+      .then((r: { ok?: boolean } | undefined) => window.postMessage({ [TAG]: 'result', id, ok: !!r?.ok }, '*'))
+      .catch(() => window.postMessage({ [TAG]: 'result', id, ok: false }, '*'));
   }
 });
 
