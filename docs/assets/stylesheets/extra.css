@@ -1,0 +1,21 @@
+/* Colors of the app (styles.css): dark sidebar as header, orange accent like the icon */
+:root {
+  --md-primary-fg-color: #14171a;
+  --md-primary-fg-color--light: #22262b;
+  --md-primary-fg-color--dark: #0f1113;
+  --md-accent-fg-color: #c77f1a;
+}
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: #f0a43a;
+}
+/* Screenshots: border and shadow, never wider than the text */
+.md-typeset img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+}
+/* Wide, scrollable tables (hosters, environment variables) */
+.md-typeset table:not([class]) {
+  font-size: .75rem;
+}

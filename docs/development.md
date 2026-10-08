@@ -19,7 +19,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` creates `.env` from [`.env.example`](../.env.example) on the first run, builds the plugins
+`pnpm dev` creates `.env` from [`.env.example`](https://github.com/firsttris/haul/blob/main/.env.example) on the first run, builds the plugins
 and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http://localhost:5173 and log
 in with `admin` / `adminadmin`. Data goes to `./.data`.
 
@@ -37,6 +37,15 @@ pnpm typecheck
 ```
 
 CI runs all of them on every pull request and builds the image.
+
+The documentation in `docs/` is published to https://firsttris.github.io/haul/ by
+[`docs.yml`](https://github.com/firsttris/haul/blob/main/.github/workflows/docs.yml) on every push to
+`main` that touches it. To preview it locally:
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve        # http://localhost:8000
+```
 
 ## Architecture
 
@@ -115,7 +124,7 @@ All endpoints are under `/api` and speak JSON. Authentication with the session c
 
 A version is a tag that matches `version` in `Cargo.toml` (`[workspace.package]`). The simplest way:
 *Actions → Bump version → Run workflow* with patch, minor or major
-([`bump.yml`](../.github/workflows/bump.yml), the shared
+([`bump.yml`](https://github.com/firsttris/haul/blob/main/.github/workflows/bump.yml), the shared
 [`bump-version`](https://github.com/firsttris/workflows#bump-version)). It raises the version in
 `Cargo.toml` and `Cargo.lock`, commits it as `Release vX.Y.Z`, tags it and starts the release. By hand:
 raise the version there, commit, then
