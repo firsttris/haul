@@ -8,7 +8,7 @@ The Haul extension for Chrome and Firefox connects your browser to your Haul ser
 - **Popup**: paste any text with links and send them, send the current page, open Haul.
 
 The links land in the **link grabber** with the page they came from, unless you turn on
-*Start downloads right away* in the extension's settings.
+*Start sent links right away instead of keeping them in the link grabber* in the extension's settings.
 
 ## Install
 

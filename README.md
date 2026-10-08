@@ -55,7 +55,7 @@ board like the Raspberry Pi.
   desktop, and *Send to Haul* in the right-click menu
 - **Auto-extract** of RAR, 7z and ZIP with progress, a password list that learns, and incomplete
   multi-part sets left alone until they are complete
-- **Checksums** verified where the hoster publishes them (MD5, SHA-256, MEGA MAC)
+- **Checksums** verified where the hoster publishes them (MD5, SHA-1, SHA-256, MEGA MAC)
 - **Done view**: the download folder as it is on disk, with extract, move and delete
 - **Password-protected files and folders**, asked for in the UI when needed
 - **English and German UI**, including every message from the server and the plugins
@@ -66,7 +66,7 @@ board like the Raspberry Pi.
 |---|:---:|:---:|:---:|
 | **1fichier** | ✅ | API key | ✅ |
 | **Datanodes** | ✅ | ✅ | |
-| **ddownload** | | ✅ premium, API key | |
+| **ddownload** | | ✅ premium | |
 | **FileQ** | ✅ | ✅ | |
 | **Filekeeper** | ✅ | ✅ | |
 | **Gofile** | ✅ | API token | ✅ |
