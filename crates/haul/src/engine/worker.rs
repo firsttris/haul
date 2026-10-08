@@ -536,7 +536,7 @@ async fn execute(
         if let Some(t) = total {
             file.set_len(t).await?;
         }
-        let mut tx = db::write_tx(&engine.db).await?;
+        let mut tx = engine.db.begin().await?;
         sqlx::query("DELETE FROM segments WHERE download_id = ?")
             .bind(id)
             .execute(&mut *tx)
@@ -646,16 +646,7 @@ async fn execute(
             }
         }
     }
-    // The whole file may be on disk by now: a busy database must not cost an attempt.
-    let mut saved = persist_segments(engine, id, &segs).await;
-    for wait in [200, 1000, 5000] {
-        if saved.is_ok() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(wait)).await;
-        saved = persist_segments(engine, id, &segs).await;
-    }
-    saved?;
+    persist_segments(engine, id, &segs).await?;
     if cancel.is_cancelled() {
         return Err(Failure::Cancelled);
     }
@@ -781,7 +772,7 @@ fn plan_segments(total: Option<u64>, ranges: bool, conns: u64) -> Vec<(u64, Opti
 }
 
 async fn persist_segments(engine: &Engine, id: i64, segs: &[Arc<Seg>]) -> Result<(), Failure> {
-    let mut tx = db::write_tx(&engine.db).await?;
+    let mut tx = engine.db.begin().await?;
     let mut sum = 0u64;
     for s in segs {
         let safe = s.safe.load(Ordering::Relaxed);

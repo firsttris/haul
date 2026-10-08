@@ -544,7 +544,7 @@ impl Engine {
         // checks or starts the package; hoster links only go to their plugin's hoster.
         let probe_direct = req.source.as_deref() != Some("cnl");
         let now = now_ms();
-        let mut tx = db::write_tx(&self.db).await?;
+        let mut tx = self.db.begin().await?;
         let pkg_id: i64 = sqlx::query_scalar(
             "INSERT INTO packages(name, target_dir, source, source_page, passwords, collector, created_at)
              VALUES(?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -724,7 +724,7 @@ impl Engine {
 
     /// Swaps a crawled link for its files, in one transaction; nothing if it was deleted.
     async fn replace_link(&self, d: &Download, links: &[NewLink], status: &str) -> Result<()> {
-        let mut tx = db::write_tx(&self.db).await?;
+        let mut tx = self.db.begin().await?;
         let gone = sqlx::query("DELETE FROM downloads WHERE id = ? AND status = ?")
             .bind(d.id)
             .bind(status::CRAWLING)
@@ -934,7 +934,7 @@ impl Engine {
             self.start_package(id).await?;
             return Ok(id);
         }
-        let mut tx = db::write_tx(&self.db).await?;
+        let mut tx = self.db.begin().await?;
         let new_id = sqlx::query(
             "INSERT INTO packages(name, target_dir, source, source_page, passwords, collector, created_at)
              SELECT name, target_dir, source, source_page, passwords, 0, ? FROM packages WHERE id = ?",
