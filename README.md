@@ -55,7 +55,7 @@ board like the Raspberry Pi.
   desktop, and *Send to Haul* in the right-click menu
 - **Auto-extract** of RAR, 7z and ZIP with progress, a password list that learns, and incomplete
   multi-part sets left alone until they are complete
-- **Checksums** verified where the hoster publishes them (MD5, SHA-256, MEGA MAC)
+- **Checksums** verified where the hoster publishes them (MD5, SHA-1, SHA-256, MEGA MAC)
 - **Done view**: the download folder as it is on disk, with extract, move and delete
 - **Password-protected files and folders**, asked for in the UI when needed
 - **English and German UI**, including every message from the server and the plugins
@@ -66,7 +66,7 @@ board like the Raspberry Pi.
 |---|:---:|:---:|:---:|
 | **1fichier** | ✅ | API key | ✅ |
 | **Datanodes** | ✅ | ✅ | |
-| **ddownload** | | ✅ premium, API key | |
+| **ddownload** | | ✅ premium | |
 | **FileQ** | ✅ | ✅ | |
 | **Filekeeper** | ✅ | ✅ | |
 | **Gofile** | ✅ | API token | ✅ |
@@ -138,6 +138,7 @@ The full documentation, with search, is at **[firsttris.github.io/haul](https://
 | [Extraction](https://firsttris.github.io/haul/extraction.html) | archives, passwords, incomplete sets, the Done view |
 | [Browser extension](https://firsttris.github.io/haul/browser-extension.html) | Click'n'Load and *Send to Haul* in Chrome and Firefox |
 | [Click'n'Load](https://firsttris.github.io/haul/click-n-load.html) | how links from link sites reach the server, `haul-cnl` |
+| [Architecture](https://firsttris.github.io/haul/architecture.html) | how the server, queue, plugins and downloads fit together |
 | [Plugins](https://firsttris.github.io/haul/plugins.html) | writing and debugging hoster plugins |
 | [Development](https://firsttris.github.io/haul/development.html) | building, checks, architecture, API, releases |
 
@@ -154,7 +155,7 @@ pnpm dev        # server on :8080, UI with hot reload on :5173, login admin / ad
 
 **Stack**: Rust with tokio, axum, reqwest and SQLite · hoster plugins in TypeScript, run in QuickJS
 inside the server · React, TanStack Router, Query and Table, embedded in the binary.
-More in the [development guide](https://firsttris.github.io/haul/development.html).
+More in [Architecture](https://firsttris.github.io/haul/architecture.html) and the [development guide](https://firsttris.github.io/haul/development.html).
 
 ## 🤝 Contributing
 

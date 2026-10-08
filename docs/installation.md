@@ -108,14 +108,39 @@ Then:
 | `HAUL_TMP_DIR` | `/downloads/tmp` | Downloads in progress |
 | `HAUL_DONE_DIR` | `/downloads/done` | Finished downloads |
 | `HAUL_LISTEN` | `0.0.0.0:8080` | Web UI and API |
-| `HAUL_CNL_LISTEN` | `0.0.0.0:9666` in the image | Click'n'Load; `off` turns it off. Publish it only on `127.0.0.1`. |
-| `HAUL_BUILTIN_PLUGINS` | `/app/plugins` in the image | Plugins that come with Haul |
+| `HAUL_CNL_LISTEN` | `0.0.0.0:9666` in the image, else `127.0.0.1:9666` | Click'n'Load; `off` turns it off. Publish it only on `127.0.0.1`. |
+| `HAUL_BUILTIN_PLUGINS` | `/app/plugins` in the image, else unset | Plugins that come with Haul; unset means only your own plugins load |
 | `HAUL_USER_AGENT` | a desktop browser | User-Agent sent to hosters |
-| `HAUL_7Z`, `HAUL_UNRAR` | found on `PATH` | Extractors |
-| `RUST_LOG` | `info` | Log level. `haul=debug` also saves the hoster pages of failed downloads, see [Debugging a hoster](plugins.md#debugging-a-hoster). |
+| `HAUL_7Z`, `HAUL_UNRAR` | found on `PATH` | Extractors: `7zz`, `7z` or `7za`, and `unrar` |
+| `RUST_LOG` | `info,sqlx=warn` | Log level. `haul=debug` also saves the hoster pages of failed downloads, see [Debugging a hoster](plugins.md#debugging-a-hoster). |
 
-Everything else (parallel downloads, connections per file, bandwidth limit, retries, extraction,
-checksums) is under **Settings** in the UI.
+## Settings in the UI
+
+Everything else is under **Settings** in the web UI and stored in the database.
+
+| Setting | Default | Range |
+|---|---|---|
+| Parallel downloads | 3 | 1–20 |
+| Connections per file | 4 | 1–16, hosters may allow fewer |
+| Bandwidth limit (KiB/s) | 0, no limit | over all downloads |
+| Retries | 5 | 0–50 |
+| Extract finished packages automatically | on | |
+| Delete archives after successful extraction | off | |
+| Remove the downloads from the list after successful extraction | off | |
+| Ask for the archive password when none fits | on | |
+| Verify the checksum after the download | on | |
+
+The same page holds the [archive password list](extraction.md), the [captcha userscript](captchas.md),
+the API token for [Click'n'Load](click-n-load.md), the folders and extractors Haul found, and:
+
+- **Language**: German or English for this browser, including messages from the server and the
+  hosters. It is also switchable at the bottom of the sidebar.
+- **Login**: change your password, or log out.
+
+## Health check
+
+`GET /api/health` answers `{"status":"ok"}` without a login. The image uses it as its Docker
+`HEALTHCHECK`, and you can point an uptime monitor at it.
 
 ## Updating
 

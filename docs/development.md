@@ -24,7 +24,8 @@ and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http:
 in with `admin` / `adminadmin`. Data goes to `./.data`.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
-environment take precedence.
+environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`
+(`http://localhost:5173` in `.env.example`) makes `:8080` redirect to the Vite dev server.
 
 ## Checks
 
@@ -49,17 +50,8 @@ mkdocs serve        # http://localhost:8000
 
 ## Architecture
 
-```
-Browser ──HTTP/SSE──▶ axum ──▶ queue / engine ──▶ plugin (QuickJS) ──▶ direct URL
-                        │            │
-                        │            └──▶ download engine (reqwest, range segments) ──▶ tmp ──▶ done
-                        └──▶ SQLite (/config/haul.db)
-Desktop: web page ──▶ 127.0.0.1:9666 (haul-cnl) ──bearer token──▶ /api/cnl/flash/*
-```
-
-The queue hands every link to its plugin. The plugin logs in at the hoster and returns only the direct
-URL. The download engine loads the bytes in segments, stores the progress of each segment in SQLite and
-moves finished files into the package folder.
+How the server, the queue, the plugins and the downloads fit together is described in
+[Architecture](architecture.md). In short:
 
 | Part | Choice |
 |---|---|
@@ -96,18 +88,20 @@ packages/plugin-sdk  types, helpers, XFileSharing base, test context for plugins
 plugins/*            hoster plugins, one folder each, with tests
 ui                   web UI
 extension            browser extension for Chrome and Firefox (pnpm build:extension)
-docker               Compose file and Podman Quadlet units
-docs                 this documentation
+docker               Dockerfile, Compose file and Podman Quadlet units
+docs                 this documentation (mkdocs.yml, requirements-docs.txt)
+scripts              dev.mjs (pnpm dev), build-plugins.mjs
+.github/workflows    CI, extension, docs, bump and release
 ```
 
 ## API
 
 All endpoints are under `/api` and speak JSON. Authentication with the session cookie (web UI) or
-`Authorization: Bearer <API token>`.
+`Authorization: Bearer <API token>`, created under **Settings → Click'n'Load from the desktop**.
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/links` | `{ links, packageName?, targetDir?, password?, start }`; `links` is text with one link per line; `password` is the download and first archive password, or separately `downloadPassword?`, `passwords?` |
+| `POST` | `/links` | `{ links, packageName?, targetDir?, password?, start? }`; `links` is text with one link per line; `start` defaults to `false` (link grabber); `password` is the download and first archive password, or separately `downloadPassword?`, `passwords?`; also `source?`, `sourcePage?`. Answers `{ packageId }`. |
 | `GET` | `/packages?view=queue\|collector` | packages with their downloads |
 | `PATCH` / `DELETE` | `/packages/{id}` | rename, target folder, passwords / delete |
 | `POST` | `/packages/{id}/start\|pause\|resume\|check\|extract` | `start` takes `{ downloadIds }` to start only those; the rest stays in the link grabber |
@@ -115,10 +109,32 @@ All endpoints are under `/api` and speak JSON. Authentication with the session c
 | `POST` | `/downloads/pause-all\|resume-all\|clear-finished` | |
 | `GET` | `/events` | SSE: `changed` and `progress` |
 | `GET` | `/stats` | slots, queue, disk space, premium traffic |
-| `GET` / `POST` / `PATCH` / `DELETE` | `/accounts…` | |
+| `GET` / `POST` | `/accounts` | list / add |
+| `PATCH` / `DELETE` | `/accounts/{id}` | change / delete |
+| `POST` | `/accounts/{id}/check` | log in and refresh premium state and traffic |
+| `GET` | `/files`, `/files/folders` | the done folder; every folder in it as move targets |
+| `POST` | `/files/delete\|delete-archives\|extract\|move\|mkdir` | Done view actions, paths relative to the done folder |
 | `GET` / `POST` | `/plugins`, `/plugins/reload` | |
 | `GET` / `PUT` | `/settings` | |
+| `GET` / `PUT` | `/settings/archive-passwords` | the archive password list |
+| `POST` | `/settings/api-token` | a new API token, shown once; replaces the old one |
+| `POST` | `/auth/password` | change the login password |
+| `GET` | `/captchas` | captchas and questions waiting for the user |
+| `POST` | `/captchas/{id}/cancel` | cancel one |
 | `POST` | `/cnl/flash/add\|addcrypted2` | Click'n'Load through `haul-cnl` |
+
+Without login:
+
+| Method | Path | |
+|---|---|---|
+| `GET` | `/health` | `{"status":"ok"}`, used by the Docker health check |
+| `GET` | `/auth/state` | whether a user exists and the session is valid |
+| `POST` | `/auth/setup\|login\|logout` | create the first user, log in, log out |
+| `POST` | `/captcha/solve` | the userscript sends a solved captcha; the challenge's one-time secret is the proof |
+| `GET` | `/captcha/haul-captcha.user.js` | the userscript |
+
+The Click'n'Load port `9666` serves `/jdcheck.js`, `/crossdomain.xml`, `/flash`, `/flash/add` and
+`/flash/addcrypted2` without login, as link sites expect.
 
 ## Releases
 

@@ -15,7 +15,7 @@ Every hoster is a plugin. Direct HTTP(S) links work without a plugin.
 |---|:---:|---|:---:|
 | 1fichier | ✅ waits between downloads | API key, no waits | ✅ |
 | Datanodes | ✅ Turnstile in the browser | account login | – |
-| ddownload | – | premium login or API key | – |
+| ddownload | – | premium login (or `xfss` cookie) | – |
 | FileQ | ✅ text captcha | premium login | – |
 | Filekeeper | ✅ reCaptcha in the browser | premium login | – |
 | Gofile | ✅ guest token | API token | ✅ |
@@ -23,6 +23,17 @@ Every hoster is a plugin. Direct HTTP(S) links work without a plugin.
 | MEGA | ✅ free transfer quota | Pro account (no 2FA yet) | ✅ |
 | Mediafire | ✅ | e-mail and password | ✅ |
 | Send (send.now, send.cm, tusfiles, userscloud) | ✅ countdown, text captcha | premium login or API key | ✅ |
+
+The plugins also recognise the other domains of these hosters:
+
+| Hoster | Domains |
+|---|---|
+| 1fichier | 1fichier.com, alterupload.com, cjoint.net, desfichiers.com, desfichiers.net, dfichiers.com, dl4free.com, megadl.fr, mesfichiers.org, piecejointe.net, pjointe.com, tenvoi.com |
+| ddownload | ddownload.com, ddl.to |
+| Google Drive | drive.google.com, docs.google.com |
+| MEGA | mega.nz, mega.co.nz |
+| Mediafire | mediafire.com, mfi.re |
+| Send | send.now, send.cm, sendit.cloud, tusfiles.com, tusfiles.net, userscloud.com, usersfiles.com, usercdn.com |
 
 Folder links are resolved into their files when you add them, with sub-folders; the package gets the
 folder's name. This happens in the background, so adding, even by Click'n'Load, never waits for it.
@@ -68,8 +79,9 @@ optional line `User-Agent: …` makes Haul use the same browser identity.
   attempts.
 - **Gofile without account**: Haul keeps its requests few and respects the guest rate limit; when it
   is reached, all Gofile downloads wait.
-- **ddownload**: web login with a premium account, or the XFileSharing API with an API key. It is
-  tested against recorded pages, not yet against a real premium account.
+- **ddownload**: web login with a premium account. ddownload has turned off downloads through its
+  API, so API keys no longer work. It is tested against recorded pages, not yet against a real
+  premium account.
 
 ## Password-protected files
 
@@ -87,10 +99,10 @@ FileQ, Filekeeper).
 
 ## Checksums
 
-Where the hoster publishes a checksum, Haul verifies the file after the download: Google Drive (SHA-256/MD5), Gofile (MD5), Mediafire (SHA-256), Send (SHA-256) and MEGA (the
+Where the hoster publishes a checksum, Haul verifies the file after the download: Google Drive (SHA-256/MD5), Gofile (MD5), Mediafire (MD5, SHA-1 or SHA-256), Send (SHA-256) and MEGA (the
 MAC in the key). A match shows "verified" next to the file. A mismatch downloads the file once
 more and then reports "checksum wrong". One check runs at a time; checks can be turned off under
-**Settings**.
+**Settings → Verify the checksum** (on by default).
 
 ## Waits and limits
 
