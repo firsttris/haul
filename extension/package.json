@@ -1,7 +1,7 @@
 {
   "name": "@haul/extension",
   "private": true,
-  "license": "GPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Send links to Haul: right-click menu and Click'n'Load in the browser",
   "scripts": {
