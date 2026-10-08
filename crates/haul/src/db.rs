@@ -210,9 +210,37 @@ impl Default for Settings {
 impl Settings {
     pub async fn load(db: &Db) -> Result<Self> {
         Ok(match get_setting(db, "settings").await? {
-            Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+            Some(json) => Self::parse(&json),
             None => Self::default(),
         })
+    }
+
+    /// The stored settings. A value that does not fit (an older or hand-edited row) falls back
+    /// to its default alone instead of taking all the others with it.
+    fn parse(json: &str) -> Self {
+        let err = match serde_json::from_str(json) {
+            Ok(s) => return s,
+            Err(e) => e,
+        };
+        tracing::warn!("settings partly unreadable, keeping what fits: {err}");
+        let Ok(serde_json::Value::Object(stored)) = serde_json::from_str(json) else {
+            return Self::default();
+        };
+        let mut merged = match serde_json::to_value(Self::default()) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => return Self::default(),
+        };
+        for (key, value) in stored {
+            let mut candidate = merged.clone();
+            candidate.insert(key.clone(), value);
+            if serde_json::from_value::<Self>(serde_json::Value::Object(candidate.clone())).is_ok()
+            {
+                merged = candidate;
+            } else {
+                tracing::warn!(setting = %key, "unreadable setting, using its default");
+            }
+        }
+        serde_json::from_value(serde_json::Value::Object(merged)).unwrap_or_default()
     }
 
     pub async fn save(&self, db: &Db) -> Result<()> {
@@ -224,5 +252,21 @@ impl Settings {
         self.connections_per_file = self.connections_per_file.clamp(1, 16);
         self.max_retries = self.max_retries.min(50);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_bad_setting_keeps_the_others() {
+        let s =
+            Settings::parse(r#"{"maxParallel": 7, "maxRetries": "many", "autoExtract": false}"#);
+        assert_eq!(
+            (s.max_parallel, s.max_retries, s.auto_extract),
+            (7, Settings::default().max_retries, false)
+        );
+        assert_eq!(Settings::parse("not json").max_parallel, 3);
     }
 }

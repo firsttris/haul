@@ -42,7 +42,8 @@ const SUB = {
   canAccess: true,
   children: { f3: { id: 'f3', type: 'file', name: 'x.nfo', size: 3, link: 'https://store2.gofile.io/download/web/f3/x.nfo', viruses: ['bad'] } },
 };
-const crawled = (id: string, url: string) => `https://gofile.io/d/AbC123#file=${id}&t=tok123&dl=${encodeURIComponent(url)}`;
+const fp = (token: string) => createHash('sha256').update(`gofile-link::${token}`).digest('hex').slice(0, 12);
+const crawled = (id: string, url: string) => `https://gofile.io/d/AbC123#file=${id}&k=${fp('tok123')}&dl=${encodeURIComponent(url)}`;
 
 describe('gofile', () => {
   it('matches folder and file links', () => {
@@ -83,9 +84,32 @@ describe('gofile', () => {
         return { file: true, headers: { 'content-disposition': 'attachment' } };
       },
     });
+    // The guest token the crawl kept in the jar.
+    ctx.jar.set('accountToken', 'tok123');
     const r = await plugin.resolve(crawled('f1', f1), ctx);
     expect(r).toMatchObject({ url: f1, cookies: { accountToken: 'tok123' }, headers: { Referer: 'https://gofile.io/' }, maxConnections: 3 });
     expect(ctx.requests).toHaveLength(1);
+  });
+
+  it('keeps the token out of crawled links', async () => {
+    const ctx = fakeCtx({ ...TOKEN_ROUTE, ...contents('AbC123', FOLDER), ...contents('Sub9', SUB) });
+    const r = await plugin.crawl!('https://gofile.io/d/AbC123', ctx);
+    for (const f of r.files) expect(f.url).not.toContain('tok123');
+  });
+
+  it('still reads links that carried the token', async () => {
+    const ctx = fakeCtx({ [`HEAD ${f1}`]: { file: true } });
+    ctx.jar.set('accountToken', 'tok123');
+    const old = `https://gofile.io/d/AbC123#file=f1&t=tok123&dl=${encodeURIComponent(f1)}`;
+    expect(await plugin.resolve(old, ctx)).toMatchObject({ url: f1 });
+  });
+
+  it('lists the folder again when the guest token changed', async () => {
+    const ctx = fakeCtx({ ...TOKEN_ROUTE, ...contents('AbC123', FOLDER) });
+    ctx.jar.set('accountToken', 'tok123');
+    const other = `https://gofile.io/d/AbC123#file=f1&k=${fp('older')}&dl=${encodeURIComponent(f1)}`;
+    expect(await plugin.resolve(other, ctx)).toMatchObject({ url: f1, name: 'a.part1.rar' });
+    expect(ctx.requests.some((r) => r.method === 'HEAD')).toBe(false);
   });
 
   it('lists the folder again when the direct link expired', async () => {

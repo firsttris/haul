@@ -65,6 +65,10 @@ describe('free mode helpers (JD)', () => {
     const { parseWait, countdown, plainTextCaptcha } = await import('./xfs');
     expect(parseWait('You have to wait 2 minutes, 10 seconds till next download')).toBe(131);
     expect(parseWait('You have reached the download limit')).toBe(3600);
+    expect(parseWait('Please wait 3 min')).toBe(181);
+    expect(parseWait('try again in 2 hrs')).toBe(7201);
+    expect(parseWait('wait 1h 5m 30s')).toBe(3931);
+    expect(parseWait('45 secs left')).toBe(46);
     expect(countdown('<span id="countdown_str">Wait <span id="x">60</span> seconds</span>')).toBe(60);
     expect(countdown('<span class="seconds">30</span>')).toBe(30);
     expect(countdown('nothing')).toBeUndefined();
@@ -73,5 +77,29 @@ describe('free mode helpers (JD)', () => {
       [0, 52],
     ].map(([p, d]) => `<span style='position:absolute;padding-left:${p}px;padding-top:2px;'>&#${d};</span>`);
     expect(plainTextCaptcha(spans.join(''))).toBe('42');
+  });
+});
+
+describe('XFS free downloads: what is final', () => {
+  const plugin = createXfsPlugin({ id: 'x', name: 'X', version: 1, domains: ['x.example'], free: true });
+  const LINK = 'https://x.example/abcdefghijkl';
+
+  it('takes a 404 for offline, but not a 404 from Cloudflare or maintenance', async () => {
+    const page = (body: string) => fakeCtx({ 'GET https://x.example/abcdefghijkl': { status: 404, body } });
+    await expect(plugin.resolve(LINK, page('<h1>Not Found</h1>'))).rejects.toMatchObject({ haulKind: 'offline' });
+    expect(await plugin.check!(LINK, page('<h1>Not Found</h1>'))).toEqual({ online: false });
+    const cf = '<div id="cf-error-details"><h1>Error 404</h1></div>';
+    await expect(plugin.resolve(LINK, page(cf))).rejects.toMatchObject({ haulKind: 'temporary' });
+    await expect(plugin.check!(LINK, page(cf))).rejects.toMatchObject({ haulKind: 'temporary' });
+    await expect(plugin.resolve(LINK, page('<p>This server is in maintenance mode</p>'))).rejects.toMatchObject({ haulKind: 'temporary' });
+  });
+
+  it('ignores premium-only texts in HTML comments', async () => {
+    const ctx = fakeCtx({
+      'GET https://x.example/abcdefghijkl': { body: '<!-- <div>This file is available for Premium Users only</div> --><p>Please try again</p>' },
+    });
+    await expect(plugin.resolve(LINK, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+    const premium = fakeCtx({ 'GET https://x.example/abcdefghijkl': { body: '<div>This file is available for Premium Users only</div>' } });
+    await expect(plugin.resolve(LINK, premium)).rejects.toMatchObject({ haulKind: 'fatal' });
   });
 });

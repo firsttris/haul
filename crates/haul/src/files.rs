@@ -119,6 +119,10 @@ pub fn list(root: &Path, dir: &Path) -> Result<Vec<Entry>> {
         if is_dir && name.starts_with(".haul-extract-") {
             continue;
         }
+        // A finished download still being copied in (worker::move_file).
+        if !is_dir && name.starts_with(".haul-move-") {
+            continue;
+        }
         entries.push(Entry {
             path: relative(root, &path),
             dir: is_dir,

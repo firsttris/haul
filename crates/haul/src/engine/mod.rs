@@ -58,6 +58,8 @@ struct Active {
     progress: Arc<Progress>,
     /// Flips to true when the worker task has exited.
     exited: watch::Receiver<bool>,
+    /// For a worker that does not stop when cancelled.
+    task: tokio::task::AbortHandle,
 }
 
 pub struct Engine {
@@ -182,6 +184,19 @@ impl Engine {
 
     pub fn extract_progress_of(&self, rel: &str) -> Option<u8> {
         self.extracting.lock().unwrap().get(rel).map(|(_, p)| *p)
+    }
+
+    /// Whether an extraction runs in `rel` (relative to the done folder, as
+    /// `files::relative` writes it), in a folder inside it, or in a folder it is inside.
+    pub fn extracting_near(&self, rel: &str) -> bool {
+        let within = |inner: &str, outer: &str| {
+            outer.is_empty() || inner == outer || inner.starts_with(&format!("{outer}/"))
+        };
+        self.extracting
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|k| within(k, rel) || within(rel, k))
     }
 
     pub fn active_count(&self) -> usize {
@@ -326,24 +341,38 @@ impl Engine {
             phase: AtomicU8::new(PHASE_DOWNLOAD),
         });
         let (tx, rx) = watch::channel(false);
-        active.insert(
-            id,
-            Active {
-                cancel: cancel.clone(),
-                progress: progress.clone(),
-                exited: rx,
-            },
-        );
-        drop(active);
         let this = self.clone();
-        tokio::spawn(async move {
-            worker::run(&this, id, &cancel, &progress).await;
-            this.active.lock().unwrap().remove(&id);
+        let (c, p) = (cancel.clone(), progress.clone());
+        // Started while `active` is locked: the task's own removal waits for the entry.
+        let task = tokio::spawn(async move {
+            worker::run(&this, id, &c, &p).await;
+            this.forget_worker(id, &p);
             let _ = tx.send(true);
             this.events.changed(Topic::Downloads);
             this.wake.notify_one();
         });
+        active.insert(
+            id,
+            Active {
+                cancel,
+                progress,
+                exited: rx,
+                task: task.abort_handle(),
+            },
+        );
         true
+    }
+
+    /// Removes the worker of `id` from the active ones, if it is still the run with `progress`
+    /// (a stuck run given up by `stop_worker` must not remove the next one).
+    fn forget_worker(&self, id: i64, progress: &Arc<Progress>) {
+        let mut active = self.active.lock().unwrap();
+        if active
+            .get(&id)
+            .is_some_and(|a| Arc::ptr_eq(&a.progress, progress))
+        {
+            active.remove(&id);
+        }
     }
 
     /// Cancels a running worker and waits until it has persisted its state.
@@ -355,8 +384,20 @@ impl Engine {
                 a.exited.clone()
             })
         };
-        if let Some(mut rx) = exited {
-            let _ = tokio::time::timeout(Duration::from_secs(15), rx.wait_for(|x| *x)).await;
+        let Some(mut rx) = exited else { return };
+        if tokio::time::timeout(Duration::from_secs(15), rx.wait_for(|x| *x))
+            .await
+            .is_err()
+        {
+            // Stuck past its cancellation: stop it where it waits and give up its slot, or the
+            // slot stays taken until the server restarts.
+            tracing::warn!(id, "worker did not stop within 15 s, aborting it");
+            let gone = self.active.lock().unwrap().remove(&id);
+            if let Some(a) = gone {
+                a.task.abort();
+            }
+            self.events.changed(Topic::Downloads);
+            self.wake.notify_one();
         }
     }
 
@@ -538,6 +579,11 @@ impl Engine {
         let target_dir = given_dir
             .map(|d| util::sanitize_rel_dir(&d))
             .unwrap_or_else(|| util::sanitize_filename(&name));
+        // Click'n'Load is open to every web page the user visits: its links reach the server
+        // without the user's doing. A direct link is probed with a request from the server's
+        // network (to anything, `http://192.168.1.1/…` included), so those wait until the user
+        // checks or starts the package; hoster links only go to their plugin's hoster.
+        let probe_direct = req.source.as_deref() != Some("cnl");
         let now = now_ms();
         let mut tx = self.db.begin().await?;
         let pkg_id: i64 = sqlx::query_scalar(
@@ -600,7 +646,7 @@ impl Engine {
             if !req.start {
                 // Files from a folder crawl are known already; checking each one again would
                 // only cost the hoster's rate limit.
-                if let Err(e) = this.check_downloads(pkg_id, true).await {
+                if let Err(e) = this.check_downloads(pkg_id, true, probe_direct).await {
                     tracing::warn!("online check: {e:#}");
                 }
             }
@@ -805,14 +851,21 @@ impl Engine {
 
     /// Online check for all downloads of a package: plugin `check` or an HTTP probe.
     pub async fn check_package(self: &Arc<Self>, package_id: i64) -> Result<()> {
-        self.check_downloads(package_id, false).await
+        self.check_downloads(package_id, false, true).await
     }
 
-    async fn check_downloads(self: &Arc<Self>, package_id: i64, only_unknown: bool) -> Result<()> {
+    /// `probe_direct`: also check links no plugin handles, with an HTTP request.
+    async fn check_downloads(
+        self: &Arc<Self>,
+        package_id: i64,
+        only_unknown: bool,
+        probe_direct: bool,
+    ) -> Result<()> {
         let downloads = db::package_downloads(&self.db, package_id)
             .await?
             .into_iter()
             .filter(|d| d.status != status::CRAWLING)
+            .filter(|d| probe_direct || self.plugins.find_for(&d.url).is_some())
             .filter(|d| !only_unknown || (d.online == "unknown" && d.error.is_none()));
         futures::stream::iter(downloads)
             .for_each_concurrent(4, |d| {
@@ -1085,13 +1138,13 @@ pub fn parse_links(text: &str) -> Vec<String> {
 
 /// `Foo.part1.rar`, `Foo.part2.rar` → `Foo`; mixed files → `first (+n)`.
 pub fn guess_package_name(names: &[String]) -> String {
-    let re = regex::Regex::new(
-        r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$",
-    )
-    .unwrap();
+    static TYPE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)(\.part\d+)?\.(rar|zip|7z|r\d\d|\d{3}|iso|mkv|mp4|avi|bin|tar|gz)$")
+            .unwrap()
+    });
     let stems: Vec<String> = names
         .iter()
-        .map(|n| re.replace(n, "").to_string())
+        .map(|n| TYPE.replace(n, "").to_string())
         .collect();
     if let Some(first) = stems.first() {
         if !first.is_empty() && stems.iter().all(|s| s == first) {
@@ -1194,6 +1247,18 @@ mod engine_tests {
                     )
                 }),
             )
+            // A web page that never ends: only its start may be read.
+            .route(
+                "/endless.html",
+                get(|| async {
+                    let chunk = axum::body::Bytes::from_static(b"<p>Link expired</p>\n");
+                    let stream = futures::stream::repeat(chunk).map(Ok::<_, std::io::Error>);
+                    (
+                        [(header::CONTENT_TYPE, "text/html")],
+                        Body::from_stream(stream),
+                    )
+                }),
+            )
             .route(
                 "/page.bin",
                 get(|| async {
@@ -1231,6 +1296,23 @@ mod engine_tests {
         let e = Engine::new(db, cfg, plugins, Events::new()).await.unwrap();
         tokio::spawn(e.clone().run());
         e
+    }
+
+    #[tokio::test]
+    async fn extraction_guard_covers_parents_and_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        e.extracting
+            .lock()
+            .unwrap()
+            .insert("Pkg/Sub".into(), (None, 10));
+        for busy in ["Pkg/Sub", "Pkg", "Pkg/Sub/file.rar", ""] {
+            assert!(e.extracting_near(busy), "{busy}");
+        }
+        for free in ["Other", "Pkg/Subway", "Pk"] {
+            assert!(!e.extracting_near(free), "{free}");
+        }
+        e.shutdown().await;
     }
 
     async fn wait_for(e: &Engine, id: i64, want: &str) -> Download {
@@ -1477,7 +1559,7 @@ mod engine_tests {
 
         let pkg = e
             .add_links(AddLinks {
-                links: format!("{base}/file.bin\n{base}/page.bin"),
+                links: format!("{base}/file.bin\n{base}/page.bin\n{base}/endless.html"),
                 package_name: Some("One".into()),
                 start: true,
                 ..Default::default()
@@ -1490,19 +1572,52 @@ mod engine_tests {
         assert!(std::fs::read(dir.path().join("done/One/file.bin")).unwrap() == *data);
 
         // A web page instead of the file is an error, not a finished download.
+        let mut reported = 0;
         for _ in 0..100 {
-            let d = db::get_download(&e.db, ids[1]).await.unwrap().unwrap();
-            if let Some(err) = d.error {
-                let err = crate::i18n::german(&err);
-                assert!(err.contains("Webseite statt der Datei"), "{err}");
-                assert!(err.contains("Link expired"), "{err}");
-                assert_ne!(d.status, status::FINISHED);
+            reported = 0;
+            for &id in &ids[1..] {
+                let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+                if let Some(err) = d.error {
+                    let err = crate::i18n::german(&err);
+                    assert!(err.contains("Webseite statt der Datei"), "{err}");
+                    assert!(err.contains("Link expired"), "{err}");
+                    assert_ne!(d.status, status::FINISHED);
+                    reported += 1;
+                }
+            }
+            if reported == 2 {
                 e.shutdown().await;
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("HTML response was not reported");
+        panic!("HTML responses were not reported ({reported} of 2)");
+    }
+
+    /// Click'n'Load links come from any web page: direct links are not probed from the server
+    /// until the user checks the package.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn click_n_load_links_are_not_probed_on_their_own() {
+        let requests = Arc::new(AtomicU64::new(0));
+        let base = range_server(Arc::new(vec![0u8; 16]), requests.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: format!("{base}/file.bin"),
+                source: Some("cnl".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        e.check_package(pkg).await.unwrap();
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+        assert_eq!(d.online, "online");
+        e.shutdown().await;
     }
 
     /// The file id from a crypter link is only a placeholder: even when the online check

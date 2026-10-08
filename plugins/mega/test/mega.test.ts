@@ -159,6 +159,14 @@ describe('mega folders (pyLoad MegaCoNzFolder)', () => {
     const r = await plugin.resolve(`https://mega.nz/folder/F0lder12#${FK}/file/N0de0001`, ctx);
     expect(r).toMatchObject({ url: DL, name: 'a.rar', decrypt: { key: K.toString('hex') } });
   });
+
+  it('takes a failed folder listing during a download as temporary (JD: -11 offline only in the check)', async () => {
+    const ctx = fakeCtx({
+      'POST https://g.api.mega.co.nz/cs?id=': api((cmd, req) => (cmd.a === 'f' ? -11 : listing(req, cmd))),
+    });
+    await expect(plugin.resolve(`https://mega.nz/folder/F0lder12#${FK}/file/N0de0001`, ctx)).rejects.toMatchObject({ haulKind: 'temporary' });
+    await expect(plugin.crawl!(`https://mega.nz/folder/F0lder12#${FK}`, ctx)).rejects.toMatchObject({ haulKind: 'offline' });
+  });
 });
 
 describe('mega account (JD apiLogin, pyLoad hashcash)', async () => {

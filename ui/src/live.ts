@@ -80,7 +80,10 @@ export function useLiveEvents(enabled: boolean) {
         invalidate('downloads');
       };
       es.onerror = () => {
-        publish({ connected: false });
+        // No news without the stream: the last speeds (and ETAs from them) would stand still
+        // as if they were current. The bytes done so far stay.
+        const items = new Map([...snapshot.items].map(([id, p]) => [id, { ...p, speed: 0 }]));
+        publish({ connected: false, items, totalSpeed: 0 });
         es?.close();
         retry = setTimeout(connect, 3000);
       };

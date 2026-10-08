@@ -172,6 +172,23 @@ pub async fn probe_direct(client: &Client, url: &str) -> Result<Probe> {
     Ok(p)
 }
 
+/// What is read of a web page in place of a file: enough for its text and the debug log.
+const PAGE_LIMIT: usize = 64 << 10;
+
+/// The first [`PAGE_LIMIT`] bytes of a response, as text.
+async fn page_start(resp: Response) -> String {
+    let mut stream = resp.bytes_stream();
+    let mut buf = Vec::new();
+    while let Some(Ok(chunk)) = stream.next().await {
+        buf.extend_from_slice(&chunk);
+        if buf.len() >= PAGE_LIMIT {
+            buf.truncate(PAGE_LIMIT);
+            break;
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 pub async fn run(
     engine: &Arc<Engine>,
     id: i64,
@@ -428,7 +445,8 @@ async fn execute(
         .is_some_and(|v| v.starts_with("text/html"));
     if html && resp.headers().get(CONTENT_DISPOSITION).is_none() {
         let resp_url = resp.url().to_string();
-        let body = resp.text().await.unwrap_or_default();
+        // Only the start: the "page" may be the whole file with a wrong type.
+        let body = cancellable(cancel, page_start(resp)).await?;
         let text: String = body
             .split('<')
             .filter_map(|t| t.split_once('>').map(|(_, rest)| rest.trim()))
@@ -969,18 +987,50 @@ async fn unique_path(dir: &Path, name: &str) -> PathBuf {
 
 /// Rename, or copy + delete when tmp and target are on different file systems.
 async fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    match tokio::fs::rename(from, to).await {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            tokio::fs::copy(from, to).await?;
-            tokio::fs::remove_file(from).await
-        }
+    if tokio::fs::rename(from, to).await.is_ok() {
+        return Ok(());
     }
+    // Another file system (tmp and done on two volumes): copy next to the target under a
+    // hidden name and rename it into place, so an interrupted copy never shows up as a cut-off
+    // file under the real name (which the retry would then avoid with `name (1).ext`).
+    let partial = partial_path(to);
+    if let Err(e) = tokio::fs::copy(from, &partial).await {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(e);
+    }
+    if let Err(e) = tokio::fs::rename(&partial, to).await {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(e);
+    }
+    tokio::fs::remove_file(from).await
+}
+
+/// Where [`move_file`] copies to first: `.haul-move-<name>` in the target's folder.
+fn partial_path(to: &Path) -> PathBuf {
+    let name = to
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    to.with_file_name(format!(".haul-move-{name}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn move_leaves_no_file_under_the_target_name_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let to = dir.path().join("done/file.bin");
+        // The source does not exist: rename and copy fail.
+        assert!(move_file(&dir.path().join("missing"), &to).await.is_err());
+        assert!(!to.exists());
+        assert!(!partial_path(&to).exists());
+        assert_eq!(
+            partial_path(&to).file_name().unwrap(),
+            ".haul-move-file.bin"
+        );
+    }
 
     #[test]
     fn extensions() {

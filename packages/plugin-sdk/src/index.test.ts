@@ -53,6 +53,13 @@ describe('base64Decode', () => {
       expect(base64Decode(b64.replace(/=+$/, ''))).toBe(text);
     }
   });
+
+  it('does not throw on bytes that are not UTF-8', () => {
+    // 0xf7 0xbf 0xbf 0xbf would be code point 0x1fffff.
+    const b64 = Buffer.from([0x61, 0xf7, 0xbf, 0xbf, 0xbf]).toString('base64');
+    expect(base64Decode(b64)).toBe('a\ufffd');
+    expect(() => base64Decode(Buffer.from([0xff, 0xfe, 0xfd]).toString('base64'))).not.toThrow();
+  });
 });
 
 describe('bilingual messages', () => {

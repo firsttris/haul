@@ -147,6 +147,19 @@ fn now_ms() -> i64 {
         .unwrap_or_default()
 }
 
+/// Removes a question from the list when its wait ends, however it ends.
+struct Withdraw<'a> {
+    captchas: &'a Captchas,
+    id: String,
+}
+
+impl Drop for Withdraw<'_> {
+    fn drop(&mut self) {
+        self.captchas.pending.lock().unwrap().remove(&self.id);
+        self.captchas.events.changed(Topic::Captchas);
+    }
+}
+
 impl Captchas {
     pub fn new(events: Events) -> Self {
         Self {
@@ -265,14 +278,14 @@ impl Captchas {
             .insert(id.clone(), Pending { view, tx });
         tracing::info!(%plugin, %id, "waiting for the user");
         self.events.changed(Topic::Captchas);
-        let result = match tokio::time::timeout(TIMEOUT, rx).await {
+        // The caller's future is often dropped while it waits here (the download was paused or
+        // deleted, the plugin call ran out of time): the question goes away with it.
+        let _guard = Withdraw { captchas: self, id };
+        match tokio::time::timeout(TIMEOUT, rx).await {
             Ok(Ok(r)) => r,
             Ok(Err(_)) => Err("cancelled".into()),
             Err(_) => Err("timeout".into()),
-        };
-        self.pending.lock().unwrap().remove(&id);
-        self.events.changed(Topic::Captchas);
-        result
+        }
     }
 
     pub fn list(&self) -> Vec<CaptchaView> {
@@ -390,6 +403,22 @@ mod tests {
         }
         assert!(c.cancel(&c.list()[0].id));
         assert_eq!(wait.await.unwrap(), Err("cancelled".into()));
+    }
+
+    #[tokio::test]
+    async fn dropped_wait_withdraws_the_question() {
+        let c = Arc::new(Captchas::new(Events::new()));
+        let wait = tokio::spawn({
+            let c = c.clone();
+            async move { c.request(&asker(&c), req()).await }
+        });
+        while c.list().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // Like a paused download: the plugin call is dropped while it waits.
+        wait.abort();
+        let _ = wait.await;
+        assert!(c.list().is_empty());
     }
 
     #[tokio::test]

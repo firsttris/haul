@@ -426,10 +426,15 @@ async fn stats(State(app): State<Arc<App>>) -> ApiResult<Json<Stats>> {
     .fetch_all(db)
     .await?;
     let cfg = &app.engine.cfg;
-    let storage = [("tmp", &cfg.tmp_dir), ("fertig", &cfg.done_dir)]
-        .into_iter()
-        .filter_map(|(l, p)| disk_usage(l, p))
-        .collect();
+    // statvfs can hang on a network drive that went away: not on the async runtime.
+    let dirs = [
+        ("tmp", cfg.tmp_dir.clone()),
+        ("fertig", cfg.done_dir.clone()),
+    ];
+    let storage = tokio::task::spawn_blocking(move || {
+        dirs.iter().filter_map(|(l, p)| disk_usage(l, p)).collect()
+    })
+    .await?;
     Ok(Json(Stats {
         active: app.engine.active_count(),
         slots: settings.max_parallel,
@@ -722,45 +727,50 @@ async fn list_files(
     if !dir.is_dir() {
         return Err(ApiError::bad_request(crate::msg!("server_api_notAFolder")));
     }
-    let listing = {
-        let (root, dir) = (root.clone(), dir.clone());
-        tokio::task::spawn_blocking(move || crate::files::list(&root, &dir))
-            .await?
-            .map_err(bad)?
-    };
-    // Package folders by their real location.
     let packages: Vec<Package> = sqlx::query_as("SELECT * FROM packages")
         .fetch_all(&engine.db)
         .await?;
-    let by_dir: Vec<(std::path::PathBuf, Package)> = packages
-        .into_iter()
-        .filter_map(|p| engine.package_dir(&p).canonicalize().ok().map(|d| (d, p)))
-        .collect();
+    let package_dirs: Vec<std::path::PathBuf> =
+        packages.iter().map(|p| engine.package_dir(p)).collect();
+    // All file system work off the async runtime: on a network drive it takes a while.
+    // Per entry: the package whose folder it is (by real location) and its archive count.
+    let listing = {
+        let (root, dir) = (root.clone(), dir.clone());
+        tokio::task::spawn_blocking(move || {
+            let listing = crate::files::list(&root, &dir)?;
+            let real_dirs: Vec<Option<std::path::PathBuf>> =
+                package_dirs.iter().map(|d| d.canonicalize().ok()).collect();
+            let listing: Vec<(crate::files::Entry, Option<usize>, usize)> = listing
+                .into_iter()
+                .map(|entry| {
+                    if !entry.dir {
+                        return (entry, None, 0);
+                    }
+                    let full = root.join(&entry.path);
+                    let real = full.canonicalize().ok();
+                    let package = real
+                        .as_ref()
+                        .and_then(|r| real_dirs.iter().position(|d| d.as_ref() == Some(r)));
+                    let names = crate::files::file_names(&full);
+                    let archives = crate::engine::extract::find_archives(&names).1.len();
+                    (entry, package, archives)
+                })
+                .collect();
+            anyhow::Ok(listing)
+        })
+        .await?
+        .map_err(bad)?
+    };
     let errors = engine.folder_errors.lock().unwrap().clone();
     let entries = listing
         .into_iter()
-        .map(|entry| {
-            let full = root.join(&entry.path);
-            let (package, archives) = if entry.dir {
-                let real = full.canonicalize().ok();
-                let package =
-                    by_dir
-                        .iter()
-                        .find(|(d, _)| Some(d) == real.as_ref())
-                        .map(|(_, p)| FolderPackage {
-                            id: p.id,
-                            name: p.name.clone(),
-                            extract: p.extract.clone(),
-                            extract_error: p.extract_error.clone(),
-                        });
-                let names = crate::files::file_names(&full);
-                (
-                    package,
-                    crate::engine::extract::find_archives(&names).1.len(),
-                )
-            } else {
-                (None, 0)
-            };
+        .map(|(entry, package, archives)| {
+            let package = package.map(|i| &packages[i]).map(|p| FolderPackage {
+                id: p.id,
+                name: p.name.clone(),
+                extract: p.extract.clone(),
+                extract_error: p.extract_error.clone(),
+            });
             FileView {
                 extracting: entry
                     .dir
@@ -801,12 +811,10 @@ async fn delete_files(
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(bad)?;
     for (path, full) in b.paths.iter().zip(resolved) {
-        let folder = std::path::Path::new(path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if app.engine.extract_progress_of(path).is_some()
-            || app.engine.extract_progress_of(&folder).is_some()
+        // By the resolved path: `Pkg/`, `./Pkg` and `Pkg` are the same folder.
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &full))
         {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
@@ -838,13 +846,20 @@ async fn delete_archives(
         if !dir.is_dir() {
             continue;
         }
-        if app.engine.extract_progress_of(path).is_some() {
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &dir))
+        {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
                 path = path
             )));
         }
-        let (_, all) = crate::engine::extract::find_archives(&crate::files::file_names(&dir));
+        let names = {
+            let dir = dir.clone();
+            tokio::task::spawn_blocking(move || crate::files::file_names(&dir)).await?
+        };
+        let (_, all) = crate::engine::extract::find_archives(&names);
         for name in &all {
             tokio::fs::remove_file(dir.join(name)).await?;
         }
@@ -858,7 +873,11 @@ async fn extract_files(
     State(app): State<Arc<App>>,
     Json(b): Json<PathsBody>,
 ) -> ApiResult<StatusCode> {
-    app.engine.extract_paths(&b.paths).map_err(bad)?;
+    // Reads the folders of the selected files: off the async runtime.
+    let engine = app.engine.clone();
+    tokio::task::spawn_blocking(move || engine.extract_paths(&b.paths))
+        .await?
+        .map_err(bad)?;
     app.engine.events.changed(Topic::Files);
     Ok(StatusCode::ACCEPTED)
 }
@@ -885,7 +904,10 @@ async fn move_files(State(app): State<Arc<App>>, Json(b): Json<MoveBody>) -> Api
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(bad)?;
     for (path, src) in b.paths.iter().zip(sources) {
-        if app.engine.extract_progress_of(path).is_some() {
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &src))
+        {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
                 path = path

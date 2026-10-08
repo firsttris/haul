@@ -75,7 +75,10 @@ chrome.runtime.onMessage.addListener((msg: { type?: string; action?: 'add' | 'ad
   if (msg?.type === 'cnl' && msg.action) {
     void (async () => {
       try {
-        await forwardCnl(await loadSettings(), msg.action!, msg.body ?? '', msg.page ?? '');
+        const settings = await loadSettings();
+        // The relay checks this too; a request with Click'n'Load turned off is dropped quietly.
+        if (!settings.cnl) return reply({ ok: false });
+        await forwardCnl(settings, msg.action!, msg.body ?? '', msg.page ?? '');
         await showResult(true, t('cnlSent'));
         reply({ ok: true });
       } catch (e) {
