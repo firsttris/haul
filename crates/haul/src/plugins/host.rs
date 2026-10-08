@@ -537,11 +537,17 @@ async fn invoke_inner(
     let method = method.to_string();
     let plugin_id = plugin_id.to_string();
     // Pages are kept per plugin and link (the call's first argument), for the latest call.
-    let page_key = page_key(
-        &plugin_id,
-        args.get(0).and_then(|a| a.as_str()).unwrap_or(""),
-    );
-    PAGES.lock().unwrap().remove(&page_key);
+    // Only for `resolve`: the worker takes them after each one. Nobody takes those of other
+    // calls, so they would pile up, and `checkAccount` pages carry the account's session.
+    let page_key = (method == "resolve").then(|| {
+        page_key(
+            &plugin_id,
+            args.get(0).and_then(|a| a.as_str()).unwrap_or(""),
+        )
+    });
+    if let Some(key) = &page_key {
+        PAGES.lock().unwrap().remove(key);
+    }
     let args = args.to_string();
     let env = env.to_string();
     let clients = Arc::new(clients);
@@ -557,7 +563,9 @@ async fn invoke_inner(
                         match do_http(&c, &req).await {
                             Ok(r) => {
                                 let method = serde_json::from_str::<HttpReq>(&req).map(|q| q.method).unwrap_or_default();
-                                record_page(&key, &method, &r);
+                                if let Some(key) = &key {
+                                    record_page(key, &method, &r);
+                                }
                                 serde_json::to_string(&r).unwrap_or_default()
                             }
                             Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
