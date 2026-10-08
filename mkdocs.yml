@@ -27,6 +27,7 @@ nav:
       - Browser extension: browser-extension.md
       - "Click'n'Load": click-n-load.md
   - For developers:
+      - Architecture: architecture.md
       - Plugins: plugins.md
       - Development: development.md
 

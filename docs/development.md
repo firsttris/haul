@@ -49,17 +49,8 @@ mkdocs serve        # http://localhost:8000
 
 ## Architecture
 
-```
-Browser ──HTTP/SSE──▶ axum ──▶ queue / engine ──▶ plugin (QuickJS) ──▶ direct URL
-                        │            │
-                        │            └──▶ download engine (reqwest, range segments) ──▶ tmp ──▶ done
-                        └──▶ SQLite (/config/haul.db)
-Desktop: web page ──▶ 127.0.0.1:9666 (haul-cnl) ──bearer token──▶ /api/cnl/flash/*
-```
-
-The queue hands every link to its plugin. The plugin logs in at the hoster and returns only the direct
-URL. The download engine loads the bytes in segments, stores the progress of each segment in SQLite and
-moves finished files into the package folder.
+How the server, the queue, the plugins and the downloads fit together is described in
+[Architecture](architecture.md). In short:
 
 | Part | Choice |
 |---|---|
