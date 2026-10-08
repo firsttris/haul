@@ -1,10 +1,19 @@
 name: CI
 
+# Changes to documentation alone don't build.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   # The release workflow runs the same checks before it publishes anything.
   workflow_call:
 
