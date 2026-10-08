@@ -556,7 +556,8 @@ export function base64Decode(input: string): string {
     else if (b < 0xe0) cp = ((b & 0x1f) << 6) | (bytes[i++] & 0x3f);
     else if (b < 0xf0) cp = ((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
     else cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
-    out += String.fromCodePoint(cp);
+    // Not UTF-8 (hoster data can be anything): the replacement character, never a RangeError.
+    out += cp <= 0x10ffff ? String.fromCodePoint(cp) : '\ufffd';
   }
   return out;
 }
