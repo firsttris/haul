@@ -987,18 +987,50 @@ async fn unique_path(dir: &Path, name: &str) -> PathBuf {
 
 /// Rename, or copy + delete when tmp and target are on different file systems.
 async fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    match tokio::fs::rename(from, to).await {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            tokio::fs::copy(from, to).await?;
-            tokio::fs::remove_file(from).await
-        }
+    if tokio::fs::rename(from, to).await.is_ok() {
+        return Ok(());
     }
+    // Another file system (tmp and done on two volumes): copy next to the target under a
+    // hidden name and rename it into place, so an interrupted copy never shows up as a cut-off
+    // file under the real name (which the retry would then avoid with `name (1).ext`).
+    let partial = partial_path(to);
+    if let Err(e) = tokio::fs::copy(from, &partial).await {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(e);
+    }
+    if let Err(e) = tokio::fs::rename(&partial, to).await {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(e);
+    }
+    tokio::fs::remove_file(from).await
+}
+
+/// Where [`move_file`] copies to first: `.haul-move-<name>` in the target's folder.
+fn partial_path(to: &Path) -> PathBuf {
+    let name = to
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    to.with_file_name(format!(".haul-move-{name}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn move_leaves_no_file_under_the_target_name_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let to = dir.path().join("done/file.bin");
+        // The source does not exist: rename and copy fail.
+        assert!(move_file(&dir.path().join("missing"), &to).await.is_err());
+        assert!(!to.exists());
+        assert!(!partial_path(&to).exists());
+        assert_eq!(
+            partial_path(&to).file_name().unwrap(),
+            ".haul-move-file.bin"
+        );
+    }
 
     #[test]
     fn extensions() {
