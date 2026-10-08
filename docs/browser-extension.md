@@ -60,7 +60,7 @@ over inside the page, before the browser sends them, and passes their form field
 Haul decrypts CNL2 as always, in its own QuickJS instance without host functions.
 
 With Click'n'Load turned off in the extension's settings, pages reach `127.0.0.1:9666` as before,
-so a local JDownloader or [`haul-cnl`](click-n-load.md#haul-cnl) still works.
+so a local JDownloader or [`haul-cnl`](click-n-load.md#haul-cnl-for-developers) still works.
 
 ## Troubleshooting
 

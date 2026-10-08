@@ -22,7 +22,7 @@ curl -O https://raw.githubusercontent.com/firsttris/haul/main/docker/docker-comp
 docker compose up -d
 ```
 
-The file in [`docker/docker-compose.yml`](../docker/docker-compose.yml):
+The file in [`docker/docker-compose.yml`](https://github.com/firsttris/haul/blob/main/docker/docker-compose.yml):
 
 ```yaml
 services:
@@ -46,7 +46,7 @@ and `/mnt/disk1/downloads:/downloads/done`.
 
 ## Podman Quadlet
 
-For Podman with systemd, [`docker/`](../docker/) has a Quadlet unit and network:
+For Podman with systemd, [`docker/`](https://github.com/firsttris/haul/tree/main/docker) has a Quadlet unit and network:
 
 ```bash
 mkdir -p ~/.config/containers/systemd ~/haul/config ~/haul/downloads/{tmp,done}

@@ -124,6 +124,8 @@ Everything else, from environment variables to a reverse proxy setup, is in the
 
 ## 📚 Documentation
 
+Also online at **[firsttris.github.io/haul](https://firsttris.github.io/haul/)**.
+
 | | |
 |---|---|
 | [Installation](docs/installation.md) | Compose, Quadlet, volumes, environment variables, updates, reverse proxy |

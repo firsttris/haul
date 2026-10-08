@@ -10,3 +10,6 @@ node_modules/
 
 # Paraglide (generated from ui/messages/*.json)
 ui/src/paraglide
+
+# MkDocs build (mkdocs build)
+site/

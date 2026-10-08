@@ -25,7 +25,7 @@ tools that talk to port 9666 directly, and helps to see what a site really sends
    ```
 
 3. To start it with your session, use the systemd user unit
-   [`crates/haul-cnl/haul-cnl.service`](../crates/haul-cnl/haul-cnl.service).
+   [`crates/haul-cnl/haul-cnl.service`](https://github.com/firsttris/haul/blob/main/crates/haul-cnl/haul-cnl.service).
 
 Turn off *Handle Click'n'Load buttons* in the extension while `haul-cnl` runs, or the extension
 answers first.
