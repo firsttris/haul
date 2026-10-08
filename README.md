@@ -14,7 +14,7 @@ your browser shows it live. One Rust binary, a web UI and hoster plugins in Type
 [![Platforms](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-lightgrey)](https://hub.docker.com/r/tristanteu/haul/tags)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Docs](https://img.shields.io/badge/docs-firsttris.github.io%2Fhaul-f0a43a?logo=materialformkdocs&logoColor=white)](https://firsttris.github.io/haul/)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 [Features](#-features) •
 [Hosters](#-supported-hosters) •
@@ -163,14 +163,17 @@ A hoster changed its pages or one is missing? Issues and pull requests are welco
 all: see [writing plugins](https://firsttris.github.io/haul/plugins.html). Please run `cargo test`, `cargo clippy`, `pnpm test` and
 `pnpm typecheck` before opening a pull request.
 
-## 📄 License
-
-[GPL-3.0-or-later](LICENSE). Parts of the hoster plugins are based on JDownloader's GPL code, so the
-whole repository is under the GPLv3.
-
 ---
 
 <div align="center">
-<sub>Haul is not affiliated with any file hoster, JDownloader or pyLoad. Use it only for files you
+
+⭐ Like Haul? A [star on GitHub](https://github.com/firsttris/haul) helps others find it.<br>
+🐛 [Report a bug](https://github.com/firsttris/haul/issues/new) · 💡 [Request a feature](https://github.com/firsttris/haul/issues/new)
+
+<sub>License: <a href="LICENSE">AGPL-3.0</a> · © Tristan Teufel and contributors<br>
+The hoster plugins are based in part on JDownloader's GPL code and stay under <a href="plugins/LICENSE">GPL-3.0-or-later</a>.<br>
+Changed versions you pass on or run for others must offer their source code under the AGPL; a commercial license without these obligations is available via <a href="https://teufel-it.de">teufel-it.de</a>.<br>
+Haul is not affiliated with any file hoster, JDownloader or pyLoad. Use it only for files you
 are allowed to download, and within the terms of the hosters you use.</sub>
+
 </div>

@@ -2,7 +2,7 @@
   "name": "@haul/ui",
   "version": "0.1.0",
   "private": true,
-  "license": "GPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "i18n": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide",

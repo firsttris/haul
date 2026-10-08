@@ -10,7 +10,7 @@ repo_url: https://github.com/firsttris/haul
 repo_name: firsttris/haul
 edit_uri: edit/main/docs/
 copyright: >-
-  License GPL-3.0 · Haul is not affiliated with any of the hosters it supports.
+  License AGPL-3.0 · Haul is not affiliated with any of the hosters it supports.
 
 docs_dir: docs
 # Pages as installation.html instead of installation/: that way the relative image

@@ -5,7 +5,7 @@ members = ["crates/haul", "crates/haul-cnl"]
 [workspace.package]
 version = "0.1.1"
 edition = "2021"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-only"
 repository = "https://github.com/firsttris/haul"
 
 [workspace.dependencies]
