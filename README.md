@@ -170,7 +170,7 @@ all: see [writing plugins](https://firsttris.github.io/haul/plugins.html). Pleas
 ⭐ Like Haul? A [star on GitHub](https://github.com/firsttris/haul) helps others find it.<br>
 🐛 [Report a bug](https://github.com/firsttris/haul/issues/new) · 💡 [Request a feature](https://github.com/firsttris/haul/issues/new)
 
-<sub>License: <a href="LICENSE">AGPL-3.0</a> (GPL-3.0-or-later up to v0.1.1) · © Tristan Teufel and contributors<br>
+<sub>License: <a href="LICENSE">AGPL-3.0</a> · © Tristan Teufel and contributors<br>
 The hoster plugins are based in part on JDownloader's GPL code and stay under <a href="plugins/LICENSE">GPL-3.0-or-later</a>.<br>
 Changed versions you pass on or run for others must offer their source code under the AGPL; a commercial license without these obligations is available via <a href="https://teufel-it.de">teufel-it.de</a>.<br>
 Haul is not affiliated with any file hoster, JDownloader or pyLoad. Use it only for files you

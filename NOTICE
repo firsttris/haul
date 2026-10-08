@@ -24,9 +24,3 @@ The hoster plugins in plugins/ are based in part on JDownloader's code and
 stay under the GNU General Public License, version 3 or later
 (plugins/LICENSE), like the plugin SDK in packages/plugin-sdk they build on.
 Section 13 of both licenses allows combining them with the AGPL-licensed rest.
-
-Earlier versions
-----------------
-
-Versions up to and including v0.1.1 were released under the GNU General
-Public License, version 3 or later, and remain available under it.
