@@ -19,7 +19,7 @@ jobs:
 
   docker:
     needs: [checks, extension]
-    uses: firsttris/workflows/.github/workflows/docker-release.yml@e338199e719aa8187493b3a2e2020b340e230af5 # v1
+    uses: firsttris/workflows/.github/workflows/docker-release.yml@v1
     with:
       image: tristanteu/haul
       description: Self-hosted download manager for file hosters, with web UI, plugins and auto-extract

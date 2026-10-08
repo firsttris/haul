@@ -21,9 +21,6 @@ services:
     environment:
       # Encrypts stored account passwords. Keep it stable and secret: openssl rand -hex 32
       - APP_SECRET=change-me
-      # Haul runs as this user and group, who also own the files: your own ids (id -u, id -g)
-      # - PUID=1000
-      # - PGID=1000
       # Optional: create the web login on the first start instead of in the UI
       # - HAUL_USER=admin
       # - HAUL_PASSWORD=change-me-too

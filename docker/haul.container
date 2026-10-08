@@ -26,8 +26,6 @@ Volume=%h/haul/downloads/done:/downloads/done:Z
 # Volume=/mnt/disk1/downloads:/downloads/done
 # SecurityLabelDisable=true
 
-# Rootless Podman: root in the container is your own user, so the files stay yours.
-Environment=PUID=0
 # Encrypts stored account passwords. Keep it stable and secret: openssl rand -hex 32
 Environment=APP_SECRET=change-me
 # Optional: create the web login on the first start instead of in the UI

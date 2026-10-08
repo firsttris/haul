@@ -6,7 +6,6 @@ Published image: [`tristanteu/haul`](https://hub.docker.com/r/tristanteu/haul) (
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Multi-stage build: UI and plugins (Node), server binary (Rust), Debian slim runtime with `7z` and `unrar` |
-| `entrypoint.sh` | Hands the volumes to `PUID:PGID` and starts Haul as that user instead of root |
 | `docker-compose.yml` | Compose setup with the published image, or `--build` to build from source |
 | `haul.container` | Podman Quadlet unit |
 | `haul.network` | Podman Quadlet network |

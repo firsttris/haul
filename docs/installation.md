@@ -112,22 +112,10 @@ Then:
 | `HAUL_BUILTIN_PLUGINS` | `/app/plugins` in the image | Plugins that come with Haul |
 | `HAUL_USER_AGENT` | a desktop browser | User-Agent sent to hosters |
 | `HAUL_7Z`, `HAUL_UNRAR` | found on `PATH` | Extractors |
-| `PUID`, `PGID` | `1000` in the image | User and group Haul runs as, and that own the volumes; see [File ownership](#file-ownership). `PUID=0` runs as root. |
 | `RUST_LOG` | `info` | Log level. `haul=debug` also saves the hoster pages of failed downloads, see [Debugging a hoster](plugins.md#debugging-a-hoster). |
 
 Everything else (parallel downloads, connections per file, bandwidth limit, retries, extraction,
 checksums) is under **Settings** in the UI.
-
-## File ownership
-
-Haul does not run as root in the container: it starts as root only to hand the volume folders to
-`PUID:PGID` (default `1000:1000`), then drops to that user. A folder still owned by root, like
-one written by an image before 0.1.2, is handed over once with everything in it; folders owned by
-another user are left alone. Set `PUID`/`PGID` to your own user's ids (`id -u`, `id -g`) to get
-the files as yourself.
-
-With rootless Podman, root in the container already is your host user, so the Quadlet unit sets
-`PUID=0`. Started with `user:` (compose) or `--user`, Haul runs as that user and changes nothing.
 
 ## Updating
 
