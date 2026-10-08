@@ -29,6 +29,13 @@ export function captchaUrl(c: Captcha, lang: string): string {
 /** Answered right here: a download or archive password, or the text of an image captcha. */
 function AnswerRow({ c, now }: { c: Captcha; now: number }) {
   const [value, setValue] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  // Focus a new question, but not away from a field the user is typing in (another question
+  // arriving must not take the keystrokes).
+  useEffect(() => {
+    const busy = document.activeElement;
+    if (!(busy instanceof HTMLInputElement || busy instanceof HTMLTextAreaElement)) input.current?.focus();
+  }, []);
   const name = c.name ?? c.link ?? c.host;
   const minutes = Math.max(0, Math.ceil((c.expiresAt - now) / 60_000));
   const isImage = c.kind === 'image';
@@ -62,7 +69,7 @@ function AnswerRow({ c, now }: { c: Captcha; now: number }) {
         autoComplete="off"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        autoFocus
+        ref={input}
       />
       <button type="submit" className="btn small primary" disabled={!value || answer.isPending}>
         {m.captcha_passwordOk()}
@@ -74,10 +81,13 @@ function AnswerRow({ c, now }: { c: Captcha; now: number }) {
   );
 }
 
+const NONE: Captcha[] = [];
+
 /** Notice on every page while captchas or passwords wait; also in the tab title and as a notification. */
 export function CaptchaBanner() {
   const lang = useLang();
-  const { data = [] } = useCaptchas();
+  // A stable empty list: a new `[]` on every render would rerun the effects below each time.
+  const data = useCaptchas().data ?? NONE;
   const cancel = useMutation({ mutationFn: (id: string) => post(`/captchas/${id}/cancel`) });
   const [now, setNow] = useState(Date.now());
   const seen = useRef(new Set<string>());
