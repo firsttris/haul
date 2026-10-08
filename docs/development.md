@@ -48,6 +48,13 @@ pip install -r requirements-docs.txt
 mkdocs serve        # http://localhost:8000
 ```
 
+The repository's social media image (`docs/social-preview.png`, 1280 × 640, uploaded under
+*Settings → Social preview*) is rendered from `scripts/social-preview/social-preview.html`:
+
+```bash
+npx -y -p playwright node scripts/social-preview/render.mjs
+```
+
 ## Architecture
 
 How the server, the queue, the plugins and the downloads fit together is described in
