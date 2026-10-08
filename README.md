@@ -1,27 +1,28 @@
 <div align="center">
 
-<img src="ui/public/favicon.svg" alt="" width="72">
+<img src="ui/public/favicon.svg" alt="Haul logo" width="72">
 
-# Haul
+<h1>Haul: self-hosted download manager for file hosters</h1>
 
-**The self-hosted download manager for file hosters.**<br>
+**A headless JDownloader and pyLoad alternative for Docker, your home server or NAS.**<br>
 Paste links or send them with Click'n'Load. Your server downloads, extracts and sorts them,
-your browser shows it live.
+your browser shows it live. One Rust binary, a web UI and hoster plugins in TypeScript.
 
 [![CI](https://github.com/firsttris/haul/actions/workflows/ci.yml/badge.svg)](https://github.com/firsttris/haul/actions/workflows/ci.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tristanteu/haul?logo=docker&logoColor=white)](https://hub.docker.com/r/tristanteu/haul)
 [![Image Size](https://img.shields.io/docker/image-size/tristanteu/haul/latest?logo=docker&logoColor=white&label=image)](https://hub.docker.com/r/tristanteu/haul)
 [![Platforms](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-lightgrey)](https://hub.docker.com/r/tristanteu/haul/tags)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Docs](https://img.shields.io/badge/docs-firsttris.github.io%2Fhaul-f0a43a?logo=materialformkdocs&logoColor=white)](https://firsttris.github.io/haul/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 [Features](#-features) •
 [Hosters](#-supported-hosters) •
 [Quick start](#-quick-start) •
-[Documentation](docs/README.md) •
+[Documentation](https://firsttris.github.io/haul/) •
 [Contributing](#-contributing)
 
-<img src="docs/screenshot.png" alt="Haul downloads view with five downloads from five hosters" width="900">
+<img src="docs/screenshot.png" alt="Haul web UI: download queue with packages from Gofile, Google Drive, ddownload, 1fichier and MEGA" width="900">
 
 </div>
 
@@ -36,6 +37,9 @@ behind. Haul is one small container built for a home server:
 - **Light**: a Debian slim image with `7z` and `unrar`, SQLite, nothing else to run.
 - **Hoster plugins you can fix yourself**: small TypeScript files, loaded from `/config/plugins` with
   one click, and a debug mode that saves exactly the pages a hoster sent.
+
+It runs wherever Docker or Podman runs: a Linux server, a NAS like Synology or Unraid, or an arm64
+board like the Raspberry Pi.
 
 ## ✨ Features
 
@@ -71,7 +75,7 @@ behind. Haul is one small container built for a home server:
 | **Mediafire** | ✅ | ✅ | ✅ |
 | **Send** (send.now, send.cm, tusfiles, userscloud) | ✅ | ✅ premium, API key | ✅ |
 
-Plus every direct HTTP(S) link. Details per hoster: [docs/hosters.md](docs/hosters.md).
+Plus every direct HTTP(S) link. Details per hoster: [Hosters](https://firsttris.github.io/haul/hosters.html) in the documentation.
 
 ## 🐳 Quick start
 
@@ -120,22 +124,22 @@ systemctl --user daemon-reload && systemctl --user start haul
 | `/downloads/done` | finished downloads, one folder per package |
 
 Everything else, from environment variables to a reverse proxy setup, is in the
-[installation guide](docs/installation.md).
+[installation guide](https://firsttris.github.io/haul/installation.html).
 
 ## 📚 Documentation
 
-Also online at **[firsttris.github.io/haul](https://firsttris.github.io/haul/)**.
+The full documentation, with search, is at **[firsttris.github.io/haul](https://firsttris.github.io/haul/)**.
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | Compose, Quadlet, volumes, environment variables, updates, reverse proxy |
-| [Hosters](docs/hosters.md) | accounts, passwords, checksums, waits and limits |
-| [Captchas](docs/captchas.md) | the userscript for reCaptcha, hCaptcha and Turnstile |
-| [Extraction](docs/extraction.md) | archives, passwords, incomplete sets, the Done view |
-| [Browser extension](docs/browser-extension.md) | Click'n'Load and *Send to Haul* in Chrome and Firefox |
-| [Click'n'Load](docs/click-n-load.md) | how links from link sites reach the server, `haul-cnl` |
-| [Plugins](docs/plugins.md) | writing and debugging hoster plugins |
-| [Development](docs/development.md) | building, checks, architecture, API, releases |
+| [Installation](https://firsttris.github.io/haul/installation.html) | Compose, Quadlet, volumes, environment variables, updates, reverse proxy |
+| [Hosters](https://firsttris.github.io/haul/hosters.html) | accounts, passwords, checksums, waits and limits |
+| [Captchas](https://firsttris.github.io/haul/captchas.html) | the userscript for reCaptcha, hCaptcha and Turnstile |
+| [Extraction](https://firsttris.github.io/haul/extraction.html) | archives, passwords, incomplete sets, the Done view |
+| [Browser extension](https://firsttris.github.io/haul/browser-extension.html) | Click'n'Load and *Send to Haul* in Chrome and Firefox |
+| [Click'n'Load](https://firsttris.github.io/haul/click-n-load.html) | how links from link sites reach the server, `haul-cnl` |
+| [Plugins](https://firsttris.github.io/haul/plugins.html) | writing and debugging hoster plugins |
+| [Development](https://firsttris.github.io/haul/development.html) | building, checks, architecture, API, releases |
 
 ## 🛠️ Development
 
@@ -150,12 +154,12 @@ pnpm dev        # server on :8080, UI with hot reload on :5173, login admin / ad
 
 **Stack**: Rust with tokio, axum, reqwest and SQLite · hoster plugins in TypeScript, run in QuickJS
 inside the server · React, TanStack Router, Query and Table, embedded in the binary.
-More in [docs/development.md](docs/development.md).
+More in the [development guide](https://firsttris.github.io/haul/development.html).
 
 ## 🤝 Contributing
 
 A hoster changed its pages or one is missing? Issues and pull requests are welcome, plugins most of
-all: see [writing plugins](docs/plugins.md). Please run `cargo test`, `cargo clippy`, `pnpm test` and
+all: see [writing plugins](https://firsttris.github.io/haul/plugins.html). Please run `cargo test`, `cargo clippy`, `pnpm test` and
 `pnpm typecheck` before opening a pull request.
 
 ## 📄 License
