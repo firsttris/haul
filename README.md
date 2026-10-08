@@ -163,14 +163,17 @@ A hoster changed its pages or one is missing? Issues and pull requests are welco
 all: see [writing plugins](https://firsttris.github.io/haul/plugins.html). Please run `cargo test`, `cargo clippy`, `pnpm test` and
 `pnpm typecheck` before opening a pull request.
 
-## 📄 License
-
-[GPL-3.0-or-later](LICENSE). Parts of the hoster plugins are based on JDownloader's GPL code, so the
-whole repository is under the GPLv3.
-
 ---
 
 <div align="center">
-<sub>Haul is not affiliated with any file hoster, JDownloader or pyLoad. Use it only for files you
+
+⭐ Like Haul? A [star on GitHub](https://github.com/firsttris/haul) helps others find it.<br>
+🐛 [Report a bug](https://github.com/firsttris/haul/issues/new) · 💡 [Request a feature](https://github.com/firsttris/haul/issues/new)
+
+<sub>License: <a href="LICENSE">GPL-3.0-or-later</a> · © Tristan Teufel and contributors<br>
+Parts of the hoster plugins are based on JDownloader's GPL code, so the whole repository is under the GPLv3;<br>
+changed versions you pass on have to stay under the GPL and come with their source code.<br>
+Haul is not affiliated with any file hoster, JDownloader or pyLoad. Use it only for files you
 are allowed to download, and within the terms of the hosters you use.</sub>
+
 </div>
