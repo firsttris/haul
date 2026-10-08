@@ -1,0 +1,62 @@
+<!doctype html>
+<!-- Template for the repository's social media image (Settings → Social preview), 1280 × 640.
+     Render: node scripts/social-preview/render.mjs → docs/social-preview.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: Inter, "Inter Display", ui-sans-serif, system-ui, sans-serif;
+    color: #e7e9ec;
+    background:
+      radial-gradient(60% 55% at 8% 0%, rgba(240,164,58,.22), transparent 70%),
+      radial-gradient(45% 50% at 100% 100%, rgba(240,164,58,.10), transparent 70%),
+      linear-gradient(135deg, #171a1e, #0f1113);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(#1d2125 1px, transparent 1px),
+      linear-gradient(90deg, #1d2125 1px, transparent 1px);
+    background-size: 32px 32px; opacity: .6;
+  }
+  .head { position: absolute; left: 64px; top: 56px; display: flex; align-items: center; gap: 22px; }
+  .head img { width: 84px; height: 84px; border-radius: 19px; box-shadow: 0 8px 30px rgba(240,164,58,.4); }
+  h1 { font-size: 58px; font-weight: 700; letter-spacing: -1.8px; line-height: 1; }
+  .sub { position: absolute; left: 64px; top: 170px; font-size: 23px; color: #b8bec6; letter-spacing: -.2px; }
+  .sub b { color: #f5f6f7; font-weight: 600; }
+  .chips { position: absolute; left: 64px; top: 222px; display: flex; gap: 10px; }
+  .chip {
+    font-size: 15px; font-weight: 500; color: #e7e9ec; padding: 7px 14px; border-radius: 999px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .shot {
+    position: absolute; left: 36px; top: 286px; width: 1210px;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 110px);
+            mask-image: linear-gradient(180deg, transparent 0, #000 110px);
+  }
+  .shot img { width: 100%; display: block; border-radius: 10px; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="head">
+    <img src="../../ui/public/favicon.svg" alt="">
+    <h1>Haul</h1>
+  </div>
+  <p class="sub">The <b>self-hosted download manager</b> for file hosters, a headless <b>JDownloader</b> and <b>pyLoad</b> alternative.</p>
+  <div class="chips">
+    <span class="chip"><i style="background:#f0a43a"></i>Docker · amd64 · arm64</span>
+    <span class="chip"><i style="background:#4ade80"></i>Premium accounts</span>
+    <span class="chip"><i style="background:#60a5fa"></i>Click'n'Load</span>
+    <span class="chip"><i style="background:#f472b6"></i>Captchas in your browser</span>
+    <span class="chip"><i style="background:#a78bfa"></i>Auto-extract</span>
+  </div>
+  <div class="shot"><img src="../../docs/screenshot.png" alt=""></div>
+</body>
+</html>
