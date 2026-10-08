@@ -58,6 +58,8 @@ struct Active {
     progress: Arc<Progress>,
     /// Flips to true when the worker task has exited.
     exited: watch::Receiver<bool>,
+    /// For a worker that does not stop when cancelled.
+    task: tokio::task::AbortHandle,
 }
 
 pub struct Engine {
@@ -339,24 +341,38 @@ impl Engine {
             phase: AtomicU8::new(PHASE_DOWNLOAD),
         });
         let (tx, rx) = watch::channel(false);
-        active.insert(
-            id,
-            Active {
-                cancel: cancel.clone(),
-                progress: progress.clone(),
-                exited: rx,
-            },
-        );
-        drop(active);
         let this = self.clone();
-        tokio::spawn(async move {
-            worker::run(&this, id, &cancel, &progress).await;
-            this.active.lock().unwrap().remove(&id);
+        let (c, p) = (cancel.clone(), progress.clone());
+        // Started while `active` is locked: the task's own removal waits for the entry.
+        let task = tokio::spawn(async move {
+            worker::run(&this, id, &c, &p).await;
+            this.forget_worker(id, &p);
             let _ = tx.send(true);
             this.events.changed(Topic::Downloads);
             this.wake.notify_one();
         });
+        active.insert(
+            id,
+            Active {
+                cancel,
+                progress,
+                exited: rx,
+                task: task.abort_handle(),
+            },
+        );
         true
+    }
+
+    /// Removes the worker of `id` from the active ones, if it is still the run with `progress`
+    /// (a stuck run given up by `stop_worker` must not remove the next one).
+    fn forget_worker(&self, id: i64, progress: &Arc<Progress>) {
+        let mut active = self.active.lock().unwrap();
+        if active
+            .get(&id)
+            .is_some_and(|a| Arc::ptr_eq(&a.progress, progress))
+        {
+            active.remove(&id);
+        }
     }
 
     /// Cancels a running worker and waits until it has persisted its state.
@@ -368,8 +384,20 @@ impl Engine {
                 a.exited.clone()
             })
         };
-        if let Some(mut rx) = exited {
-            let _ = tokio::time::timeout(Duration::from_secs(15), rx.wait_for(|x| *x)).await;
+        let Some(mut rx) = exited else { return };
+        if tokio::time::timeout(Duration::from_secs(15), rx.wait_for(|x| *x))
+            .await
+            .is_err()
+        {
+            // Stuck past its cancellation: stop it where it waits and give up its slot, or the
+            // slot stays taken until the server restarts.
+            tracing::warn!(id, "worker did not stop within 15 s, aborting it");
+            let gone = self.active.lock().unwrap().remove(&id);
+            if let Some(a) = gone {
+                a.task.abort();
+            }
+            self.events.changed(Topic::Downloads);
+            self.wake.notify_one();
         }
     }
 
