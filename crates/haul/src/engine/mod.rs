@@ -184,6 +184,19 @@ impl Engine {
         self.extracting.lock().unwrap().get(rel).map(|(_, p)| *p)
     }
 
+    /// Whether an extraction runs in `rel` (relative to the done folder, as
+    /// `files::relative` writes it), in a folder inside it, or in a folder it is inside.
+    pub fn extracting_near(&self, rel: &str) -> bool {
+        let within = |inner: &str, outer: &str| {
+            outer.is_empty() || inner == outer || inner.starts_with(&format!("{outer}/"))
+        };
+        self.extracting
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|k| within(k, rel) || within(rel, k))
+    }
+
     pub fn active_count(&self) -> usize {
         self.active.lock().unwrap().len()
     }
@@ -1255,6 +1268,23 @@ mod engine_tests {
         let e = Engine::new(db, cfg, plugins, Events::new()).await.unwrap();
         tokio::spawn(e.clone().run());
         e
+    }
+
+    #[tokio::test]
+    async fn extraction_guard_covers_parents_and_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        e.extracting
+            .lock()
+            .unwrap()
+            .insert("Pkg/Sub".into(), (None, 10));
+        for busy in ["Pkg/Sub", "Pkg", "Pkg/Sub/file.rar", ""] {
+            assert!(e.extracting_near(busy), "{busy}");
+        }
+        for free in ["Other", "Pkg/Subway", "Pk"] {
+            assert!(!e.extracting_near(free), "{free}");
+        }
+        e.shutdown().await;
     }
 
     async fn wait_for(e: &Engine, id: i64, want: &str) -> Download {

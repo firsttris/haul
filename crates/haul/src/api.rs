@@ -811,12 +811,10 @@ async fn delete_files(
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(bad)?;
     for (path, full) in b.paths.iter().zip(resolved) {
-        let folder = std::path::Path::new(path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if app.engine.extract_progress_of(path).is_some()
-            || app.engine.extract_progress_of(&folder).is_some()
+        // By the resolved path: `Pkg/`, `./Pkg` and `Pkg` are the same folder.
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &full))
         {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
@@ -848,7 +846,10 @@ async fn delete_archives(
         if !dir.is_dir() {
             continue;
         }
-        if app.engine.extract_progress_of(path).is_some() {
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &dir))
+        {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
                 path = path
@@ -903,7 +904,10 @@ async fn move_files(State(app): State<Arc<App>>, Json(b): Json<MoveBody>) -> Api
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(bad)?;
     for (path, src) in b.paths.iter().zip(sources) {
-        if app.engine.extract_progress_of(path).is_some() {
+        if app
+            .engine
+            .extracting_near(&crate::files::relative(root, &src))
+        {
             return Err(ApiError::bad_request(crate::msg!(
                 "server_api_extracting",
                 path = path
