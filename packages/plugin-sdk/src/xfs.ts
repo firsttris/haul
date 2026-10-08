@@ -139,8 +139,10 @@ const PREMIUM_ONLY = [
 
 /** Seconds from "1 hour 5 minutes 3 seconds" (JD: preciseWaittime); default one hour. */
 export function parseWait(text: string): number {
-  const n = (unit: string) => Number(new RegExp(`(\\d+)\\s*${unit}`, 'i').exec(text)?.[1] ?? 0);
-  const total = n('days?') * 86400 + n('hours?') * 3600 + n('minutes?') * 60 + n('seconds?');
+  // Spelled out or short: "2 hours, 3 minutes", "2 hrs", "3 min", "45 sec", "1h 5m".
+  const n = (unit: string) => Number(new RegExp(`(\\d+)\\s*(?:${unit})\\b`, 'i').exec(text)?.[1] ?? 0);
+  const total =
+    n('days?|d') * 86400 + n('hours?|hrs?|h') * 3600 + n('minutes?|mins?|m') * 60 + n('seconds?|secs?|s');
   return total > 0 ? total + 1 : 3600;
 }
 

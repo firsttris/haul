@@ -65,6 +65,10 @@ describe('free mode helpers (JD)', () => {
     const { parseWait, countdown, plainTextCaptcha } = await import('./xfs');
     expect(parseWait('You have to wait 2 minutes, 10 seconds till next download')).toBe(131);
     expect(parseWait('You have reached the download limit')).toBe(3600);
+    expect(parseWait('Please wait 3 min')).toBe(181);
+    expect(parseWait('try again in 2 hrs')).toBe(7201);
+    expect(parseWait('wait 1h 5m 30s')).toBe(3931);
+    expect(parseWait('45 secs left')).toBe(46);
     expect(countdown('<span id="countdown_str">Wait <span id="x">60</span> seconds</span>')).toBe(60);
     expect(countdown('<span class="seconds">30</span>')).toBe(30);
     expect(countdown('nothing')).toBeUndefined();
