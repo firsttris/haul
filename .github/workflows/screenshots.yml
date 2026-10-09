@@ -1,0 +1,57 @@
+name: Update screenshots
+
+# Takes docs/screenshot.png and docs/social-preview.png from a real haul that downloads from a
+# stand-in for the internet (scripts/screenshots/, docs/development.md) and commits the ones
+# that changed. Run it after a change to the look.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.playwright.outputs.image }}
+    steps:
+      - id: playwright
+        uses: firsttris/workflows/actions/playwright-image@v1
+        with:
+          lockfile: pnpm-lock.yaml
+
+  screenshots:
+    needs: image
+    runs-on: ubuntu-latest
+    # The browser and its fonts of the @playwright/test version in pnpm-lock.yaml
+    container:
+      image: ${{ needs.image.outputs.image }}
+      options: --ipc=host
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      # A C compiler for the Rust build, curl for rustup, 7-Zip and unrar for the extraction
+      - name: Build tools
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential curl 7zip unrar
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: screenshots
+      - name: Install
+        run: |
+          npm install --global corepack@latest
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Build
+        run: |
+          pnpm build
+          cargo build --release -p haul
+      - name: Take the screenshots
+        run: pnpm screenshots
+      - uses: firsttris/workflows/actions/commit-changes@v1
+        with:
+          paths: |
+            docs/screenshot.png
+            docs/social-preview.png
+          message: Update screenshots

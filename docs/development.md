@@ -48,12 +48,23 @@ pip install -r requirements-docs.txt
 mkdocs serve        # http://localhost:8000
 ```
 
-The repository's social media image (`docs/social-preview.png`, 1280 × 640, uploaded under
-*Settings → Social preview*) is rendered from `scripts/social-preview/social-preview.html`:
+### Screenshots
+
+The picture in the README (`docs/screenshot.png`) and the repository's social media image
+(`docs/social-preview.png`, 1280 × 640, uploaded under *Settings → Social preview*, rendered
+from `scripts/social-preview/social-preview.html`) come from `pnpm screenshots`. It starts a
+fresh haul with its own data directory (`scripts/screenshots/serve.mjs`) whose `HTTP_PROXY`
+points at a stand-in for the internet: the linked files are served there with their real sizes,
+each at its own speed, so progress, speed and ETA are real. No hoster accounts and no internet
+are needed. It needs `pnpm build`, `cargo build --release -p haul` and 7-Zip; unrar keeps the
+"unrar is missing" note out of the picture.
 
 ```bash
-npx -y -p playwright node scripts/social-preview/render.mjs
+pnpm screenshots
 ```
+
+After a change to the look, run **Actions → Update screenshots → Run workflow**: it takes them
+in the official Playwright image and commits the ones that changed.
 
 ## Architecture
 
@@ -97,8 +108,8 @@ ui                   web UI
 extension            browser extension for Chrome and Firefox (pnpm build:extension)
 docker               Dockerfile, Compose file and Podman Quadlet units
 docs                 this documentation (mkdocs.yml, requirements-docs.txt)
-scripts              dev.mjs (pnpm dev), build-plugins.mjs
-.github/workflows    CI, extension, docs, bump and release
+scripts              dev.mjs (pnpm dev), build-plugins.mjs, screenshots/ (pnpm screenshots)
+.github/workflows    CI, extension, docs, screenshots, bump and release
 ```
 
 ## API

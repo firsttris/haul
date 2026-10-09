@@ -11,12 +11,14 @@
     "build:plugins": "node scripts/build-plugins.mjs",
     "build:extension": "pnpm --filter @haul/extension build",
     "test": "pnpm --filter @haul/ui i18n && vitest run",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "screenshots": "playwright test -c scripts/screenshots/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "concurrently": "^9.2.1",
     "esbuild": "^0.25.12",
     "typescript": "~5.9.3",
-    "vitest": "^3.2.7",
-    "concurrently": "^9.2.1"
+    "vitest": "^3.2.7"
   }
 }
