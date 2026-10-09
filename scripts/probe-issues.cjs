@@ -15,7 +15,7 @@ const day = (secs) => (secs ? new Date(secs * 1000).toISOString().slice(0, 10) :
 const title = (c) => `Hoster probe: ${c.case} (${c.plugin ?? 'no plugin'})`;
 const HINT = {
   broken: 'The plugin failed or returned something wrong: the hoster probably changed its pages or API.',
-  offline: 'The hoster says the test file is gone. Upload it again and update `HAUL_PROBE_CASES`, unless the plugin misreads the page.',
+  offline: 'The hoster says the test file is gone. Upload it again and update its `PROBE_*` secret, unless the plugin misreads the page.',
   account: 'The account of this case was rejected or is out of traffic.',
   unavailable: `The hoster was busy, limited or unreachable in ${UNAVAILABLE_RUNS} runs in a row.`,
 };
@@ -34,9 +34,9 @@ function body(c, s, runUrl) {
     `| Steps | ${c.steps.map((st) => `${st.ok ? '✅' : '❌'} ${st.step}`).join(' → ') || '-'} |`,
     `| Run | ${runUrl} |`,
     '',
-    'The pages the hoster sent are in the run\'s encrypted `probe-pages` artifact (if `HAUL_PROBE_ZIP_PASSWORD` is set); locally: `haul probe --only ' +
+    'The pages the hoster sent are in the run\'s encrypted `probe-pages` artifact (if `HAUL_PROBE_ZIP_PASSWORD` is set); locally: `haul probe --secrets links.json --only ' +
       c.case +
-      ' cases.json`.',
+      ' .github/hoster-probe.json`.',
   ].join('\n');
 }
 

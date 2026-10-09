@@ -29,8 +29,11 @@ const MAX_BYTES: u64 = 64 << 20;
 /// For one whole case, waits and download included.
 const CASE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-const USAGE: &str = "usage: haul probe [--plugins DIR] [--out DIR] [--only NAME,…] [CASES.json]
-  CASES.json   the cases; default: the JSON in $HAUL_PROBE_CASES
+const USAGE: &str =
+    "usage: haul probe [--secrets FILE] [--plugins DIR] [--out DIR] [--only NAME,…] [CASES.json]
+  CASES.json   the cases: name → { url, name, size, md5, … }
+  --secrets    links as a JSON object: PROBE_<NAME> → link (or a case as JSON);
+               they make or complete the case <name> (lower case, _ as -)
   --plugins    the built plugins (default plugins/dist)
   --out        report, log and the hoster's pages of failed cases (default probe-out)
   --only       run only these cases";
@@ -39,6 +42,8 @@ const USAGE: &str = "usage: haul probe [--plugins DIR] [--out DIR] [--only NAME,
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Case {
+    /// Empty when only the expectations are known (the link comes from a secret).
+    #[serde(default)]
     url: String,
     /// The file's name; for a folder, picks the file to download (else the first one).
     name: Option<String>,
@@ -168,6 +173,7 @@ struct Args {
     out: PathBuf,
     only: Option<Vec<String>>,
     cases: Option<PathBuf>,
+    secrets: Option<PathBuf>,
 }
 
 fn parse_args(args: &[String]) -> Result<Args> {
@@ -176,6 +182,7 @@ fn parse_args(args: &[String]) -> Result<Args> {
         out: PathBuf::from("probe-out"),
         only: None,
         cases: None,
+        secrets: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -187,6 +194,7 @@ fn parse_args(args: &[String]) -> Result<Args> {
         match arg.as_str() {
             "--plugins" => a.plugins = value()?.into(),
             "--out" => a.out = value()?.into(),
+            "--secrets" => a.secrets = Some(value()?.into()),
             "--only" => a.only = Some(value()?.split(',').map(|s| s.trim().to_string()).collect()),
             "-h" | "--help" => bail!("{USAGE}"),
             s if s.starts_with('-') => bail!("unknown option {s}\n{USAGE}"),
@@ -200,17 +208,16 @@ fn parse_args(args: &[String]) -> Result<Args> {
 /// `haul probe …`; returns the process exit code: 1 when a case needs attention.
 pub async fn main(args: &[String]) -> Result<i32> {
     let args = parse_args(args)?;
-    let json = match &args.cases {
-        Some(p) => {
-            std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?
-        }
-        None => std::env::var("HAUL_PROBE_CASES")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .ok_or_else(|| anyhow!("no cases: pass a file or set HAUL_PROBE_CASES\n{USAGE}"))?,
+    if args.cases.is_none() && args.secrets.is_none() {
+        bail!("no cases\n{USAGE}");
+    }
+    let read = |p: &PathBuf| -> Result<String> {
+        std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))
     };
-    let mut cases: BTreeMap<String, Case> =
-        serde_json::from_str(&json).context("reading the cases")?;
+    let mut cases = cases_from(
+        args.cases.as_ref().map(read).transpose()?.as_deref(),
+        args.secrets.as_ref().map(read).transpose()?.as_deref(),
+    )?;
     if let Some(only) = &args.only {
         cases.retain(|name, _| only.contains(name));
     }
@@ -304,6 +311,50 @@ pub async fn main(args: &[String]) -> Result<i32> {
     } else {
         0
     })
+}
+
+/// The cases: the expectations from the cases file, completed by the links from the secrets.
+/// A secret `PROBE_GOFILE_FOLDER` is the case `gofile-folder`; its value is the link or a case
+/// as JSON (e.g. with an account). Cases without a link are left out.
+fn cases_from(cases: Option<&str>, secrets: Option<&str>) -> Result<BTreeMap<String, Case>> {
+    type Object = serde_json::Map<String, serde_json::Value>;
+    let mut all: BTreeMap<String, Object> = match cases {
+        Some(json) => serde_json::from_str(json).context("reading the cases")?,
+        None => BTreeMap::new(),
+    };
+    let secrets: BTreeMap<String, String> = match secrets {
+        Some(json) => serde_json::from_str(json).context("reading the secrets")?,
+        None => BTreeMap::new(),
+    };
+    for (key, value) in secrets {
+        let Some(name) = key.strip_prefix("PROBE_") else {
+            continue;
+        };
+        let name = name.to_lowercase().replace('_', "-");
+        let case = all.entry(name.clone()).or_default();
+        let value = value.trim();
+        if value.starts_with('{') {
+            let more: Object = serde_json::from_str(value)
+                .with_context(|| format!("reading the secret {key} (a link or a JSON object)"))?;
+            case.extend(more);
+        } else {
+            case.insert("url".into(), value.into());
+        }
+    }
+    let mut out = BTreeMap::new();
+    for (name, case) in all {
+        let case: Case = serde_json::from_value(case.into())
+            .with_context(|| format!("reading the case {name}"))?;
+        if case.url.is_empty() {
+            eprintln!(
+                "{name}: no link (secret PROBE_{}), skipped",
+                name.to_uppercase().replace('-', "_")
+            );
+        } else {
+            out.insert(name, case);
+        }
+    }
+    Ok(out)
 }
 
 /// Gives plugins the case's password (`ctx.password`). Nobody is there to solve a captcha or
@@ -751,7 +802,16 @@ impl Reported {
             }
         }
         if let Some(want) = case.size {
-            if let Some((from, got)) = self.sizes.iter().find(|(_, s)| *s != want) {
+            // Sizes read off a page are rounded ("1.2 MB"); the download's is exact.
+            let off = |from: &str, got: i64| {
+                let diff = (got - want).abs();
+                if from == "download" {
+                    diff != 0
+                } else {
+                    diff > want / 20
+                }
+            };
+            if let Some((from, got)) = self.sizes.iter().find(|(f, s)| off(f, *s)) {
                 return Err(broken(format!(
                     "{from} says the size is {got}, expected {want}"
                 )));
@@ -834,6 +894,33 @@ mod tests {
             r.verify(&c).unwrap_err().1,
             "resolve says the size is 11, expected 10"
         );
+        // Rounded on the page: close enough; the download must be exact.
+        let c = case(r#"{"url":"https://x.test/f","size":1048576}"#);
+        let mut r = Reported::default();
+        r.add("check", None, Some(1_050_000), None);
+        assert!(r.verify(&c).is_ok());
+        r.add("download", None, Some(1_048_575), None);
+        assert!(r.verify(&c).is_err());
+    }
+
+    #[test]
+    fn cases_from_the_file_and_the_secrets() {
+        let file = r#"{ "gofile-folder": { "files": 2 }, "mega": { "md5": "abc" } }"#;
+        let secrets = r#"{
+            "PROBE_GOFILE_FOLDER": " https://gofile.io/d/x ",
+            "PROBE_DDOWNLOAD": "{\"url\": \"https://ddownload.com/y\", \"account\": {\"user\": \"u\", \"secret\": \"p\"}}",
+            "DOCKERHUB_TOKEN": "nope"
+        }"#;
+        let cases = cases_from(Some(file), Some(secrets)).unwrap();
+        // mega has no link: left out.
+        assert_eq!(
+            cases.keys().collect::<Vec<_>>(),
+            ["ddownload", "gofile-folder"]
+        );
+        assert_eq!(cases["gofile-folder"].url, "https://gofile.io/d/x");
+        assert_eq!(cases["gofile-folder"].files, Some(2));
+        assert_eq!(cases["ddownload"].account.as_ref().unwrap().secret, "p");
+        assert!(cases_from(Some(r#"{ "x": { "url": "u", "md": 1 } }"#), None).is_err());
     }
 
     #[test]

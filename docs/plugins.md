@@ -172,30 +172,40 @@ for each case it crawls the link (folders), checks it, resolves it and downloads
 compares names, sizes and checksums with what you know about the file.
 
 Use test files of your own, a few MB of random data, uploaded to every hoster; a folder with two of
-them for hosters with folders. The cases are a JSON object, case name → case:
+them for hosters with folders. The links stay private; what to expect of each file does not:
+
+- **The links** are secrets, one per case: `PROBE_GOFILE_FOLDER` is the case `gofile-folder`
+  (lower case, `_` as `-`). The value is the link, or the whole case as JSON when it needs more,
+  e.g. `{"url": "…", "account": {"user": "…", "secret": "…"}}`.
+- **The expectations** are in
+  [`.github/hoster-probe.json`](https://github.com/firsttris/haul/blob/main/.github/hoster-probe.json),
+  case name → fields below. A case needs no entry there: without one, the probe still sees whether
+  the plugin gets to the file and whether what it reports fits the download.
 
 ```json
 {
-  "ddownload": { "url": "https://ddownload.com/…/probe.bin", "name": "probe.bin", "size": 1048576 },
-  "gofile-folder": { "url": "https://gofile.io/d/…", "files": 2, "name": "probe.bin", "md5": "…" },
-  "1fichier-premium": { "url": "https://1fichier.com/?…", "account": { "secret": "API key" } }
+  "ddownload": { "name": "probe.bin", "size": 1048576 },
+  "gofile-folder": { "files": 2, "name": "probe.bin", "md5": "…" }
 }
 ```
 
 | Field | |
 |---|---|
 | `url` | the link, as a user would add it |
-| `name`, `size` | the file's name and size in bytes; every name and size the plugin reports must match |
+| `name`, `size` | the file's name and size in bytes; every name and size the plugin reports must match (sizes read off a page within 5 %, they are rounded) |
 | `md5`, `sha256` | checksum of the downloaded file |
 | `files` | folder links: how many files `crawl` must find; `name` picks the file to download, else the first |
 | `password` | of a protected file or folder |
 | `account` | `{ "user", "secret" }` like in the UI; without one, a plugin that needs an account is only checked |
 | `maxBytes` | download at most this much (default 64 MiB); a larger file is checked up to there |
 
+Locally, with the links in a JSON file of their own (`{"PROBE_DDOWNLOAD": "https://…"}`, keep
+it out of the repository), or with a cases file that has `url`s itself:
+
 ```bash
 pnpm build:plugins && cargo build -p haul
-./target/debug/haul probe cases.json           # or the JSON in $HAUL_PROBE_CASES
-./target/debug/haul probe --only ddownload cases.json
+./target/debug/haul probe --secrets links.json .github/hoster-probe.json
+./target/debug/haul probe --secrets links.json --only ddownload .github/hoster-probe.json
 ```
 
 Each case ends with one status:
@@ -217,8 +227,8 @@ never links: URLs in messages are cut down to their host. Case names are public 
 titles); the log and the pages do contain links.
 
 The [Hoster probe workflow](https://github.com/firsttris/haul/blob/main/.github/workflows/hoster-probe.yml)
-runs every night and on pull requests that change plugins. It reads the cases from the secret
-`HAUL_PROBE_CASES`; with `HAUL_PROBE_ZIP_PASSWORD` set it keeps the log and pages as an encrypted
+runs every night and on pull requests that change plugins. It hands the probe the `PROBE_*` secrets
+and no others; with `HAUL_PROBE_ZIP_PASSWORD` set it keeps the log and pages as an encrypted
 `probe-pages` artifact. The nightly run opens an issue (label `hoster-probe`) when a case breaks,
 comments when what is wrong changes, and closes it when the case works again. The issue says since
 when the case fails and when it last worked. A hoster that is only `unavailable` gets an issue after

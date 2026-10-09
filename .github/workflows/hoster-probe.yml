@@ -2,11 +2,13 @@
 # downloaded like Haul does it (`haul probe`, crates/haul/src/probe.rs). The scheduled run opens
 # an issue per case that breaks and closes it when the case works again.
 #
-# Secrets (Settings → Secrets and variables → Actions):
-#   HAUL_PROBE_CASES         the cases as JSON (docs/plugins.md, "Testing on real hosters"); without it
-#                            the job does nothing
+# The links are secrets (Settings → Secrets and variables → Actions), one per case:
+#   PROBE_<NAME>             the link, e.g. PROBE_GOFILE_FOLDER for the case gofile-folder; or the
+#                            case as JSON, e.g. with an account. Without any the job does nothing.
 #   HAUL_PROBE_ZIP_PASSWORD  optional: the log and the hoster's pages of failed cases, as an
 #                            encrypted 7z artifact (they contain the links)
+# What to expect of each file (name, size, checksum) is in .github/hoster-probe.json.
+# See docs/plugins.md, "Testing on real hosters".
 name: Hoster probe
 
 on:
@@ -21,6 +23,7 @@ on:
       - "crates/haul/src/plugins/**"
       - "crates/haul/src/probe.rs"
       - "scripts/probe-issues.cjs"
+      - ".github/hoster-probe.json"
       - ".github/workflows/hoster-probe.yml"
 
 concurrency:
@@ -39,14 +42,17 @@ jobs:
       contents: read
       issues: write
     env:
-      HAUL_PROBE_CASES: ${{ secrets.HAUL_PROBE_CASES }}
       ZIP_PASSWORD: ${{ secrets.HAUL_PROBE_ZIP_PASSWORD }}
     steps:
-      - name: Cases set?
+      # Only the PROBE_* secrets reach the probe, not the repository's other ones.
+      - name: Links
         id: cases
+        env:
+          SECRETS: ${{ toJSON(secrets) }}
         run: |
-          if [ -z "$HAUL_PROBE_CASES" ]; then
-            echo "::warning::The secret HAUL_PROBE_CASES is not set (or not available to this run); nothing to probe."
+          jq 'with_entries(select(.key | startswith("PROBE_")))' <<<"$SECRETS" > "$RUNNER_TEMP/probe-links.json"
+          if [ "$(jq length "$RUNNER_TEMP/probe-links.json")" = 0 ]; then
+            echo "::warning::No PROBE_* secrets (or none available to this run); nothing to probe."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@v4
@@ -74,7 +80,7 @@ jobs:
         if: ${{ !steps.cases.outputs.skip }}
         run: |
           set +e
-          ./target/debug/haul probe --out probe-out
+          ./target/debug/haul probe --secrets "$RUNNER_TEMP/probe-links.json" --out probe-out .github/hoster-probe.json
           echo "code=$?" >> "$GITHUB_OUTPUT"
           [ -f probe-out/summary.md ] && cat probe-out/summary.md >> "$GITHUB_STEP_SUMMARY"
           exit 0
