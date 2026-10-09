@@ -218,6 +218,7 @@ Each case ends with one status:
 | `ok` | checked, resolved and downloaded as expected |
 | `checked` | only the online check ran: the plugin needs an account and the case has none |
 | `captcha` | the plugin got as far as a captcha, which needs a person |
+| `blocked` | the hoster turns away the probe's network (data centre IP, Cloudflare check); the plugin recognised it, the case cannot be tried from there |
 | `unavailable` | the hoster was busy, limited or unreachable |
 | `account` | the account was rejected or is out of traffic |
 | `offline` | the hoster says the test file is gone: upload it again (or the plugin misreads the page) |

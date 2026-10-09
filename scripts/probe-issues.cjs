@@ -10,6 +10,8 @@ const LABEL = 'hoster-probe';
 const UNAVAILABLE_RUNS = 3;
 const PASSING = new Set(['ok', 'checked', 'captcha']);
 const ATTENTION = new Set(['broken', 'offline', 'account']);
+// The hoster turns away the runner's network: nothing to learn about the plugin, either way.
+const NEUTRAL = new Set(['blocked']);
 
 const day = (secs) => (secs ? new Date(secs * 1000).toISOString().slice(0, 10) : 'never (since the probe runs)');
 const title = (c) => `Hoster probe: ${c.case} (${c.plugin ?? 'no plugin'})`;
@@ -53,6 +55,10 @@ module.exports = async ({ github, context, core, report, state: statePath }) => 
   const open = await github.paginate(github.rest.issues.listForRepo, { owner, repo, labels: LABEL, state: 'open', per_page: 100 });
 
   for (const c of cases) {
+    if (NEUTRAL.has(c.status)) {
+      core.info(`${c.case}: ${c.status} (${c.message ?? ''}), left as it is`);
+      continue;
+    }
     const s = (state[c.case] ??= {});
     const issue = open.find((i) => i.title === title(c) || i.title.startsWith(`Hoster probe: ${c.case} (`));
     if (PASSING.has(c.status)) {

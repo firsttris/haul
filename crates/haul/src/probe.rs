@@ -79,6 +79,9 @@ pub enum Status {
     Checked,
     /// The plugin got as far as a captcha, which needs a person.
     Captcha,
+    /// The hoster refuses the network the probe runs in (data centre IPs, Cloudflare): the plugin
+    /// recognised it, the case cannot be tried from here.
+    Blocked,
     /// The hoster was busy, limited or unreachable; not the plugin's fault (as far as we can tell).
     Unavailable,
     /// The account was rejected or is out of traffic.
@@ -146,6 +149,7 @@ impl From<PluginError> for Fail {
             {
                 Status::Captcha
             }
+            _ if blocked(&msg) => Status::Blocked,
             ErrorKind::Temporary => Status::Unavailable,
             // A failed `ctx.http` request reaches the plugin as an exception (fatal): the
             // hoster was not reachable, the plugin is not at fault.
@@ -154,6 +158,13 @@ impl From<PluginError> for Fail {
         };
         Fail(status, msg)
     }
+}
+
+/// What the plugins say when a hoster turns away a server's IP (they tell the user the same).
+fn blocked(msg: &str) -> bool {
+    ["server, VPN or proxy IP detected", "Cloudflare check"]
+        .iter()
+        .any(|m| msg.contains(m))
 }
 
 /// reqwest's words for a request that never got an answer.
@@ -385,7 +396,7 @@ fn summary(report: &Report) -> String {
     for c in &report.cases {
         let icon = match c.status {
             Status::Ok | Status::Checked | Status::Captcha => "✅",
-            Status::Unavailable => "⚠️",
+            Status::Blocked | Status::Unavailable => "⚠️",
             _ => "❌",
         };
         s.push_str(&format!(
@@ -421,7 +432,14 @@ async fn run_case(
         secrets: secrets(&case),
     };
     let result = match &plugin {
-        None => Err(broken("no plugin handles this link")),
+        // The host is no secret, and it tells which link went into the wrong secret.
+        None => Err(broken(match url::Url::parse(&case.url) {
+            Ok(u) => format!(
+                "no plugin handles links to {}",
+                u.host_str().unwrap_or("(no host)")
+            ),
+            Err(_) => "the link is not a URL".into(),
+        })),
         Some(p) => match tokio::time::timeout(CASE_TIMEOUT, probe.run(p, index as i64 + 1)).await {
             Ok(r) => r,
             Err(_) => Err(Fail(Status::Unavailable, "timed out".into())),
@@ -871,6 +889,18 @@ mod tests {
             Status::Captcha
         );
         assert_eq!(e(ErrorKind::Temporary, "busy"), Status::Unavailable);
+        assert_eq!(
+            e(
+                ErrorKind::Fatal,
+                "1fichier: server, VPN or proxy IP detected; downloads only from private connections"
+            ),
+            Status::Blocked
+        );
+        assert_eq!(
+            e(ErrorKind::Temporary, "Send: Cloudflare check, trying later"),
+            Status::Blocked
+        );
+        assert!(!Status::Blocked.needs_attention());
         assert_eq!(e(ErrorKind::Fatal, "no link found"), Status::Broken);
         assert_eq!(
             e(
@@ -1050,6 +1080,11 @@ mod tests {
         assert_eq!(no_pw.status, Status::Broken, "{:?}", no_pw.message);
         let cap = run("cap", format!(r#"{{"url":"{base}/f/cap"}}"#)).await;
         assert_eq!(cap.status, Status::Captcha, "{:?}", cap.message);
+        let other = run("other", r#"{"url":"https://elsewhere.test/f/1"}"#.into()).await;
+        assert_eq!(
+            other.message.as_deref(),
+            Some("no plugin handles links to elsewhere.test")
+        );
         let gone = run("gone", format!(r#"{{"url":"{base}/f/gone"}}"#)).await;
         assert_eq!(gone.status, Status::Offline);
     }
