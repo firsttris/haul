@@ -13,6 +13,7 @@ bundled to JavaScript and run in QuickJS inside the server, without Node, `fetch
 - [Messages in two languages](#messages-in-two-languages)
 - [Building and installing](#building-and-installing)
 - [Testing](#testing)
+- [Testing on real hosters](#testing-on-real-hosters)
 - [Debugging a hoster](#debugging-a-hoster)
 
 ## A minimal plugin
@@ -162,6 +163,81 @@ expect(await plugin.resolve(link, ctx)).toMatchObject({ url: cdn });
 ```
 
 See the tests next to every plugin, for example `plugins/ddownload/test`.
+
+## Testing on real hosters
+
+The tests above show that a plugin understands the pages it was written for, not that the hoster
+still sends them. `haul probe` tries the plugins on the real hosters, the way a download runs:
+for each case it crawls the link (folders), checks it, resolves it and downloads the file, and
+compares names, sizes and checksums with what you know about the file.
+
+Use test files of your own, a few MB of random data, uploaded to every hoster; a folder with two of
+them for hosters with folders. The links stay private; what to expect of each file does not:
+
+- **The links** are secrets, one per case: `PROBE_GOFILE_FOLDER` is the case `gofile-folder`
+  (lower case, `_` as `-`). The value is the link, or the whole case as JSON when it needs more,
+  e.g. `{"url": "…", "account": {"user": "…", "secret": "…"}}`.
+- **The expectations** are in
+  [`.github/hoster-probe.json`](https://github.com/firsttris/haul/blob/main/.github/hoster-probe.json),
+  case name → fields below. The entry `*` holds what every case expects unless it says otherwise
+  (`null` drops a field): with the same test file on every hoster, a new hoster needs only its
+  secret. Without any expectations, the probe still sees whether the plugin gets to the file and
+  whether what it reports fits the download.
+
+```json
+{
+  "*": { "name": "haul-probe.bin", "size": 1048576, "md5": "…" },
+  "gofile-folder": { "files": 2 },
+  "ddownload": { "name": "other.tar.gz", "size": null, "md5": null }
+}
+```
+
+| Field | |
+|---|---|
+| `url` | the link, as a user would add it |
+| `name`, `size` | the file's name and size in bytes; every name and size the plugin reports must match (sizes read off a page within 5 %, they are rounded) |
+| `md5`, `sha256` | checksum of the downloaded file |
+| `files` | folder links: how many files `crawl` must find; `name` picks the file to download, else the first |
+| `password` | of a protected file or folder |
+| `account` | `{ "user", "secret" }` like in the UI; without one, a plugin that needs an account is only checked |
+| `maxBytes` | download at most this much (default 64 MiB); a larger file is checked up to there |
+
+Locally, with the links in a JSON file of their own (`{"PROBE_DDOWNLOAD": "https://…"}`, keep
+it out of the repository), or with a cases file that has `url`s itself:
+
+```bash
+pnpm build:plugins && cargo build -p haul
+./target/debug/haul probe --secrets links.json .github/hoster-probe.json
+./target/debug/haul probe --secrets links.json --only ddownload .github/hoster-probe.json
+```
+
+Each case ends with one status:
+
+| Status | Meaning |
+|---|---|
+| `ok` | checked, resolved and downloaded as expected |
+| `checked` | only the online check ran: the plugin needs an account and the case has none |
+| `captcha` | the plugin got as far as a captcha, which needs a person |
+| `blocked` | the hoster turns away the probe's network (data centre IP, Cloudflare check); the plugin recognised it, the case cannot be tried from there |
+| `unavailable` | the hoster was busy, limited or unreachable |
+| `account` | the account was rejected or is out of traffic |
+| `offline` | the hoster says the test file is gone: upload it again (or the plugin misreads the page) |
+| `broken` | the plugin failed or returned something wrong |
+
+The exit code is 1 if a case is `broken`, `offline` or `account`. `probe-out/` gets `report.json`,
+`summary.md` and, for failed cases, the pages the hoster sent (as in
+[Debugging a hoster](#debugging-a-hoster)) and the debug log. The console and the report name cases,
+never links: URLs in messages are cut down to their host. Case names are public (summary, issue
+titles); the log and the pages do contain links.
+
+The [Hoster probe workflow](https://github.com/firsttris/haul/blob/main/.github/workflows/hoster-probe.yml)
+runs every night and on pull requests that change plugins. It hands the probe the `PROBE_*` secrets
+and no others; with `HAUL_PROBE_ZIP_PASSWORD` set it keeps the log and pages as an encrypted
+`probe-pages` artifact. The nightly run opens an issue (label `hoster-probe`) when a case breaks,
+comments when what is wrong changes, and closes it when the case works again. The issue says since
+when the case fails and when it last worked. A hoster that is only `unavailable` gets an issue after
+three nights in a row. Each run also downloads the test files, which keeps hosters from deleting
+them as unused.
 
 ## Debugging a hoster
 

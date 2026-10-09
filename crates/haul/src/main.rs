@@ -10,6 +10,7 @@ mod events;
 mod files;
 mod i18n;
 mod plugins;
+mod probe;
 mod ui;
 mod util;
 
@@ -31,6 +32,12 @@ use crate::plugins::PluginManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // `haul probe …`: tries the plugins on real hosters (see probe.rs), then exits.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("probe") {
+        let code = probe::main(&args[1..]).await?;
+        std::process::exit(code);
+    }
     // For development: read `.env` from the working directory (or a parent). Variables that
     // are already set in the environment win, so Docker/systemd configuration is unaffected.
     let dotenv = dotenvy::dotenv();

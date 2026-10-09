@@ -16,3 +16,7 @@ site/
 
 # Playwright (pnpm screenshots)
 test-results/
+
+# haul probe (docs/plugins.md, "Testing on real hosters")
+/probe-out
+/.probe-state
