@@ -1,11 +1,7 @@
 {
-  "ddownload": { "name": "mui-0.0.68.tar.gz" },
-  "gofile-folder": { "files": 2, "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "mega": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "mega-folder": { "files": 2, "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "mediafire": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "mediafire-folder": { "files": 2, "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "gdrive": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "1fichier": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "send": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" }
+  "*": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
+  "ddownload": { "name": "mui-0.0.68.tar.gz", "size": null, "md5": null },
+  "gofile-folder": { "files": 2 },
+  "mega-folder": { "files": 2 },
+  "mediafire-folder": { "files": 2 }
 }

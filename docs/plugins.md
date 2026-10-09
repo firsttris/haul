@@ -179,13 +179,16 @@ them for hosters with folders. The links stay private; what to expect of each fi
   e.g. `{"url": "…", "account": {"user": "…", "secret": "…"}}`.
 - **The expectations** are in
   [`.github/hoster-probe.json`](https://github.com/firsttris/haul/blob/main/.github/hoster-probe.json),
-  case name → fields below. A case needs no entry there: without one, the probe still sees whether
-  the plugin gets to the file and whether what it reports fits the download.
+  case name → fields below. The entry `*` holds what every case expects unless it says otherwise
+  (`null` drops a field): with the same test file on every hoster, a new hoster needs only its
+  secret. Without any expectations, the probe still sees whether the plugin gets to the file and
+  whether what it reports fits the download.
 
 ```json
 {
-  "ddownload": { "name": "probe.bin", "size": 1048576 },
-  "gofile-folder": { "files": 2, "name": "probe.bin", "md5": "…" }
+  "*": { "name": "haul-probe.bin", "size": 1048576, "md5": "…" },
+  "gofile-folder": { "files": 2 },
+  "ddownload": { "name": "other.tar.gz", "size": null, "md5": null }
 }
 ```
 

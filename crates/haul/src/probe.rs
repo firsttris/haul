@@ -315,13 +315,16 @@ pub async fn main(args: &[String]) -> Result<i32> {
 
 /// The cases: the expectations from the cases file, completed by the links from the secrets.
 /// A secret `PROBE_GOFILE_FOLDER` is the case `gofile-folder`; its value is the link or a case
-/// as JSON (e.g. with an account). Cases without a link are left out.
+/// as JSON (e.g. with an account). The entry `*` holds what every case expects unless it says
+/// otherwise (`null` drops a field), e.g. the same test file on every hoster. Cases without a
+/// link are left out.
 fn cases_from(cases: Option<&str>, secrets: Option<&str>) -> Result<BTreeMap<String, Case>> {
     type Object = serde_json::Map<String, serde_json::Value>;
     let mut all: BTreeMap<String, Object> = match cases {
         Some(json) => serde_json::from_str(json).context("reading the cases")?,
         None => BTreeMap::new(),
     };
+    let defaults = all.remove("*").unwrap_or_default();
     let secrets: BTreeMap<String, String> = match secrets {
         Some(json) => serde_json::from_str(json).context("reading the secrets")?,
         None => BTreeMap::new(),
@@ -342,7 +345,10 @@ fn cases_from(cases: Option<&str>, secrets: Option<&str>) -> Result<BTreeMap<Str
         }
     }
     let mut out = BTreeMap::new();
-    for (name, case) in all {
+    for (name, own) in all {
+        let mut case = defaults.clone();
+        case.extend(own);
+        case.retain(|_, v| !v.is_null());
         let case: Case = serde_json::from_value(case.into())
             .with_context(|| format!("reading the case {name}"))?;
         if case.url.is_empty() {
@@ -921,6 +927,17 @@ mod tests {
         assert_eq!(cases["gofile-folder"].files, Some(2));
         assert_eq!(cases["ddownload"].account.as_ref().unwrap().secret, "p");
         assert!(cases_from(Some(r#"{ "x": { "url": "u", "md": 1 } }"#), None).is_err());
+
+        // `*` for every case, `null` drops a field.
+        let file =
+            r#"{ "*": { "name": "p.bin", "md5": "abc" }, "dd": { "name": "x.tgz", "md5": null } }"#;
+        let secrets =
+            r#"{ "PROBE_DD": "https://dd.test/1", "PROBE_GOFILE": "https://gofile.io/d/y" }"#;
+        let cases = cases_from(Some(file), Some(secrets)).unwrap();
+        assert_eq!(cases["gofile"].name.as_deref(), Some("p.bin"));
+        assert_eq!(cases["gofile"].md5.as_deref(), Some("abc"));
+        assert_eq!(cases["dd"].name.as_deref(), Some("x.tgz"));
+        assert_eq!(cases["dd"].md5, None);
     }
 
     #[test]
