@@ -1,5 +1,7 @@
 # Haul documentation
 
+Also as a website with search: **https://firsttris.github.io/haul/**
+
 | | |
 |---|---|
 | [Installation](installation.md) | Docker Compose, Podman Quadlet, volumes, environment variables, updates, reverse proxy |
