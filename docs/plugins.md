@@ -13,6 +13,7 @@ bundled to JavaScript and run in QuickJS inside the server, without Node, `fetch
 - [Messages in two languages](#messages-in-two-languages)
 - [Building and installing](#building-and-installing)
 - [Testing](#testing)
+- [Testing on real hosters](#testing-on-real-hosters)
 - [Debugging a hoster](#debugging-a-hoster)
 
 ## A minimal plugin
@@ -162,6 +163,67 @@ expect(await plugin.resolve(link, ctx)).toMatchObject({ url: cdn });
 ```
 
 See the tests next to every plugin, for example `plugins/ddownload/test`.
+
+## Testing on real hosters
+
+The tests above show that a plugin understands the pages it was written for, not that the hoster
+still sends them. `haul probe` tries the plugins on the real hosters, the way a download runs:
+for each case it crawls the link (folders), checks it, resolves it and downloads the file, and
+compares names, sizes and checksums with what you know about the file.
+
+Use test files of your own, a few MB of random data, uploaded to every hoster; a folder with two of
+them for hosters with folders. The cases are a JSON object, case name → case:
+
+```json
+{
+  "ddownload": { "url": "https://ddownload.com/…/probe.bin", "name": "probe.bin", "size": 1048576 },
+  "gofile-folder": { "url": "https://gofile.io/d/…", "files": 2, "name": "probe.bin", "md5": "…" },
+  "1fichier-premium": { "url": "https://1fichier.com/?…", "account": { "secret": "API key" } }
+}
+```
+
+| Field | |
+|---|---|
+| `url` | the link, as a user would add it |
+| `name`, `size` | the file's name and size in bytes; every name and size the plugin reports must match |
+| `md5`, `sha256` | checksum of the downloaded file |
+| `files` | folder links: how many files `crawl` must find; `name` picks the file to download, else the first |
+| `password` | of a protected file or folder |
+| `account` | `{ "user", "secret" }` like in the UI; without one, a plugin that needs an account is only checked |
+| `maxBytes` | download at most this much (default 64 MiB); a larger file is checked up to there |
+
+```bash
+pnpm build:plugins && cargo build -p haul
+./target/debug/haul probe cases.json           # or the JSON in $HAUL_PROBE_CASES
+./target/debug/haul probe --only ddownload cases.json
+```
+
+Each case ends with one status:
+
+| Status | Meaning |
+|---|---|
+| `ok` | checked, resolved and downloaded as expected |
+| `checked` | only the online check ran: the plugin needs an account and the case has none |
+| `captcha` | the plugin got as far as a captcha, which needs a person |
+| `unavailable` | the hoster was busy, limited or unreachable |
+| `account` | the account was rejected or is out of traffic |
+| `offline` | the hoster says the test file is gone: upload it again (or the plugin misreads the page) |
+| `broken` | the plugin failed or returned something wrong |
+
+The exit code is 1 if a case is `broken`, `offline` or `account`. `probe-out/` gets `report.json`,
+`summary.md` and, for failed cases, the pages the hoster sent (as in
+[Debugging a hoster](#debugging-a-hoster)) and the debug log. The console and the report name cases,
+never links: URLs in messages are cut down to their host. Case names are public (summary, issue
+titles); the log and the pages do contain links.
+
+The [Hoster probe workflow](https://github.com/firsttris/haul/blob/main/.github/workflows/hoster-probe.yml)
+runs every night and on pull requests that change plugins. It reads the cases from the secret
+`HAUL_PROBE_CASES`; with `HAUL_PROBE_ZIP_PASSWORD` set it keeps the log and pages as an encrypted
+`probe-pages` artifact. The nightly run opens an issue (label `hoster-probe`) when a case breaks,
+comments when what is wrong changes, and closes it when the case works again. The issue says since
+when the case fails and when it last worked. A hoster that is only `unavailable` gets an issue after
+three nights in a row. Each run also downloads the test files, which keeps hosters from deleting
+them as unused.
 
 ## Debugging a hoster
 
