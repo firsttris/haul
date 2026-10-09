@@ -22,7 +22,7 @@ your browser shows it live. One Rust binary, a web UI and hoster plugins in Type
 [Documentation](https://firsttris.github.io/haul/) •
 [Contributing](#-contributing)
 
-<img src="docs/screenshot.png" alt="Haul web UI: download queue with packages from Gofile, Google Drive, ddownload, 1fichier and MEGA" width="900">
+<img src="docs/screenshot.png" alt="Haul web UI: download queue with four packages, five downloads running under a 60 MB/s limit" width="900">
 
 </div>
 
