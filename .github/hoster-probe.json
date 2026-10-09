@@ -1,7 +1,4 @@
 {
   "*": { "name": "haul-probe.bin", "size": 1048576, "md5": "c961184b73ec453916de23e06ca44a6e" },
-  "ddownload": { "name": "mui-0.0.68.tar.gz", "size": null, "md5": null },
-  "gofile-folder": { "files": 2 },
-  "mega-folder": { "files": 2 },
-  "mediafire-folder": { "files": 2 }
+  "ddownload": { "name": "mui-0.0.68.tar.gz", "size": null, "md5": null }
 }
