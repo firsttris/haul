@@ -14,14 +14,26 @@ COPY ui ui
 RUN pnpm install --frozen-lockfile && pnpm build
 
 # ---- 2. Server binary (UI embedded via rust-embed) ------------------------------------
-FROM rust:1-bookworm AS server
+# cargo-chef splits the build: the dependencies are cooked from a recipe of the manifests alone,
+# a layer the build cache keeps until Cargo.toml or Cargo.lock change (the recipe leaves out the
+# workspace crates' versions, so a release does not change it); only the workspace crates
+# compile on a code change.
+FROM rust:1-bookworm AS chef
+RUN cargo install cargo-chef --version 0.1.78 --locked
 WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS server
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release -p haul --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY --from=web /src/ui/dist ui/dist
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release -p haul && cp target/release/haul /haul
+RUN cargo build --release -p haul && cp target/release/haul /haul
 
 # ---- 3. Runtime ----------------------------------------------------------------------
 FROM debian:bookworm-slim

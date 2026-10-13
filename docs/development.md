@@ -37,7 +37,10 @@ pnpm test          # SDK helpers and hoster plugins against a fake context
 pnpm typecheck
 ```
 
-CI runs all of them on every pull request and builds the image.
+CI runs all of them on every pull request, and weekly on main. It builds the image only when the
+image's own files change (`docker/`, `Cargo.lock`, the package manifests), by hand and on the
+weekly run; the image's build cooks the Rust dependencies in a layer of their own with
+cargo-chef, so a code change compiles only the workspace crates.
 
 The documentation in `docs/` is published to https://firsttris.github.io/haul/ by
 [`docs.yml`](https://github.com/firsttris/haul/blob/main/.github/workflows/docs.yml) on every push to
