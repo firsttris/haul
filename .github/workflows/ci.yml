@@ -16,6 +16,10 @@ on:
       - "LICENSE"
   # The release workflow runs the same checks before it publishes anything.
   workflow_call:
+  workflow_dispatch:
+  # Weekly on what is on main: new clippy lints of the newest Rust, the image's base images
+  schedule:
+    - cron: "23 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,9 +49,48 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Whether this push touches what the image is built from beyond the code the test job builds
+  # and tests: then the docker job builds it. By hand and on the weekly run always; never for a
+  # release tag, whose images release.yml builds right after.
+  changes:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.diff.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "docker=false" | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$EVENT" in
+            push) from="$BEFORE" ;;
+            pull_request) from="$BASE" ;;
+            *) from="" ;;
+          esac
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
+            docker=true
+          elif git diff --name-only "$from" HEAD | grep -qE '^(docker/|\.dockerignore|Cargo\.lock|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|scripts/)'; then
+            docker=true
+          else
+            docker=false
+          fi
+          echo "docker=$docker" | tee -a "$GITHUB_OUTPUT"
+
   docker:
-    # Build check only; publishing to Docker Hub happens in docker.yml
-    needs: test
+    # Build check only, when the image's own files change (see changes); release.yml publishes
+    # the images. Next to the test job, its cache shared with the release's amd64 build.
+    needs: changes
+    if: ${{ needs.changes.outputs.docker == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,3 +101,4 @@ jobs:
           file: docker/Dockerfile
           push: false
           cache-from: type=gha,scope=linux-amd64
+          cache-to: type=gha,mode=max,scope=linux-amd64
