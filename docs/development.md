@@ -40,7 +40,9 @@ pnpm typecheck
 CI runs all of them on every pull request, and weekly on main. It builds the image only when the
 image's own files change (`docker/`, `Cargo.lock`, the package manifests), by hand and on the
 weekly run; the image's build cooks the Rust dependencies in a layer of their own with
-cargo-chef, so a code change compiles only the workspace crates.
+cargo-chef, so a code change compiles only the workspace crates. Its build cache lives in the
+registry (`ghcr.io/firsttris/haul-buildcache:linux-amd64`) and is shared with the release's amd64
+build, so either reuses what the other compiled.
 
 The documentation in `docs/` is published to https://firsttris.github.io/haul/ by
 [`docs.yml`](https://github.com/firsttris/haul/blob/main/.github/workflows/docs.yml) on every push to
@@ -173,11 +175,13 @@ git tag v0.2.0 && git push origin v0.2.0
 The tag push starts the *Release* workflow (CI and extension here, the rest from the shared
 [`docker-release.yml`](https://github.com/firsttris/workflows) in `firsttris/workflows`):
 
-1. the full CI and the browser extension build,
+1. the full CI (skipped when `main`'s CI already passed for the same code, as after *Bump version*)
+   and the browser extension build,
 2. the tag must match the version in `Cargo.toml`,
 3. the image is built for `linux/amd64` and `linux/arm64`, each on its own native runner (Rust under
    QEMU takes too long), and published to Docker Hub as `tristanteu/haul` with the tags `X.Y.Z`,
-   `X.Y` and `latest`; the README becomes the Docker Hub description,
+   `X.Y` and `latest`; the README becomes the Docker Hub description; each platform keeps its build
+   cache in `ghcr.io/firsttris/haul-buildcache`, so a release reuses the layers of the one before,
 4. only then the GitHub release with generated notes and the extension ZIPs for Chrome and Firefox.
 
 Started by hand on `main` (Actions → *Release* → Run workflow), the workflow runs the same checks and

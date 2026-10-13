@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag vX.Y.Z publishes that version: the CI and the browser extension first, then the
-# shared Docker release from firsttris/workflows. It checks the tag against the version in
+# Pushing a tag vX.Y.Z publishes that version: the CI (unless main's CI already passed for this
+# code) and the browser extension first, then the shared Docker release from firsttris/workflows. It checks the tag against the version in
 # Cargo.toml, builds amd64 and arm64 each on its own native runner, pushes :x.y.z, :x.y and
 # :latest, updates the Docker Hub description and creates the GitHub release with the extension
 # ZIPs attached. Run by hand on main: the same checks, then the image as :edge, nothing is released.
@@ -11,14 +11,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Whether main's CI already tested this code: the "Bump version" commit only changes the
+  # version, so the green CI of the commit before it counts and the checks are not run again
+  tested:
+    uses: firsttris/workflows/.github/workflows/tested-on-main.yml@ccr-161f105b-9ns022
+    permissions:
+      actions: read
+      contents: read
+
   checks:
+    needs: tested
+    if: needs.tested.outputs.tested != 'true'
     uses: ./.github/workflows/ci.yml
+    # The CI's image check keeps its build cache in ghcr.io
+    permissions:
+      contents: read
+      packages: write
 
   extension:
     uses: ./.github/workflows/extension.yml
 
   docker:
-    needs: [checks, extension]
+    needs: [tested, checks, extension]
+    # The checks either passed or were not needed; the extension is always built
+    if: ${{ !cancelled() && needs.tested.result == 'success' && needs.checks.result != 'failure' && needs.extension.result == 'success' }}
     uses: firsttris/workflows/.github/workflows/docker-release.yml@v1
     with:
       image: tristanteu/haul
