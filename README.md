@@ -9,6 +9,7 @@ Paste links or send them with Click'n'Load. Your server downloads, extracts and 
 your browser shows it live. One Rust binary, a web UI and hoster plugins in TypeScript.
 
 [![CI](https://github.com/firsttris/haul/actions/workflows/ci.yml/badge.svg)](https://github.com/firsttris/haul/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/firsttris/haul?logo=github&label=release)](https://github.com/firsttris/haul/releases/latest)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tristanteu/haul?logo=docker&logoColor=white)](https://hub.docker.com/r/tristanteu/haul)
 [![Image Size](https://img.shields.io/docker/image-size/tristanteu/haul/latest?logo=docker&logoColor=white&label=image)](https://hub.docker.com/r/tristanteu/haul)
 [![Platforms](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-lightgrey)](https://hub.docker.com/r/tristanteu/haul/tags)
