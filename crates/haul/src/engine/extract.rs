@@ -724,17 +724,19 @@ impl Engine {
         if downloads.iter().any(|d| d.status != status::FINISHED) {
             return;
         }
-        let Ok(Some(pkg)) = db::get_package(&self.db, package_id).await else {
-            return;
-        };
-        let dir = self.package_dir(&pkg);
-        let sets = self.package_sets(package_id, &dir).await;
+        let groups = self.package_sets(package_id).await;
         // A volume still loading in another package of this folder: that one's end starts it.
-        let loading = self.loading_names(&dir).await;
-        if sets.iter().all(|(_, members)| {
-            !loading.is_empty() && self.loading_volumes(members, &loading).is_some()
-        }) {
-            if !sets.is_empty() {
+        let mut waiting = true;
+        for (dir, sets) in &groups {
+            let loading = self.loading_names(dir).await;
+            if !sets.iter().all(|(_, members)| {
+                !loading.is_empty() && self.loading_volumes(members, &loading).is_some()
+            }) {
+                waiting = false;
+            }
+        }
+        if waiting {
+            if !groups.is_empty() {
                 tracing::info!(package_id, "extract: waiting for volumes still downloading");
             }
             return;
@@ -756,27 +758,54 @@ impl Engine {
         }
     }
 
-    /// The package's archive sets in its folder: those with at least one file the package
-    /// downloaded, with all their volumes. Another package's archives in the same folder stay
-    /// out (a Linksammler package started in parts shares its folder), so they are neither
-    /// extracted twice nor, half downloaded, the reason this package fails. If none of the
-    /// package's files is there any more (renamed or moved in Fertig): every set in the folder.
-    async fn package_sets(&self, package_id: i64, dir: &Path) -> Vec<ArchiveSet> {
-        let names = file_names(dir).await;
-        let own: Vec<String> = db::package_downloads(&self.db, package_id)
+    /// The package's archive sets, per folder it downloaded into (its folder and the
+    /// subfolders of a crawled folder, each extracted where it is): those with at least one
+    /// file the package downloaded, with all their volumes. Another package's archives in the
+    /// same folder stay out (a Linksammler package started in parts shares its folder), so they
+    /// are neither extracted twice nor, half downloaded, the reason this package fails. If none
+    /// of the package's files is there any more (renamed or moved in Fertig): every set in the
+    /// folder. Folders without sets are left out.
+    async fn package_sets(&self, package_id: i64) -> Vec<(PathBuf, Vec<ArchiveSet>)> {
+        let Ok(Some(pkg)) = db::get_package(&self.db, package_id).await else {
+            return Vec::new();
+        };
+        let downloads = db::package_downloads(&self.db, package_id)
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|d| d.status == status::FINISHED)
-            .map(|d| d.name)
-            .collect();
-        let present = names.iter().any(|n| own.contains(n));
-        find_archives(&names)
-            .0
-            .iter()
-            .filter_map(|first| archive_set(&names, first))
-            .filter(|(_, members)| !present || members.iter().any(|m| own.contains(m)))
-            .collect()
+            .unwrap_or_default();
+        // Only the folders it downloads into: a package wholly in subfolders leaves the
+        // archives of another package in its main folder alone.
+        let mut dirs = Vec::new();
+        for d in &downloads {
+            let dir = self.download_dir(&pkg, d);
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+        if dirs.is_empty() {
+            dirs.push(self.package_dir(&pkg));
+        }
+        let mut groups = Vec::new();
+        for dir in dirs {
+            let names = file_names(&dir).await;
+            let own: Vec<&str> = downloads
+                .iter()
+                .filter(|d| d.status == status::FINISHED && self.download_dir(&pkg, d) == dir)
+                .map(|d| d.name.as_str())
+                .collect();
+            let present = names.iter().any(|n| own.contains(&n.as_str()));
+            let sets: Vec<ArchiveSet> = find_archives(&names)
+                .0
+                .iter()
+                .filter_map(|first| archive_set(&names, first))
+                .filter(|(_, members)| {
+                    !present || members.iter().any(|m| own.contains(&m.as_str()))
+                })
+                .collect();
+            if !sets.is_empty() {
+                groups.push((dir, sets));
+            }
+        }
+        groups
     }
 
     /// Extracts the package's archives in its folder (see `package_sets`) and records the
@@ -785,9 +814,8 @@ impl Engine {
         let pkg = db::get_package(&self.db, package_id)
             .await?
             .ok_or_else(|| anyhow!(crate::msg!("server_package_notFound")))?;
-        let dir = self.package_dir(&pkg);
-        let sets = self.package_sets(package_id, &dir).await;
-        if sets.is_empty() {
+        let groups = self.package_sets(package_id).await;
+        if groups.is_empty() {
             return Ok(());
         }
         let claimed = sqlx::query(
@@ -810,12 +838,17 @@ impl Engine {
             .filter(|p| !p.is_empty())
             .map(str::to_string)
             .collect();
-        let rel = files::relative(&self.cfg.done_dir, &dir);
-        let error = self
-            .extract_dir(&dir, &rel, Some(package_id), &passwords, Some(sets))
-            .await
-            .err()
-            .map(|e| format!("{e:#}"));
+        let mut errors = Vec::new();
+        for (dir, sets) in groups {
+            let rel = files::relative(&self.cfg.done_dir, &dir);
+            if let Err(e) = self
+                .extract_dir(&dir, &rel, Some(package_id), &passwords, Some(sets))
+                .await
+            {
+                errors.push(format!("{e:#}"));
+            }
+        }
+        let error = (!errors.is_empty()).then(|| errors.join("\n"));
         sqlx::query("UPDATE packages SET extract = ?, extract_error = ? WHERE id = ?")
             .bind(if error.is_some() { "failed" } else { "done" })
             .bind(&error)
@@ -925,7 +958,7 @@ impl Engine {
         result
     }
 
-    /// The downloads that go into `dir`, of any package there.
+    /// The downloads that go into `dir`, of any package there (into its folder or a subfolder).
     async fn downloads_in_dir(&self, dir: &Path) -> Vec<db::Download> {
         let Ok(dir) = dir.canonicalize() else {
             return Vec::new();
@@ -936,13 +969,23 @@ impl Engine {
             .unwrap_or_default();
         let mut downloads = Vec::new();
         for p in packages {
-            if self.package_dir(&p).canonicalize().is_ok_and(|d| d == dir) {
-                downloads.extend(
-                    db::package_downloads(&self.db, p.id)
-                        .await
-                        .unwrap_or_default(),
-                );
+            let Ok(base) = self.package_dir(&p).canonicalize() else {
+                continue;
+            };
+            if !dir.starts_with(&base) {
+                continue;
             }
+            downloads.extend(
+                db::package_downloads(&self.db, p.id)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|d| {
+                        self.download_dir(&p, d)
+                            .canonicalize()
+                            .is_ok_and(|d| d == dir)
+                    }),
+            );
         }
         downloads
     }

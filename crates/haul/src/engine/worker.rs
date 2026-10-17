@@ -718,7 +718,7 @@ async fn execute(
     }
 
     // 6. Move into the package folder.
-    let dir = engine.package_dir(&pkg);
+    let dir = engine.download_dir(&pkg, &d);
     tokio::fs::create_dir_all(&dir).await?;
     let dest = unique_path(&dir, &name).await;
     move_file(&path, &dest).await?;

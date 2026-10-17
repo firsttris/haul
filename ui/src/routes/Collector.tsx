@@ -213,7 +213,10 @@ function CollectedPackage({ pkg, unchecked, setUnchecked }: { pkg: Package; unch
                 onChange={() => {}}
               />
               <div className="grow">
-                <span className="cell-name">{d.name}</span>
+                <span className="cell-name">
+                  {d.subdir && <span className="cell-dir">{d.subdir}/</span>}
+                  {d.name}
+                </span>
                 <span className="sub mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {d.url}
                 </span>

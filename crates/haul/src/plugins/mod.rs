@@ -186,6 +186,9 @@ pub struct CrawledFile {
     pub size: Option<i64>,
     #[serde(default)]
     pub hash: Option<crate::engine::hash::HashSpec>,
+    /// Folder of the file below the crawled folder (`CD1/Extras`), kept in the package folder.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

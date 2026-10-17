@@ -262,6 +262,8 @@ export interface CrawledFile {
   name?: string;
   size?: number;
   hash?: FileHash;
+  /** Subfolder below the crawled folder, e.g. `CD1/Extras`: the file goes there in the package folder. */
+  path?: string;
 }
 
 export interface CrawlResult {

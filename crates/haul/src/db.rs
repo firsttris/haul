@@ -76,6 +76,8 @@ pub struct Download {
     pub hash: Option<String>,
     /// Checked after the download: matched (true) or not (false).
     pub hash_ok: Option<bool>,
+    /// Folder inside the package folder (`CD1/Extras`) from the crawled folder, if any.
+    pub subdir: Option<String>,
 }
 
 fn hash_type<S: serde::Serializer>(hash: &Option<String>, s: S) -> Result<S::Ok, S::Error> {

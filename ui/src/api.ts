@@ -21,6 +21,8 @@ export interface Download {
   hashType: 'md5' | 'sha1' | 'sha256' | 'mega' | null;
   /** Checked after the download: matched, did not match, or not checked. */
   hashOk: boolean | null;
+  /** Folder inside the package folder from the crawled folder (`CD1/Extras`), if any. */
+  subdir: string | null;
 }
 
 export interface Package {
