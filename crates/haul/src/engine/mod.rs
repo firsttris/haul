@@ -216,6 +216,15 @@ impl Engine {
         }
     }
 
+    /// Where a finished download goes: the package folder, or its subfolder from the crawl.
+    pub fn download_dir(&self, pkg: &db::Package, d: &Download) -> PathBuf {
+        let dir = self.package_dir(pkg);
+        match d.subdir.as_deref().map(util::sanitize_rel_dir) {
+            Some(sub) if !sub.is_empty() => dir.join(sub),
+            _ => dir,
+        }
+    }
+
     /// Scheduler loop plus the progress ticker. Runs until shutdown.
     pub async fn run(self: Arc<Self>) {
         let ticker = tokio::spawn(self.clone().progress_loop());
@@ -695,6 +704,7 @@ impl Engine {
                         name: None,
                         size: None,
                         hash: None,
+                        path: None,
                     }],
                 }),
             };
@@ -730,6 +740,11 @@ impl Engine {
                             // JD: the crawler gives its files the folder's password.
                             password: password.get(),
                             hash: f.hash.filter(|h| h.usable()).map(|h| h.to_db()),
+                            subdir: f
+                                .path
+                                .as_deref()
+                                .map(util::sanitize_rel_dir)
+                                .filter(|p| !p.is_empty()),
                         })
                         .collect()
                 }
@@ -779,8 +794,8 @@ impl Engine {
         let now = now_ms();
         for l in links {
             sqlx::query(
-                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, password, hash, created_at)
-                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO downloads(package_id, url, plugin_id, status, name, size, online, error, password, hash, subdir, created_at)
+                 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(d.package_id)
             .bind(&l.url)
@@ -792,6 +807,7 @@ impl Engine {
             .bind(&l.error)
             .bind(&l.password)
             .bind(&l.hash)
+            .bind(&l.subdir)
             .bind(now)
             .execute(&mut *tx)
             .await?;
@@ -1099,6 +1115,7 @@ struct NewLink {
     error: Option<String>,
     password: Option<String>,
     hash: Option<String>,
+    subdir: Option<String>,
 }
 
 impl NewLink {
@@ -1111,6 +1128,7 @@ impl NewLink {
             error: None,
             password: d.password.clone(),
             hash: d.hash.clone(),
+            subdir: d.subdir.clone(),
         }
     }
 }
@@ -1896,6 +1914,138 @@ mod engine_tests {
         let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
         plugins.reload().await;
         plugins
+    }
+
+    /// The files of a crawled folder keep their subfolders (Google Drive): each lands in its
+    /// folder inside the package folder, so equal names in different folders do not collide,
+    /// and a path cannot leave the package folder.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn crawled_subfolders_are_kept() {
+        let data: Arc<Vec<u8>> = Arc::new((0..4096u32).map(|i| i as u8).collect());
+        let base = range_server(data.clone(), Arc::new(AtomicU64::new(0))).await;
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("tree.js"),
+            r#"var __plugin = { default: { id: "tree", version: 1, matches: [/https?:\/\/tree\.test\//],
+                async crawl() {
+                    const u = "BASE/file.bin?";
+                    return { packageName: "Tree", files: [
+                        { url: u + 1, name: "top.nfo", size: 4096 },
+                        { url: u + 2, name: "x.nfo", size: 4096, path: "Extras" },
+                        { url: u + 3, name: "x.nfo", size: 4096, path: "Extras/CD 1" },
+                        { url: u + 4, name: "y.nfo", size: 4096, path: "../../escape" },
+                    ] };
+                },
+            }};"#
+                .replace("BASE", &base),
+        )
+        .unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://tree.test/folder".into(),
+                start: false,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        wait_crawled(&e, pkg).await;
+        let downloads = db::package_downloads(&e.db, pkg).await.unwrap();
+        let subdirs: Vec<Option<&str>> = downloads.iter().map(|d| d.subdir.as_deref()).collect();
+        assert_eq!(
+            subdirs,
+            [None, Some("Extras"), Some("Extras/CD 1"), Some("escape")]
+        );
+        e.start_package(pkg).await.unwrap();
+        for d in &downloads {
+            wait_for(&e, d.id, status::FINISHED).await;
+        }
+        let folder = e.cfg.done_dir.join("Tree");
+        // The server names every file `file.bin`: one per folder, none renamed to `file (1).bin`.
+        for sub in ["", "Extras", "Extras/CD 1", "escape"] {
+            let file = folder.join(sub).join("file.bin");
+            assert_eq!(std::fs::read(&file).unwrap(), *data, "{}", file.display());
+        }
+        assert!(!folder.join("file (1).bin").exists());
+        e.shutdown().await;
+    }
+
+    /// Archives of a crawled folder are extracted in their own subfolder; equal archive names
+    /// in two subfolders are two archives, not one set.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn archives_are_extracted_in_their_subfolder() {
+        let _path = extract::PATH_LOCK.lock().await;
+        let Some(seven) = extract::available_tools()
+            .into_iter()
+            .map(|t| t.describe())
+            .find(|p| p.ends_with("7z") || p.ends_with("7zz") || p.ends_with("7za"))
+        else {
+            eprintln!("skipped: 7-Zip is not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path()).await;
+        let pkg = sqlx::query(
+            "INSERT INTO packages(name, target_dir, collector, created_at) VALUES ('P', 'P', 0, 0)",
+        )
+        .execute(&e.db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        // Another package's archive in the main folder stays packed.
+        let folder = e.cfg.done_dir.join("P");
+        std::fs::create_dir_all(&folder).unwrap();
+        let other = dir.path().join("src/other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("other.txt"), "other").unwrap();
+        assert!(std::process::Command::new(&seven)
+            .current_dir(&other)
+            .args(["a", folder.join("other.7z").to_str().unwrap(), "other.txt"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success());
+        for sub in ["CD1", "CD2"] {
+            let src = dir.path().join("src").join(sub);
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("film.txt"), sub).unwrap();
+            let folder = e.cfg.done_dir.join("P").join(sub);
+            std::fs::create_dir_all(&folder).unwrap();
+            let ok = std::process::Command::new(&seven)
+                .current_dir(&src)
+                .arg("a")
+                .arg(folder.join("film.7z"))
+                .arg("film.txt")
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok);
+            sqlx::query(
+                "INSERT INTO downloads(package_id, url, status, name, subdir, created_at) VALUES (?, ?, ?, 'film.7z', ?, 0)",
+            )
+            .bind(pkg)
+            .bind(format!("https://x.test/{sub}"))
+            .bind(status::FINISHED)
+            .bind(sub)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        }
+        e.extract_package(pkg).await.unwrap();
+        for sub in ["CD1", "CD2"] {
+            let text = std::fs::read_to_string(e.cfg.done_dir.join("P").join(sub).join("film.txt"));
+            assert_eq!(text.unwrap(), sub);
+        }
+        assert!(!e.cfg.done_dir.join("P/film.txt").exists());
+        assert!(!e.cfg.done_dir.join("P/other.txt").exists());
+        let p = db::get_package(&e.db, pkg).await.unwrap().unwrap();
+        assert_eq!(p.extract.as_deref(), Some("done"), "{:?}", p.extract_error);
+        e.shutdown().await;
     }
 
     async fn wait_crawled(e: &Engine, pkg: i64) {

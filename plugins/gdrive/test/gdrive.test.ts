@@ -136,11 +136,21 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
         }),
       };
     }
+    if (q.includes('sub2')) {
+      return { body: JSON.stringify({ items: [{ kind: 'drive#file', id: 'f4', title: 'x.nfo', fileSize: '4' }] }) };
+    }
     expect(req.headers?.['X-Goog-Drive-Resource-Keys']).toBe('sub1/0-rk');
-    return { body: JSON.stringify({ items: [{ kind: 'drive#file', id: 'f3', title: 'x.nfo', fileSize: '3' }] }) };
+    return {
+      body: JSON.stringify({
+        items: [
+          { kind: 'drive#file', id: 'sub2', title: 'CD 1/2', mimeType: 'application/vnd.google-apps.folder' },
+          { kind: 'drive#file', id: 'f3', title: 'x.nfo', fileSize: '3' },
+        ],
+      }),
+    };
   };
 
-  it('lists all pages and subfolders and names the package', async () => {
+  it('lists all pages and subfolders with their paths and names the package', async () => {
     const ctx = fakeCtx({
       [`GET https://drive.google.com/drive/folders/${FID}`]: { body: PAGE },
       'GET https://clients6.google.com/drive/v2beta/files?': files,
@@ -151,7 +161,9 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
         // SHA-256 before MD5 (JD parseFileInfoAPIAndWebsiteWebAPI).
         { url: 'https://drive.google.com/file/d/f1', name: 'a.part1.rar', size: 100, hash: { type: 'sha256', value: 'bb'.repeat(32) } },
         { url: 'https://drive.google.com/file/d/f2', name: 'b.rar', size: undefined },
-        { url: 'https://drive.google.com/file/d/f3', name: 'x.nfo', size: 3 },
+        // Subfolders keep their place in the folder, so equal names do not collide.
+        { url: 'https://drive.google.com/file/d/f3', name: 'x.nfo', size: 3, path: 'Extras' },
+        { url: 'https://drive.google.com/file/d/f4', name: 'x.nfo', size: 4, path: 'Extras/CD 1_2' },
       ],
     });
     expect(ctx.waits).toEqual([0.5]);
@@ -164,7 +176,7 @@ describe('google drive folders (JD GoogleDriveCrawler.crawlWebsite)', () => {
       [`GET https://drive.google.com/drive/folders/${FID}`]: { body: PAGE },
       'GET https://clients6.google.com/drive/v2beta/files?': files,
     });
-    expect((await plugin.crawl!('https://drive.google.com/open?id=abc', ctx)).files).toHaveLength(3);
+    expect((await plugin.crawl!('https://drive.google.com/open?id=abc', ctx)).files).toHaveLength(4);
     expect(await plugin.crawl!('https://drive.google.com/open?id=file1', ctx)).toEqual({ files: [{ url: 'https://drive.google.com/file/d/file1/view' }] });
     expect(await plugin.crawl!(LINK, ctx)).toEqual({ files: [{ url: LINK }] });
   });

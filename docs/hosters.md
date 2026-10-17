@@ -67,8 +67,8 @@ optional line `User-Agent: …` makes Haul use the same browser identity.
 
 ## Hoster notes
 
-- **Google Drive**: public files and folders (with sub-folders and shortcuts), confirmation of large
-  files, quota and rate limits with waits. Google documents are exported: in the format the title
+- **Google Drive**: public files and folders (with sub-folders, kept as folders in the package
+  folder, and shortcuts), confirmation of large files, quota and rate limits with waits. Google documents are exported: in the format the title
   names (`Report.pdf`), otherwise like Drive's own download as Word, Excel or PowerPoint, otherwise
   PDF/ODF/text, as a last resort as ZIP.
 - **MEGA**: the file arrives encrypted and is decrypted while it is saved (AES-CTR per segment, also

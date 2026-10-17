@@ -57,7 +57,7 @@ export default definePlugin({
 |---|---|
 | `resolve(link, ctx)` (required) | `url`, and optionally `headers`, `cookies`, `name`, `size`, `maxConnections`, `hash`, and `decrypt: { cipher: 'aes-128-ctr', key, iv }` for files the hoster stores encrypted |
 | `check(link, ctx)` | `online`, and optionally `name`, `size`, `hash`; runs when links are added and on **Check** |
-| `crawl(link, ctx)` | `{ packageName?, files: [{ url, name?, size?, hash? }] }` for a folder link (see `plugins/gofile`); runs in the background after a link is added |
+| `crawl(link, ctx)` | `{ packageName?, files: [{ url, name?, size?, hash?, path? }] }` for a folder link (see `plugins/gofile`); runs in the background after a link is added. `path` is the file's subfolder below the crawled folder (`CD1/Extras`): it lands there inside the package folder, and its archives are extracted there |
 | `checkAccount(ctx)` | `valid`, and optionally `premium`, `trafficLeft` (bytes), `validUntil` (ms), `message`; shown under **Accounts & plugins** |
 
 A `hash` is `{ type: 'md5' | 'sha1' | 'sha256' | 'mega', value }`. The one from `resolve` wins over the

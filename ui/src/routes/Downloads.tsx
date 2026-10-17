@@ -80,7 +80,10 @@ export function DownloadsPage() {
         header: m.common_name(),
         cell: ({ row }) => row.original.kind === 'dl' && (
           <div className="name-with-badge">
-            <div className="cell-name" title={row.original.d.url}>{row.original.d.name}</div>
+            <div className="cell-name" title={row.original.d.url}>
+              {row.original.d.subdir && <span className="cell-dir">{row.original.d.subdir}/</span>}
+              {row.original.d.name}
+            </div>
             <HashBadge d={row.original.d} />
           </div>
         ),

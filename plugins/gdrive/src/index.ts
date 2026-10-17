@@ -17,7 +17,9 @@
  *   team drive id (in `_DRIVE_ivd`) and the title; the items come from
  *   `clients6.google.com/drive/v2beta/files` (50 per page, `pageToken`), with the headers of
  *   GoogleHelper.prepBrowserWebAPI. Shortcuts point to their target, subfolders are listed too
- *   (their files join the package), `open?id=` links are file or folder depending on the redirect.
+ *   (their files join the package with their folder path, like JD's subfolder structure, so
+ *   they land in the same folders as in Drive), `open?id=` links are file or folder depending
+ *   on the redirect.
  * - Google account (JD COOKIE_LOGIN_ONLY, GoogleHelper.login): Google has no password login
  *   for programs, so the account is the browser's exported cookies (Cookie-Editor JSON,
  *   cookies.txt or a `Cookie:` line), without the many `ST-…` cookies (JD loadUserCookies), with
@@ -266,7 +268,8 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
   }
   const files: CrawledFile[] = [];
   const seen = new Set<string>([root.id]);
-  const walk = async (folder: { id: string; resourceKey?: string }, depth: number) => {
+  type Folder = { id: string; resourceKey?: string; path?: string };
+  const walk = async (folder: Folder, depth: number) => {
     const query = [
       'openDrive=false',
       'reason=102',
@@ -294,7 +297,7 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
       'X-Javascript-User-Agent': 'google-api-javascript-client/1.1.0',
       ...(folder.resourceKey ? { 'X-Goog-Drive-Resource-Keys': `${folder.id}/${folder.resourceKey}` } : {}),
     };
-    const subfolders: Array<{ id: string; resourceKey?: string }> = [];
+    const subfolders: Folder[] = [];
     let token: string | undefined;
     for (let n = 0; ; n++) {
       const url = `https://clients6.google.com/drive/v2beta/files?${query.join('&')}${token ? `&pageToken=${encodeURIComponent(token)}` : ''}`;
@@ -324,9 +327,16 @@ async function crawlFolder(ctx: Ctx, start: { id: string; resourceKey?: string }
         fresh++;
         if ((item.kind ?? '').toLowerCase() === 'drive#file' && mime !== FOLDER_MIME) {
           const size = Number(item.fileSize);
-          files.push({ url: fileUrl(id, item.resourceKey), name: item.title, size: size > 0 ? size : undefined, hash: driveHash(item) });
+          files.push({
+            url: fileUrl(id, item.resourceKey),
+            name: item.title,
+            size: size > 0 ? size : undefined,
+            hash: driveHash(item),
+            ...(folder.path ? { path: folder.path } : {}),
+          });
         } else {
-          subfolders.push({ id, resourceKey: item.resourceKey });
+          const title = (item.title ?? '').replace(/[/\\]/g, '_').trim() || id;
+          subfolders.push({ id, resourceKey: item.resourceKey, path: folder.path ? `${folder.path}/${title}` : title });
         }
       }
       token = data.nextPageToken;
@@ -477,7 +487,7 @@ export function confirmUrl(html: string, pageUrl: string): string | undefined {
 export default definePlugin({
   id: 'gdrive',
   name: 'Google Drive',
-  version: 7,
+  version: 8,
   domains: ['drive.google.com', 'docs.google.com'],
   matches: [LINK, FOLDER],
   accountRequired: false,
