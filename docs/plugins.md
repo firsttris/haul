@@ -3,6 +3,7 @@
 A plugin does one thing: **link in, direct URL plus headers out**. Everything that touches the file's
 bytes (segments, resume, speed limit, checksums) is done by the Rust core. Plugins are TypeScript,
 bundled to JavaScript and run in QuickJS inside the server, without Node, `fetch` or timers.
+To have an AI agent write, test and repair one, see [Plugins with Claude Code](plugins-with-claude.md).
 
 - [A minimal plugin](#a-minimal-plugin)
 - [The plugin definition](#the-plugin-definition)

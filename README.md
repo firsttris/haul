@@ -141,6 +141,7 @@ The full documentation, with search, is at **[firsttris.github.io/haul](https://
 | [Click'n'Load](https://firsttris.github.io/haul/click-n-load.html) | how links from link sites reach the server, `haul-cnl` |
 | [Architecture](https://firsttris.github.io/haul/architecture.html) | how the server, queue, plugins and downloads fit together |
 | [Plugins](https://firsttris.github.io/haul/plugins.html) | writing and debugging hoster plugins |
+| [Plugins with Claude Code](https://firsttris.github.io/haul/plugins-with-claude.html) | letting an AI agent write, test and repair a hoster plugin |
 | [Development](https://firsttris.github.io/haul/development.html) | building, checks, architecture, API, releases |
 
 ## 🛠️ Development
@@ -161,8 +162,10 @@ More in [Architecture](https://firsttris.github.io/haul/architecture.html) and t
 ## 🤝 Contributing
 
 A hoster changed its pages or one is missing? Issues and pull requests are welcome, plugins most of
-all: see [writing plugins](https://firsttris.github.io/haul/plugins.html). Please run `cargo test`, `cargo clippy`, `pnpm test` and
-`pnpm typecheck` before opening a pull request.
+all: see [writing plugins](https://firsttris.github.io/haul/plugins.html), or let Claude Code write
+one with the skill in the repository ([Plugins with Claude Code](https://firsttris.github.io/haul/plugins-with-claude.html)).
+Please run `cargo test`, `cargo clippy`, `pnpm test` and `pnpm typecheck` before opening a pull
+request.
 
 ---
 

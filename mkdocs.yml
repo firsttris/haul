@@ -29,6 +29,7 @@ nav:
   - For developers:
       - Architecture: architecture.md
       - Plugins: plugins.md
+      - Plugins with Claude Code: plugins-with-claude.md
       - Development: development.md
 
 theme:
