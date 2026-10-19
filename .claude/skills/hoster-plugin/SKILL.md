@@ -106,15 +106,37 @@ pnpm build:plugins              # must bundle without warnings → plugins/dist/
 cargo test --workspace          # if the Rust side or the SDK prelude was touched
 ```
 
-Against the real hoster, if you have a test link (keep it out of the repository):
+## 5a. Working against the real hoster
 
-```bash
-cargo build -p haul
-./target/debug/haul probe --secrets links.json --only <case> .github/hoster-probe.json
-```
+When the hoster is reachable (on the user's own computer it usually is; a cloud sandbox may block
+it), develop against it, not only against guessed pages:
 
-`links.json` is `{"PROBE_<CASE>": "https://…"}`. Statuses and fields: "Testing on real hosters"
-in `docs/plugins.md`.
+1. Ask the user for what only they can give: a test link (best a small file of their own,
+   uploaded for this; a folder with two files if the hoster has folders), the file's name, size
+   and MD5, and an account if the plugin needs one. Keep all of it in a file outside the
+   repository, e.g. `~/.haul-probe/links.json`:
+   `{"PROBE_<CASE>": "https://…"}` or `{"PROBE_<CASE>": "{\"url\": \"…\", \"account\": {\"user\": \"…\", \"secret\": \"…\"}}"}`.
+   The case name is the secret's name in lower case with `-` for `_`.
+2. Fetch the hoster's pages with `curl` (file page, offline link, folder, login, the answers to
+   the forms), save them to a scratch folder, and build the test fixtures from trimmed copies.
+3. Write the plugin and its tests, then try it end to end, the way a download runs (crawl,
+   check, resolve, download, compare name, size and checksum):
+
+   ```bash
+   pnpm build:plugins && cargo build -p haul
+   ./target/debug/haul probe --secrets ~/.haul-probe/links.json --only <case> .github/hoster-probe.json
+   ```
+
+4. Read `probe-out/summary.md`, and for a failed case `probe-out/haul.log` and the pages the
+   hoster sent in `probe-out/`. Turn every new page into a test, fix, repeat until the case is
+   `ok`. `captcha` means the plugin got as far as a captcha: finish that path by hand with
+   `pnpm dev` (http://localhost:5173, `admin` / `adminadmin`), adding the link in the UI and
+   solving the captcha in the browser. `blocked` means the hoster turned the network away, not
+   that the plugin is wrong. Statuses and case fields: "Testing on real hosters" in
+   `docs/plugins.md`.
+
+Never commit `links.json`, `probe-out/`, cookies or account data, and never paste private links
+into code, tests, commit messages or PR texts.
 
 ## 6. Docs for a new or changed hoster
 
