@@ -19,6 +19,7 @@ your browser shows it live. One Rust binary, a web UI and hoster plugins in Type
 
 [Features](#-features) •
 [Hosters](#-supported-hosters) •
+[Plugins by an agent](#-missing-a-hoster-let-an-agent-write-the-plugin) •
 [Quick start](#-quick-start) •
 [Documentation](https://firsttris.github.io/haul/) •
 [Contributing](#-contributing)
@@ -38,6 +39,9 @@ behind. Haul is one small container built for a home server:
 - **Light**: a Debian slim image with `7z` and `unrar`, SQLite, nothing else to run.
 - **Hoster plugins you can fix yourself**: small TypeScript files, loaded from `/config/plugins` with
   one click, and a debug mode that saves exactly the pages a hoster sent.
+- **…or let an AI agent write them**: the repository comes with a [Claude Code](https://code.claude.com/docs)
+  skill. Name a hoster, and the agent writes the plugin and its tests, tries it on the real hoster
+  and fixes it when the hoster changes its pages.
 
 It runs wherever Docker or Podman runs: a Linux server, a NAS like Synology or Unraid, or an arm64
 board like the Raspberry Pi.
@@ -77,6 +81,27 @@ board like the Raspberry Pi.
 | **Send** (send.now, send.cm, tusfiles, userscloud) | ✅ | ✅ premium, API key | ✅ |
 
 Plus every direct HTTP(S) link. Details per hoster: [Hosters](https://firsttris.github.io/haul/hosters.html) in the documentation.
+
+### 🤖 Missing a hoster? Let an agent write the plugin
+
+Start [Claude Code](https://code.claude.com/docs) in a checkout of Haul and say which hoster you
+need. The skill in [`.claude/skills/hoster-plugin`](.claude/skills/hoster-plugin/SKILL.md) tells
+the agent how plugins are made here:
+
+```text
+> Write a plugin for example-hoster.com: free downloads and premium accounts, with folder links.
+```
+
+1. It starts from the closest existing plugin and reads the hoster's pages, with a browser too if
+   you connect [Playwright MCP](https://github.com/microsoft/playwright-mcp).
+2. It writes the plugin with tests against those pages.
+3. It tries the plugin on the real hoster with `haul probe`: check, resolve, download, compare
+   name, size and checksum, and fixes it until the download works.
+4. When a hoster changes its pages later, it repairs the plugin from the pages Haul saved.
+
+You give it a test file and an account where one is needed, and solve the captchas. Drop the
+built plugin into `/config/plugins`, or open a pull request so everyone gets it. How it works,
+what it needs and what it may do: [Plugins with Claude Code](https://firsttris.github.io/haul/plugins-with-claude.html).
 
 ## 🐳 Quick start
 
