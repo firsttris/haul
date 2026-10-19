@@ -16,7 +16,8 @@ itself is `packages/plugin-sdk/src/{index,xfs,testing}.ts`.
 - Look at how the existing plugins do the same thing. Pick the closest one:
   - XFileSharing Pro site (URLs like `/<12 chars>/name`, forms `op=download1/download2`,
     `?op=my_account`): `createXfsPlugin` from `@haul/plugin-sdk/xfs`. Few lines:
-    `plugins/ddownload`; with quirks (`freeHooks`, `headers`): `plugins/datanodes`, `plugins/send`.
+    `plugins/ddownload`; with quirks: `plugins/datanodes` (`freeHooks`, `headers`),
+    `plugins/send` (`checkErrors`, folders by wrapping the XFS plugin with its own `crawl`).
   - JSON API, guest tokens, folders: `plugins/gofile`, `plugins/1fichier`.
   - Plain pages with a download button: `plugins/mediafire`.
   - Cookies exported from a browser as account: `plugins/gdrive`.
