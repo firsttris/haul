@@ -12,4 +12,5 @@ Also as a website with search: **https://firsttris.github.io/haul/**
 | [Click'n'Load](click-n-load.md) | how links from link sites reach the server, `haul-cnl` |
 | [Architecture](architecture.md) | components, the life of a download, plugins, segments, retries, data and security |
 | [Plugins](plugins.md) | writing and debugging hoster plugins |
+| [Plugins with Claude Code](plugins-with-claude.md) | letting an AI agent write, test and repair a hoster plugin |
 | [Development](development.md) | building, checks, architecture, API, releases |
