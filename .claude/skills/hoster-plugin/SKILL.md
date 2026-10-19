@@ -117,9 +117,14 @@ it), develop against it, not only against guessed pages:
    repository, e.g. `~/.haul-probe/links.json`:
    `{"PROBE_<CASE>": "https://…"}` or `{"PROBE_<CASE>": "{\"url\": \"…\", \"account\": {\"user\": \"…\", \"secret\": \"…\"}}"}`.
    The case name is the secret's name in lower case with `-` for `_`.
-   Without a test link, offer to upload one yourself (5b): a file of random data
-   (`head -c 1048576 /dev/urandom > haul-probe.bin`, then `md5sum`), the same name and size as
-   the `*` entry in `.github/hoster-probe.json` where the hoster allows it.
+   Without a test link, offer to upload one yourself (5b). Every hoster gets the same test file,
+   the one the `*` entry in `.github/hoster-probe.json` describes (name, size, MD5), so a case
+   needs nothing but its link. Ask the user for that file (or look for
+   `~/.haul-probe/haul-probe.bin`) and check its MD5 against `*`. Only if nobody has it any
+   more, create one (`head -c 1048576 /dev/urandom > ~/.haul-probe/haul-probe.bin`, then
+   `md5sum`), keep it there for the next hosters, and give the new case its own `md5` (in the
+   links file, or in the case's entry in `.github/hoster-probe.json`); never change `*`, the
+   other hosters' files would no longer match. The file is random data only, nothing else.
 2. Fetch the hoster's pages with `curl` (file page, offline link, folder, login, the answers to
    the forms), save them to a scratch folder, and build the test fixtures from trimmed copies.
 3. Write the plugin and its tests, then try it end to end, the way a download runs (crawl,
