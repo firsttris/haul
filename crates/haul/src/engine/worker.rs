@@ -370,6 +370,9 @@ async fn execute(
             .await?;
             if let Some(a) = &acc {
                 engine.save_session(&plugin.id, a.id).await;
+                if let Err(e) = &r {
+                    engine.recheck_rejected_account(a.id, e).await;
+                }
             }
             // Debug logging: the pages the plugin got from the hoster, saved when it failed.
             let pages = crate::plugins::host::take_pages(&plugin.id, &d.url);

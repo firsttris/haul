@@ -54,7 +54,9 @@ Add accounts under **Accounts & plugins**. Each plugin says there what it expect
 
 Passwords are stored encrypted with `APP_SECRET`. The page shows the account type, expiry date and
 remaining traffic where the hoster tells them. With several accounts for a hoster, Haul takes the one
-with the most traffic left; accounts the hoster rejected are skipped.
+with the most traffic left; accounts the hoster rejected are skipped. If the hoster rejects an
+account during a download, Haul checks the account again; when the login fails there too, it is
+marked invalid and the next try takes another account. **Check** brings it back once it works again.
 
 **XFileSharing sites with a login captcha** (ddownload's login has Turnstile): solve it in the
 browser with the [userscript](captchas.md), or log in once in your browser and enter its `xfss` cookie

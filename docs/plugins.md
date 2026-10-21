@@ -107,7 +107,7 @@ one from `crawl` or `check`.
 | `OfflineError` | file gone; no retry |
 | `TemporaryError(message, seconds?)` | try again later; with seconds, exactly then and not counted as a failure |
 | `HosterLimitError(message, seconds)` | the whole hoster is limited (IP limit, free slots); all its downloads wait |
-| `AccountError` | the account is wrong or expired |
+| `AccountError` | the account is wrong or expired; during a download Haul then runs `checkAccount` again and drops the account if that fails too |
 | `PluginError('fatal', message)` | give up |
 
 ## XFileSharing sites

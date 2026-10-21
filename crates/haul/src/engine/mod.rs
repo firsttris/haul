@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::crypto::SecretBox;
 use crate::db::{self, status, Db, Download, Settings};
 use crate::events::{Event, Events, ExtractProgress, ProgressItem, Topic};
-use crate::plugins::{AccountCreds, ErrorKind, PluginManager};
+use crate::plugins::{AccountCreds, ErrorKind, PluginError, PluginManager};
 use crate::util::{self, now_ms};
 
 pub use limiter::Limiter;
@@ -549,6 +549,74 @@ impl Engine {
         }
     }
 
+    /// An account the hoster rejected during a download or crawl is checked again: the check
+    /// marks it invalid if the login really fails, and `pick_account` skips it from then on.
+    /// Plugins also use `AccountError` for passing limits, which the check leaves valid.
+    pub async fn recheck_rejected_account(&self, account: i64, error: &PluginError) {
+        if error.kind != ErrorKind::Account {
+            return;
+        }
+        if let Err(e) = self.check_account(account).await {
+            tracing::warn!(account, "account check: {e:#}");
+        }
+    }
+
+    /// Logs in with an account through its plugin and stores what the hoster says about it.
+    pub async fn check_account(&self, id: i64) -> Result<()> {
+        let db = &self.db;
+        let Some(acc) = db::get_account(db, id).await? else {
+            return Ok(());
+        };
+        let Some(plugin) = self.plugins.get(&acc.plugin_id) else {
+            anyhow::bail!(crate::msg!(
+                "server_api_pluginNotLoaded",
+                plugin = acc.plugin_id
+            ));
+        };
+        if !plugin.has_check_account {
+            return Ok(());
+        }
+        sqlx::query("UPDATE accounts SET status = 'checking' WHERE id = ?")
+            .bind(id)
+            .execute(db)
+            .await?;
+        self.events.changed(Topic::Accounts);
+        let creds = self.account_creds(&acc)?;
+        let result = self.plugins.check_account(&plugin, &creds).await;
+        self.save_session(&plugin.id, acc.id).await;
+        let (status, premium, traffic, until, error) = match result {
+            Ok(i) if i.valid => ("valid", i.premium, i.traffic_left, i.valid_until, i.message),
+            Ok(i) => (
+                "invalid",
+                i.premium,
+                None,
+                None,
+                Some(
+                    i.message
+                        .unwrap_or_else(|| crate::msg!("server_api_loginFailed")),
+                ),
+            ),
+            Err(e) if e.kind == ErrorKind::Account => {
+                ("invalid", None, None, None, Some(e.message))
+            }
+            Err(e) => ("error", None, None, None, Some(e.message)),
+        };
+        sqlx::query(
+            "UPDATE accounts SET status = ?, premium = ?, traffic_left = ?, valid_until = ?, error = ?, checked_at = ? WHERE id = ?",
+        )
+        .bind(status)
+        .bind(premium)
+        .bind(traffic)
+        .bind(until)
+        .bind(error)
+        .bind(now_ms())
+        .bind(id)
+        .execute(db)
+        .await?;
+        self.events.changed(Topic::Accounts);
+        Ok(())
+    }
+
     // ---- operations used by the API ------------------------------------------------
 
     /// Stores the links right away and returns. Folder links (plugins with `crawl`) are
@@ -693,6 +761,9 @@ impl Engine {
                         .await;
                     if let Some(a) = &acc {
                         self.save_session(&plugin.id, a.id).await;
+                        if let Err(e) = &r {
+                            self.recheck_rejected_account(a.id, e).await;
+                        }
                     }
                     r
                 }
@@ -2208,6 +2279,84 @@ mod engine_tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("the wait was not recorded");
+    }
+
+    /// An account the hoster rejects during a download is checked again: a bad login is marked
+    /// invalid and the next try takes another account, a passing limit leaves it in use.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejected_account_is_checked_and_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("acc.js"),
+            r#"var __plugin = { default: { id: "acc", version: 1, accountRequired: true,
+                matches: [/https?:\/\/acc\.test\//],
+                async resolve(url, ctx) {
+                    const e = new Error("rejected " + ctx.account.get().user); e.haulKind = "account"; throw e;
+                },
+                async checkAccount(ctx) { return { valid: ctx.account.get().user === "limited" }; },
+            }};"#,
+        )
+        .unwrap();
+        let plugins = PluginManager::new(vec![(plugin_dir, true)], None);
+        plugins.reload().await;
+        let e = engine_with(dir.path(), plugins).await;
+        for (user, traffic) in [("bad", 2), ("limited", 1)] {
+            sqlx::query(
+                "INSERT INTO accounts(plugin_id, user, secret, traffic_left, created_at) VALUES('acc', ?, ?, ?, 0)",
+            )
+            .bind(user)
+            .bind(e.secrets.encrypt("pw").unwrap())
+            .bind(traffic)
+            .execute(&e.db)
+            .await
+            .unwrap();
+        }
+        let status_of = |user: &'static str| {
+            let e = e.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT status FROM accounts WHERE user = ?")
+                    .bind(user)
+                    .fetch_one(&e.db)
+                    .await
+                    .unwrap()
+            }
+        };
+        let pkg = e
+            .add_links(AddLinks {
+                links: "https://acc.test/f/1".into(),
+                start: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = e.package_ids(pkg).await.unwrap()[0];
+        for _ in 0..100 {
+            let d = db::get_download(&e.db, id).await.unwrap().unwrap();
+            if d.retry_at.is_some() && status_of("bad").await == "invalid" {
+                assert_eq!(d.error.as_deref(), Some("rejected bad"));
+                assert_eq!(status_of("limited").await, "unchecked");
+                let next = e.pick_account("acc").await.unwrap().unwrap();
+                assert_eq!(next.user, "limited");
+                // The other account's rejection is only a limit: the check keeps it.
+                e.recheck_rejected_account(
+                    next.id,
+                    &PluginError {
+                        kind: ErrorKind::Account,
+                        message: "limit".into(),
+                        wait_secs: None,
+                        hoster_wide: false,
+                    },
+                )
+                .await;
+                assert_eq!(status_of("limited").await, "valid");
+                e.shutdown().await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the rejected account was not marked invalid");
     }
 
     /// A hoster-wide limit (HosterLimitError) holds every queued download of that hoster
