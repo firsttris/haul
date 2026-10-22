@@ -4,7 +4,9 @@ name: Release
 # code) and the browser extension first, then the shared Docker release from firsttris/workflows. It checks the tag against the version in
 # Cargo.toml, builds amd64 and arm64 each on its own native runner, pushes :x.y.z, :x.y and
 # :latest, updates the Docker Hub description and creates the GitHub release with the extension
-# ZIPs attached. Run by hand on main: the same checks, then the image as :edge, nothing is released.
+# ZIPs attached; the static Linux binaries for scripts/install.sh are added to it after. Run by
+# hand on main: the same checks, then the image as :edge and the binaries as artifacts, nothing is
+# released.
 on:
   push:
     tags: ["v*"]
@@ -31,10 +33,51 @@ jobs:
   extension:
     uses: ./.github/workflows/extension.yml
 
+  # Static Linux binaries (musl) with the UI and the plugins built in, each on its native runner
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-${{ matrix.arch }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: cargo build --release --locked -p haul --target ${{ matrix.arch }}-unknown-linux-musl
+      - name: Pack
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p out pack
+          cp "target/$ARCH-unknown-linux-musl/release/haul" LICENSE NOTICE pack/
+          ./pack/haul --version
+          tar -czf "out/haul-linux-$ARCH.tar.gz" -C pack .
+          (cd out && sha256sum "haul-linux-$ARCH.tar.gz" > "haul-linux-$ARCH.tar.gz.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haul-linux-${{ matrix.arch }}
+          path: out/*
+
   docker:
-    needs: [tested, checks, extension]
-    # The checks either passed or were not needed; the extension is always built
-    if: ${{ !cancelled() && needs.tested.result == 'success' && needs.checks.result != 'failure' && needs.extension.result == 'success' }}
+    needs: [tested, checks, extension, binaries]
+    # The checks either passed or were not needed; the extension and binaries are always built
+    if: ${{ !cancelled() && needs.tested.result == 'success' && needs.checks.result != 'failure' && needs.extension.result == 'success' && needs.binaries.result == 'success' }}
     uses: firsttris/workflows/.github/workflows/docker-release.yml@v1
     with:
       image: tristanteu/haul
@@ -45,3 +88,20 @@ jobs:
     permissions:
       contents: write
       packages: write
+
+  # The docker job creates the GitHub release; the binaries join it
+  release-binaries:
+    needs: docker
+    if: ${{ !cancelled() && needs.docker.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: haul-linux-*
+          merge-multiple: true
+          path: out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber

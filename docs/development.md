@@ -175,15 +175,17 @@ git tag v0.2.0 && git push origin v0.2.0
 The tag push starts the *Release* workflow (CI and extension here, the rest from the shared
 [`docker-release.yml`](https://github.com/firsttris/workflows) in `firsttris/workflows`):
 
-1. the full CI (skipped when `main`'s CI already passed for the same code, as after *Bump version*)
-   and the browser extension build,
+1. the full CI (skipped when `main`'s CI already passed for the same code, as after *Bump version*),
+   the browser extension build and the static binaries `haul-linux-x86_64` and `haul-linux-aarch64`
+   (musl, UI and plugins embedded) for [`scripts/install.sh`](installation.md#without-docker),
 2. the tag must match the version in `Cargo.toml`,
 3. the image is built for `linux/amd64` and `linux/arm64`, each on its own native runner (Rust under
    QEMU takes too long), and published to Docker Hub as `tristanteu/haul` with the tags `X.Y.Z`,
    `X.Y` and `latest`; the README becomes the Docker Hub description; each platform keeps its build
    cache in `ghcr.io/firsttris/haul-buildcache`, so a release reuses the layers of the one before,
-4. only then the GitHub release with generated notes and the extension ZIPs for Chrome and Firefox.
+4. only then the GitHub release with generated notes and the extension ZIPs for Chrome and Firefox;
+   the binaries (`.tar.gz` with a `.sha256`) are added to it right after.
 
 Started by hand on `main` (Actions → *Release* → Run workflow), the workflow runs the same checks and
-publishes the image as `edge`; nothing is released. The repository needs the secret `DOCKER_PAT`, a
+publishes the image as `edge`, the binaries stay as workflow artifacts; nothing is released. The repository needs the secret `DOCKER_PAT`, a
 Docker Hub access token with write access.

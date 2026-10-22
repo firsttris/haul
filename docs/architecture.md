@@ -120,7 +120,8 @@ name, are kept.
 ## Hoster plugins
 
 A plugin is a TypeScript file that `scripts/build-plugins.mjs` bundles into one script per hoster
-(`plugins/dist/<name>.js`). The built-in plugins sit in `/app/plugins` in the image. Your own go to
+(`plugins/dist/<name>.js`). The built-in plugins sit in `/app/plugins` in the image; without
+`HAUL_BUILTIN_PLUGINS` they come from the binary, which embeds `plugins/dist` like the UI. Your own go to
 `/config/plugins` and win over a built-in one with the same id.
 
 A plugin declares its `id`, the URL patterns it `matches`, its account form and up to four functions:
@@ -253,5 +254,7 @@ language you pick later. Details for contributors are in [Development](developme
 2. **server** (Rust): builds the `haul` binary with the UI embedded.
 3. **runtime** (Debian slim): the binary, the plugins in `/app/plugins`, `7z` and `unrar`.
 
-The release builds the image for `linux/amd64` and `linux/arm64`, each on its own native runner. See
+The release builds the image for `linux/amd64` and `linux/arm64`, each on its own native runner,
+and static binaries (musl) with the UI and the plugins embedded for
+[`scripts/install.sh`](installation.md#without-docker). See
 [Releases](development.md#releases).
