@@ -601,72 +601,17 @@ async fn delete_account(State(app): State<Arc<App>>, Path(id): Path<i64>) -> Api
 }
 
 async fn check_account(State(app): State<Arc<App>>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    run_account_check(&app.engine, id).await?;
+    app.engine.check_account(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 fn spawn_account_check(app: &App, id: i64) {
     let engine = app.engine.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_account_check(&engine, id).await {
+        if let Err(e) = engine.check_account(id).await {
             tracing::warn!(id, "account check: {e:#}");
         }
     });
-}
-
-pub async fn run_account_check(engine: &Engine, id: i64) -> anyhow::Result<()> {
-    let db = &engine.db;
-    let Some(acc) = db::get_account(db, id).await? else {
-        return Ok(());
-    };
-    let Some(plugin) = engine.plugins.get(&acc.plugin_id) else {
-        anyhow::bail!(crate::msg!(
-            "server_api_pluginNotLoaded",
-            plugin = acc.plugin_id
-        ));
-    };
-    if !plugin.has_check_account {
-        return Ok(());
-    }
-    sqlx::query("UPDATE accounts SET status = 'checking' WHERE id = ?")
-        .bind(id)
-        .execute(db)
-        .await?;
-    engine.events.changed(Topic::Accounts);
-    let creds = engine.account_creds(&acc)?;
-    let result = engine.plugins.check_account(&plugin, &creds).await;
-    engine.save_session(&plugin.id, acc.id).await;
-    let (status, premium, traffic, until, error) = match result {
-        Ok(i) if i.valid => ("valid", i.premium, i.traffic_left, i.valid_until, i.message),
-        Ok(i) => (
-            "invalid",
-            i.premium,
-            None,
-            None,
-            Some(
-                i.message
-                    .unwrap_or_else(|| crate::msg!("server_api_loginFailed")),
-            ),
-        ),
-        Err(e) if e.kind == crate::plugins::ErrorKind::Account => {
-            ("invalid", None, None, None, Some(e.message))
-        }
-        Err(e) => ("error", None, None, None, Some(e.message)),
-    };
-    sqlx::query(
-        "UPDATE accounts SET status = ?, premium = ?, traffic_left = ?, valid_until = ?, error = ?, checked_at = ? WHERE id = ?",
-    )
-    .bind(status)
-    .bind(premium)
-    .bind(traffic)
-    .bind(until)
-    .bind(error)
-    .bind(now_ms())
-    .bind(id)
-    .execute(db)
-    .await?;
-    engine.events.changed(Topic::Accounts);
-    Ok(())
 }
 
 // ---- Fertig view: the done folder ------------------------------------------------

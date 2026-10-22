@@ -27,7 +27,8 @@ browser on that page and takes the answer:
 4. **Solve** opens the hoster page. The userscript shows only the captcha there and sends the answer to
    Haul. The download continues by itself; you can close the tab.
 
-A captcha waits 10 minutes for you. Without an answer, Haul tries again 30 minutes later.
+A captcha waits 10 minutes for you. Without an answer, Haul tries again 30 minutes later. **Cancel**
+in the banner fails the download at once; resuming it asks again.
 
 ## Security
 
