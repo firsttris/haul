@@ -34,6 +34,10 @@ use crate::plugins::PluginManager;
 async fn main() -> Result<()> {
     // `haul probe …`: tries the plugins on real hosters (see probe.rs), then exits.
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("haul {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("probe") {
         let code = probe::main(&args[1..]).await?;
         std::process::exit(code);
@@ -68,7 +72,12 @@ async fn main() -> Result<()> {
         plugin_dirs.push((builtin.clone(), true));
     }
     plugin_dirs.push((cfg.user_plugins(), false));
-    let plugins = Arc::new(PluginManager::new(plugin_dirs, cfg.user_agent.clone()));
+    let mut plugins = PluginManager::new(plugin_dirs, cfg.user_agent.clone());
+    // Without a plugin folder (the release binary), the plugins built into the binary.
+    if cfg.builtin_plugins.is_none() {
+        plugins = plugins.with_embedded();
+    }
+    let plugins = Arc::new(plugins);
     plugins.reload().await;
     let events = Events::new();
     let captchas = Arc::new(captcha::Captchas::new(events.clone()));

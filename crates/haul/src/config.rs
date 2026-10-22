@@ -13,6 +13,7 @@ pub struct Config {
     pub tmp_dir: PathBuf,
     pub done_dir: PathBuf,
     /// Directory with plugins shipped in the image; `config_dir/plugins` overrides them by id.
+    /// Unset: the plugins built into the binary.
     pub builtin_plugins: Option<PathBuf>,
     pub app_secret: String,
     pub initial_user: Option<(String, String)>,

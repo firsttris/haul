@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: shellcheck scripts/install.sh
       - run: pnpm test
       - run: pnpm build
       - run: cargo fmt --all --check

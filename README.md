@@ -44,7 +44,7 @@ behind. Haul is one small container built for a home server:
   and fixes it when the hoster changes its pages.
 
 It runs wherever Docker or Podman runs: a Linux server, a NAS like Synology or Unraid, or an arm64
-board like the Raspberry Pi.
+board like the Raspberry Pi. Without Docker it installs as a single binary with a systemd service.
 
 ## ✨ Features
 
@@ -140,6 +140,18 @@ curl -o ~/.config/containers/systemd/haul.network https://raw.githubusercontent.
 # set APP_SECRET in haul.container, then
 systemctl --user daemon-reload && systemctl --user start haul
 ```
+
+</details>
+
+<details>
+<summary><b>Without Docker (systemd)</b></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/firsttris/haul/main/scripts/install.sh | sudo sh
+```
+
+One binary with the UI and plugins built in, run as a systemd service; the script also installs 7-Zip
+and unrar. Details: [Without Docker](https://firsttris.github.io/haul/installation.html#without-docker).
 
 </details>
 

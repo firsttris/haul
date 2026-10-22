@@ -2,11 +2,13 @@
 
 Haul ships as one container image: [`tristanteu/haul`](https://hub.docker.com/r/tristanteu/haul) for
 `linux/amd64` and `linux/arm64`. It contains the server, the web UI, the built-in hoster plugins and the
-extractors (`7z`, `unrar`).
+extractors (`7z`, `unrar`). Without Docker, an install script sets up the same server as a systemd
+service.
 
 - [Docker Compose](#docker-compose)
 - [Podman Quadlet](#podman-quadlet)
 - [docker run](#docker-run)
+- [Without Docker](#without-docker)
 - [First start](#first-start)
 - [Volumes](#volumes)
 - [Environment variables](#environment-variables)
@@ -76,6 +78,51 @@ docker run -d --name haul --restart unless-stopped \
 
 Keep the `APP_SECRET` you used: without it, stored account passwords cannot be read.
 
+## Without Docker
+
+On a Linux machine with systemd (x86_64 or arm64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/firsttris/haul/main/scripts/install.sh | sudo sh
+```
+
+The script downloads the release binary, which has the web UI and the hoster plugins built in and
+needs no libraries, checks its SHA-256 and sets up:
+
+| Path | Content |
+|---|---|
+| `/usr/local/bin/haul` | the server |
+| `/etc/haul/haul.env` | the [environment variables](#environment-variables), with a generated `APP_SECRET`; written on the first install only |
+| `/etc/systemd/system/haul.service` | runs Haul as the system user `haul` and starts it at boot |
+| `/var/lib/haul` | database and your own plugins (`plugins/`) |
+| `/var/lib/haul/downloads/tmp`, `…/done` | downloads in progress and finished downloads |
+
+It also installs 7-Zip and unrar with the package manager (apt, dnf, pacman, zypper or apk). unrar is
+not in every distribution's default sources (Debian: `non-free`, Ubuntu: `multiverse`, Fedora: RPM
+Fusion); without it 7-Zip extracts RAR too. If no extractor could be installed, the downloads page
+says so, and archives are extracted after you install one and click **Extract again**.
+
+Options for the first install, before `sh`: `HAUL_DOWNLOADS=/mnt/disk1/downloads` puts the
+downloads there, `HAUL_PORT=8090` changes the port, `HAUL_NO_EXTRACTORS=1` leaves the packages alone,
+`HAUL_VERSION=1.2.3` picks a release. For example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/firsttris/haul/main/scripts/install.sh | sudo HAUL_DOWNLOADS=/mnt/disk1/downloads sh
+```
+
+Later changes go to `/etc/haul/haul.env`, then `sudo systemctl restart haul`. Folders outside
+`/var/lib/haul` must be writable by the user `haul` (`sudo chown -R haul:haul /mnt/disk1/downloads`).
+Click'n'Load listens on `127.0.0.1:9666` of that machine; a browser there reaches it directly.
+
+Logs: `journalctl -u haul -f`. To remove Haul:
+
+```bash
+sudo systemctl disable --now haul
+sudo rm /usr/local/bin/haul /etc/systemd/system/haul.service
+# with your settings, database and downloads:
+sudo rm -r /etc/haul /var/lib/haul && sudo userdel haul
+```
+
 ## First start
 
 Open `http://<server>:8080`. On the first visit Haul asks you to create the login. To create it without
@@ -109,7 +156,7 @@ Then:
 | `HAUL_DONE_DIR` | `/downloads/done` | Finished downloads |
 | `HAUL_LISTEN` | `0.0.0.0:8080` | Web UI and API |
 | `HAUL_CNL_LISTEN` | `0.0.0.0:9666` in the image, else `127.0.0.1:9666` | Click'n'Load; `off` turns it off. Publish it only on `127.0.0.1`. |
-| `HAUL_BUILTIN_PLUGINS` | `/app/plugins` in the image, else unset | Plugins that come with Haul; unset means only your own plugins load |
+| `HAUL_BUILTIN_PLUGINS` | `/app/plugins` in the image, else unset | Folder with the plugins that come with Haul; unset means the ones built into the binary |
 | `HAUL_USER_AGENT` | a desktop browser | User-Agent sent to hosters |
 | `HAUL_7Z`, `HAUL_UNRAR` | found on `PATH` | Extractors: `7zz`, `7z` or `7za`, and `unrar` |
 | `RUST_LOG` | `info,sqlx=warn` | Log level. `haul=debug` also saves the hoster pages of failed downloads, see [Debugging a hoster](plugins.md#debugging-a-hoster). |
@@ -149,6 +196,7 @@ docker compose pull && docker compose up -d
 ```
 
 With Podman: `podman auto-update`, or `systemctl --user restart haul` after `podman pull`.
+Without Docker: run the [install script](#without-docker) again; it keeps `/etc/haul/haul.env`.
 Downloads in progress resume after the restart.
 
 Tags: `latest` is the latest release, `1.2.3` and `1.2` pin a version.

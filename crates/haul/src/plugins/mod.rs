@@ -16,6 +16,12 @@ pub use host::{ErrorKind, HttpClients, PluginError};
 
 use crate::db::Account;
 
+/// The plugins built into the binary (`pnpm build:plugins`), for installs without
+/// `HAUL_BUILTIN_PLUGINS` (the release binary). Empty when the plugins were not built.
+#[derive(rust_embed::RustEmbed)]
+#[folder = "../../plugins/dist"]
+struct Embedded;
+
 pub const USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
@@ -221,6 +227,8 @@ impl AccountCreds {
 
 pub struct PluginManager {
     dirs: Vec<(PathBuf, bool)>,
+    /// Load the plugins built into the binary first, as built-in ones.
+    embedded: bool,
     plugins: RwLock<Vec<Arc<Plugin>>>,
     errors: RwLock<Vec<LoadError>>,
     /// Cookie jars per plugin and account, so logins survive between calls.
@@ -291,6 +299,7 @@ impl PluginManager {
         let user_agent = user_agent.unwrap_or_else(|| USER_AGENT.to_string());
         Self {
             dirs,
+            embedded: false,
             plugins: RwLock::new(Vec::new()),
             errors: RwLock::new(Vec::new()),
             clients: Mutex::new(HashMap::new()),
@@ -298,6 +307,12 @@ impl PluginManager {
             user_agent,
             captchas: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Also loads the plugins built into the binary, before `dirs`.
+    pub fn with_embedded(mut self) -> Self {
+        self.embedded = true;
+        self
     }
 
     /// Lets plugins ask the user for captchas (`ctx.captcha.solve`).
@@ -313,6 +328,18 @@ impl PluginManager {
     pub async fn reload(&self) {
         let mut by_id: HashMap<String, Arc<Plugin>> = HashMap::new();
         let mut errors = Vec::new();
+        // (file, built-in, code), in load order.
+        let mut sources: Vec<(PathBuf, bool, std::io::Result<String>)> = Vec::new();
+        if self.embedded {
+            let mut names: Vec<_> = Embedded::iter().filter(|n| n.ends_with(".js")).collect();
+            names.sort();
+            for name in names {
+                let code = Embedded::get(&name)
+                    .map(|f| String::from_utf8_lossy(&f.data).into_owned())
+                    .ok_or_else(|| std::io::ErrorKind::NotFound.into());
+                sources.push((PathBuf::from(format!("built-in/{name}")), true, code));
+            }
+        }
         for (dir, builtin) in &self.dirs {
             let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
                 Ok(rd) => rd
@@ -323,35 +350,42 @@ impl PluginManager {
             };
             files.sort();
             for file in files {
-                match load_plugin(&file, *builtin).await {
-                    Ok(mut p) => {
-                        tracing::info!(id = %p.id, version = %p.version, file = %file.display(), "plugin loaded");
-                        if let Some(old) = by_id.get(&p.id).filter(|old| old.builtin && !p.builtin)
-                        {
-                            let newer = version_newer(&old.version, &p.version).unwrap_or(false);
-                            if newer {
-                                tracing::warn!(
-                                    id = %p.id,
-                                    custom = %p.version,
-                                    builtin = %old.version,
-                                    "custom plugin hides a newer built-in one"
-                                );
-                            }
-                            p.replaces = Some(Replaced {
-                                version: old.version.clone(),
-                                file: old.file.clone(),
-                                newer,
-                            });
+                let code = tokio::fs::read_to_string(&file).await;
+                sources.push((file, *builtin, code));
+            }
+        }
+        for (file, builtin, code) in sources {
+            let loaded = match code {
+                Ok(code) => load_plugin(code, &file, builtin).await,
+                Err(e) => Err(e.into()),
+            };
+            match loaded {
+                Ok(mut p) => {
+                    tracing::info!(id = %p.id, version = %p.version, file = %file.display(), "plugin loaded");
+                    if let Some(old) = by_id.get(&p.id).filter(|old| old.builtin && !p.builtin) {
+                        let newer = version_newer(&old.version, &p.version).unwrap_or(false);
+                        if newer {
+                            tracing::warn!(
+                                id = %p.id,
+                                custom = %p.version,
+                                builtin = %old.version,
+                                "custom plugin hides a newer built-in one"
+                            );
                         }
-                        by_id.insert(p.id.clone(), Arc::new(p));
-                    }
-                    Err(e) => {
-                        tracing::warn!(file = %file.display(), "plugin failed to load: {e:#}");
-                        errors.push(LoadError {
-                            file,
-                            error: format!("{e:#}"),
+                        p.replaces = Some(Replaced {
+                            version: old.version.clone(),
+                            file: old.file.clone(),
+                            newer,
                         });
                     }
+                    by_id.insert(p.id.clone(), Arc::new(p));
+                }
+                Err(e) => {
+                    tracing::warn!(file = %file.display(), "plugin failed to load: {e:#}");
+                    errors.push(LoadError {
+                        file,
+                        error: format!("{e:#}"),
+                    });
                 }
             }
         }
@@ -564,8 +598,7 @@ pub struct Job<'a> {
     pub password: &'a crate::captcha::Password,
 }
 
-async fn load_plugin(file: &Path, builtin: bool) -> Result<Plugin> {
-    let code = tokio::fs::read_to_string(file).await?;
+async fn load_plugin(code: String, file: &Path, builtin: bool) -> Result<Plugin> {
     let meta: Meta = serde_json::from_str(&host::read_meta(&code).await?)?;
     if meta.id.is_empty()
         || !meta
@@ -720,6 +753,34 @@ mod replace_tests {
         let r = p.replaces.as_ref().unwrap();
         assert_eq!((r.version.as_str(), r.newer), ("8", true));
         assert_eq!(r.file, builtin.join("x.js"));
+    }
+
+    /// The binary's own plugins load as built-in ones, the same as from the folder, and a
+    /// custom plugin still overrides them. Skipped if the plugins are not built.
+    #[tokio::test]
+    async fn embedded_plugins_load() {
+        if Embedded::get("mega.js").is_none() {
+            eprintln!("plugins/dist not built, skipping");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("mega.js"),
+            r#"var __plugin = { default: { id: "mega", version: 1, matches: [/x\.test/], async resolve() { return { url: "" }; } } };"#,
+        )
+        .unwrap();
+        let pm = PluginManager::new(vec![(tmp.path().to_path_buf(), false)], None).with_embedded();
+        pm.reload().await;
+        assert!(pm.errors().is_empty(), "{:?}", pm.errors());
+        let one = pm.get("1fichier").unwrap();
+        assert!(one.builtin);
+        assert_eq!(one.file, PathBuf::from("built-in/1fichier.js"));
+        let mega = pm.get("mega").unwrap();
+        assert!(!mega.builtin);
+        assert_eq!(
+            mega.replaces.as_ref().unwrap().file,
+            PathBuf::from("built-in/mega.js")
+        );
     }
 
     /// Every built plugin loads in the real host: valid meta, and link patterns the Rust regex
