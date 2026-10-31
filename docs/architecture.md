@@ -250,7 +250,7 @@ language you pick later. Details for contributors are in [Development](developme
 
 `docker/Dockerfile` has three stages:
 
-1. **web** (Node 22): builds the plugins and the UI.
+1. **web** (Node 26): builds the plugins and the UI.
 2. **server** (Rust): builds the `haul` binary with the UI embedded.
 3. **runtime** (Debian slim): the binary, the plugins in `/app/plugins`, `7z` and `unrar`.
 

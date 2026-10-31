@@ -183,7 +183,7 @@ The full documentation, with search, is at **[firsttris.github.io/haul](https://
 
 ## 🛠️ Development
 
-Requires Rust (stable), Node.js 22 and pnpm.
+Requires Rust (stable), Node.js 26 and pnpm.
 
 ```bash
 git clone https://github.com/firsttris/haul

@@ -9,7 +9,7 @@
 
 ## Setup
 
-Requirements: Rust (stable), Node.js 22, pnpm, and for extraction `7zip` and `unrar`
+Requirements: Rust (stable), Node.js 26, pnpm, and for extraction `7zip` and `unrar`
 (Debian/Ubuntu: `sudo apt install 7zip unrar`, unrar is in `non-free`/`multiverse`).
 
 ```bash
