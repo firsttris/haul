@@ -6,44 +6,44 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-aes = "0.8"
-aes-gcm = "0.10"
+aes = "0.9"
+aes-gcm = "0.11"
 anyhow.workspace = true
-argon2 = "0.5"
+argon2 = "0.6"
 async-stream = "0.3"
 axum = { workspace = true, features = ["macros"] }
-axum-extra = { version = "0.10", features = ["cookie"] }
-base64 = "0.22"
+axum-extra = { version = "0.12", features = ["cookie"] }
+base64 = "0.23"
 dotenvy = "0.15"
-cbc = "0.1"
-ctr = "0.9"
+cbc = "0.2"
+ctr = "0.10"
 futures = "0.3"
 governor = "0.10"
 hex = "0.4"
-hmac = "0.12"
-md-5 = "0.10"
+hmac = "0.13"
+md-5 = "0.11"
 libc = "0.2"
 mime_guess = "2"
-num-bigint-dig = "0.8"
+num-bigint-dig = "0.9"
 percent-encoding = "2"
-rand = "0.8"
+rand = "0.10"
 regex = "1"
 reqwest.workspace = true
-reqwest_cookie_store = "0.9"
+reqwest_cookie_store = "0.10"
 cookie_store = "0.22"
 crc32fast = "1"
 rquickjs = { version = "0.14", features = ["futures", "parallel", "macro"] }
 rust-embed = "8"
 serde.workspace = true
 serde_json.workspace = true
-sha1 = "0.10"
-sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+sha1 = "0.11"
+sha2 = "0.11"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 thiserror = "2"
 tokio.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = "0.7"
-tower-http = { version = "0.6", features = ["compression-br", "compression-gzip"] }
+tower-http = { version = "0.7", features = ["compression-br", "compression-gzip"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 time = "0.3"

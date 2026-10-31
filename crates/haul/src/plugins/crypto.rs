@@ -3,7 +3,7 @@
 //! account): PBKDF2-SHA512 (v2 accounts), MEGA's old password key (v1), AES encryption, RSA
 //! (modular power) for the session id, and the Hashcash proof of work.
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use hmac::{Hmac, Mac};
@@ -61,7 +61,9 @@ pub fn run(op: &str, args: &Value) -> Result<String> {
                         *b ^= p;
                     }
                 }
-                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+                cipher.encrypt_block(
+                    <&mut aes::Block>::try_from(&mut *block).expect("16-byte block"),
+                );
                 if cbc {
                     prev.copy_from_slice(block);
                 }
@@ -132,13 +134,14 @@ pub fn pbkdf2_sha512(password: &[u8], salt: &[u8], iterations: u32, length: usiz
     let mut out = Vec::with_capacity(length);
     let mut block = 1u32;
     while out.len() < length {
-        let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(password).expect("any key length");
+        let mut mac = <Hmac<Sha512> as KeyInit>::new_from_slice(password).expect("any key length");
         mac.update(salt);
         mac.update(&block.to_be_bytes());
         let mut u = mac.finalize().into_bytes();
         let mut t = u;
         for _ in 1..iterations {
-            let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(password).expect("any key length");
+            let mut mac =
+                <Hmac<Sha512> as KeyInit>::new_from_slice(password).expect("any key length");
             mac.update(&u);
             u = mac.finalize().into_bytes();
             for (a, b) in t.iter_mut().zip(u.iter()) {
@@ -173,7 +176,7 @@ pub fn mega_prepare_key(password: &[u8]) -> [u8; 16] {
     for _ in 0..0x10000 {
         for c in &ciphers {
             // CBC with a zero IV over one block = one AES encryption.
-            c.encrypt_block(GenericArray::from_mut_slice(&mut key));
+            c.encrypt_block(<&mut aes::Block>::try_from(&mut key[..]).expect("16-byte block"));
         }
     }
     key
@@ -194,7 +197,7 @@ pub fn mega_user_hash_v1(email: &[u8], key: &[u8; 16]) -> String {
     }
     let cipher = aes::Aes128::new(&(*key).into());
     for _ in 0..0x4000 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(&mut hash));
+        cipher.encrypt_block(<&mut aes::Block>::try_from(&mut hash[..]).expect("16-byte block"));
     }
     let mut out = Vec::with_capacity(8);
     out.extend_from_slice(&hash[0..4]);

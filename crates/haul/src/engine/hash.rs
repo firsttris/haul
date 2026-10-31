@@ -5,7 +5,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
@@ -109,7 +109,7 @@ fn mega_mac(path: &Path, key: &[u8]) -> std::io::Result<[u8; 8]> {
         return Err(std::io::Error::other("MEGA key must be 32 bytes"));
     }
     let k: Vec<u8> = (0..16).map(|i| key[i] ^ key[16 + i]).collect();
-    let aes = aes::Aes128::new(GenericArray::from_slice(&k));
+    let aes = aes::Aes128::new_from_slice(&k).expect("16-byte key");
     let mut iv = [0u8; 16];
     iv[..8].copy_from_slice(&key[16..24]);
     iv[8..].copy_from_slice(&key[16..24]);
@@ -125,12 +125,12 @@ fn mega_mac(path: &Path, key: &[u8]) -> std::io::Result<[u8; 8]> {
             for (m, b) in mac.iter_mut().zip(block) {
                 *m ^= b;
             }
-            aes.encrypt_block(GenericArray::from_mut_slice(&mut mac));
+            aes.encrypt_block(<&mut aes::Block>::try_from(&mut mac[..]).expect("16-byte block"));
         }
         for (f, m) in file_mac.iter_mut().zip(mac) {
             *f ^= m;
         }
-        aes.encrypt_block(GenericArray::from_mut_slice(&mut file_mac));
+        aes.encrypt_block(<&mut aes::Block>::try_from(&mut file_mac[..]).expect("16-byte block"));
     }
     let mut out = [0u8; 8];
     for i in 0..4 {

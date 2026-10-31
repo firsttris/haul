@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+use aes::cipher::{block_padding::NoPadding, BlockModeDecrypt, KeyIvInit};
 use anyhow::{anyhow, Result};
 use axum::extract::{Form, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
@@ -42,8 +42,9 @@ pub fn decrypt_cnl2(crypted: &str, jk: &str) -> Result<Vec<String>> {
         .map_err(|e| anyhow!(crate::msg!("server_cnl_notBase64", error = e)))?;
     let usable = data.len() - data.len() % 16;
     data.truncate(usable);
-    let plain = Aes128CbcDec::new(key.as_slice().into(), key.as_slice().into())
-        .decrypt_padded_mut::<NoPadding>(&mut data)
+    let plain = Aes128CbcDec::new_from_slices(&key, &key)
+        .map_err(|_| anyhow!(crate::msg!("server_cnl_decryptFailed")))?
+        .decrypt_padded::<NoPadding>(&mut data)
         .map_err(|_| anyhow!(crate::msg!("server_cnl_decryptFailed")))?;
     let text = String::from_utf8_lossy(plain).replace('\0', "");
     Ok(parse_links(&text))
@@ -225,7 +226,7 @@ pub fn router<S: Clone + Send + Sync + 'static>(engine: Arc<Engine>) -> Router<S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes::cipher::BlockEncryptMut;
+    use aes::cipher::BlockModeEncrypt;
 
     type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
 
@@ -272,7 +273,7 @@ mod tests {
         buf.resize(buf.len().div_ceil(16) * 16, 0);
         let len = buf.len();
         let ct = Aes128CbcEnc::new(&key.into(), &key.into())
-            .encrypt_padded_mut::<NoPadding>(&mut buf, len)
+            .encrypt_padded::<NoPadding>(&mut buf, len)
             .unwrap()
             .to_vec();
         let crypted = base64::engine::general_purpose::STANDARD.encode(ct);

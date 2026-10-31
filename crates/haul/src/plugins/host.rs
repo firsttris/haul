@@ -143,9 +143,7 @@ fn looks_like_file(headers: &reqwest::header::HeaderMap) -> bool {
 /// `ctx.crypto.aesDecrypt`: AES-128 ECB or CBC without padding, hex in and out (mega.nz keys
 /// and attributes; QuickJS has no crypto).
 fn aes_decrypt(raw: &str) -> Result<String> {
-    use aes::cipher::{
-        generic_array::GenericArray, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit,
-    };
+    use aes::cipher::{BlockCipherDecrypt, BlockModeDecrypt, KeyInit, KeyIvInit};
     #[derive(Deserialize)]
     struct Req {
         mode: String,
@@ -166,7 +164,7 @@ fn aes_decrypt(raw: &str) -> Result<String> {
         "ecb" => {
             let cipher = aes::Aes128::new(&key.into());
             for block in data.chunks_mut(16) {
-                cipher.decrypt_block(GenericArray::from_mut_slice(block));
+                cipher.decrypt_block(<&mut aes::Block>::try_from(block).expect("16-byte block"));
             }
         }
         "cbc" => {
@@ -178,7 +176,7 @@ fn aes_decrypt(raw: &str) -> Result<String> {
             };
             let mut dec = cbc::Decryptor::<aes::Aes128>::new(&key.into(), &iv.into());
             for block in data.chunks_mut(16) {
-                dec.decrypt_block_mut(GenericArray::from_mut_slice(block));
+                dec.decrypt_block(<&mut aes::Block>::try_from(block).expect("16-byte block"));
             }
         }
         other => return Err(anyhow!("unknown mode {other}")),
