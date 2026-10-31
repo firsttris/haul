@@ -1,3 +1,6 @@
+// The test helpers run in Node; the SDK itself runs in QuickJS, so only these files see Node's types
+// (TypeScript 7 no longer includes @types packages on its own).
+/// <reference types="node" />
 /**
  * A fake `ctx` for unit-testing plugins in Node without the Rust core.
  * Routes are matched by `METHOD url` prefix; unmatched requests fail the test.

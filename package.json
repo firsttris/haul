@@ -2,7 +2,7 @@
   "name": "haul",
   "private": true,
   "license": "AGPL-3.0-only",
-  "packageManager": "pnpm@10.34.9",
+  "packageManager": "pnpm@12.16.1",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:server": "cargo run -p haul",
@@ -16,9 +16,9 @@
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.0",
     "esbuild": "^0.28.0",
-    "typescript": "~5.9.3",
-    "vitest": "^3.2.7"
+    "typescript": "~7.0.0",
+    "vitest": "^5.0.0"
   }
 }

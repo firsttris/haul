@@ -3,5 +3,5 @@ packages:
   - plugins/*
   - ui
   - extension
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  esbuild: true
