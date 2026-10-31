@@ -1,3 +1,6 @@
+// The test helpers run in Node; the SDK itself runs in QuickJS, so only these files see Node's types
+// (TypeScript 7 no longer includes @types packages on its own).
+/// <reference types="node" />
 import { describe, expect, it } from 'vitest';
 import { base64Decode, bilingual, cookiesFrom, findCaptcha, importCookies, OfflineError, parseCookieExport, pickLang, decodeHtml, match, parseForms, parseSize, recaptchaKeyInCode, resolveUrl, sha1Hex } from './index';
 import { fakeCtx } from './testing';

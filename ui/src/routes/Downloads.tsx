@@ -3,10 +3,11 @@ import { Link } from '@tanstack/react-router';
 import { useMutation } from '@tanstack/react-query';
 import {
   createColumnHelper,
+  createExpandedRowModel,
   flexRender,
-  getCoreRowModel,
-  getExpandedRowModel,
-  useReactTable,
+  rowExpandingFeature,
+  tableFeatures,
+  useTable,
   type ExpandedState,
 } from '@tanstack/react-table';
 import { post, api, type Download, type Package } from '../api';
@@ -40,7 +41,9 @@ function progressOf(d: Download, live: Map<number, LiveProgress>) {
   return { done, size, speed: l?.speed ?? 0 };
 }
 
-const col = createColumnHelper<Row>();
+// TanStack Table 9 exposes only the features registered here: packages expand into their downloads.
+const features = tableFeatures({ rowExpandingFeature, expandedRowModel: createExpandedRowModel() });
+const col = createColumnHelper<typeof features, Row>();
 
 export function DownloadsPage() {
   const { data: packages = [], isPending } = usePackages('queue');
@@ -188,15 +191,14 @@ export function DownloadsPage() {
     [live.items, action, remove, captchaLinks],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features,
     data: rows,
     columns,
     state: { expanded },
     onExpandedChange: setExpanded,
     getSubRows: (r) => (r.kind === 'pkg' ? r.children : undefined),
     getRowId: (r) => (r.kind === 'pkg' ? `p${r.pkg.id}` : `d${r.d.id}`),
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
   });
 
   const active = counts.active;
@@ -333,7 +335,7 @@ export function DownloadsPage() {
                 />
               ) : (
                 <div className="trow" role="row" key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <div key={cell.id} role="cell" style={{ minWidth: 0 }}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </div>

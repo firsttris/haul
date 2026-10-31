@@ -13,5 +13,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0"
   }
 }
