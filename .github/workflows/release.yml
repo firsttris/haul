@@ -16,7 +16,7 @@ jobs:
   # Whether main's CI already tested this code: the "Bump version" commit only changes the
   # version, so the green CI of the commit before it counts and the checks are not run again
   tested:
-    uses: firsttris/workflows/.github/workflows/tested-on-main.yml@ccr-161f105b-9ns022
+    uses: firsttris/workflows/.github/workflows/tested-on-main.yml@v1
     permissions:
       actions: read
       contents: read
