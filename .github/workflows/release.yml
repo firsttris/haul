@@ -44,9 +44,9 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: pnpm
@@ -69,7 +69,7 @@ jobs:
           ./pack/haul --version
           tar -czf "out/haul-linux-$ARCH.tar.gz" -C pack .
           (cd out && sha256sum "haul-linux-$ARCH.tar.gz" > "haul-linux-$ARCH.tar.gz.sha256")
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: haul-linux-${{ matrix.arch }}
           path: out/*
@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: haul-linux-*
           merge-multiple: true
