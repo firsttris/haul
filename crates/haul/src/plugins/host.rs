@@ -12,9 +12,7 @@ use reqwest::header::HeaderValue;
 use reqwest::Client;
 use reqwest_cookie_store::CookieStoreMutex;
 use rquickjs::prelude::{Async, Func};
-use rquickjs::{
-    async_with, AsyncContext, AsyncRuntime, CatchResultExt, Context, Function, Promise, Runtime,
-};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Context, Function, Promise, Runtime};
 use serde::{Deserialize, Serialize};
 
 const PRELUDE: &str = include_str!("prelude.js");
@@ -384,7 +382,7 @@ pub async fn read_meta(code: &str) -> Result<String> {
     rt.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)))
         .await;
     let code = code.to_string();
-    async_with!(ctx => |ctx| {
+    ctx.async_with(async |ctx| {
         let run = || -> rquickjs::Result<String> {
             ctx.globals().set("__host_http", Func::from(|| ()))?;
             ctx.globals().set("__host_sleep", Func::from(|| ()))?;
@@ -551,7 +549,7 @@ async fn invoke_inner(
     let args = args.to_string();
     let env = env.to_string();
     let clients = Arc::new(clients);
-    let out = async_with!(ctx => |ctx| {
+    let out = ctx.async_with(async |ctx| {
         let setup = || -> rquickjs::Result<Promise> {
             let g = ctx.globals();
             let (c, key) = (clients.clone(), page_key.clone());
