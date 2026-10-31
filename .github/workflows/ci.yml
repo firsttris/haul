@@ -100,7 +100,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: firsttris/workflows/actions/docker-build@ccr-161f105b-9ns022
+      - uses: firsttris/workflows/actions/docker-build@v1
         with:
           dockerfile: docker/Dockerfile
           tags: haul:ci
