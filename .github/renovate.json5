@@ -1,17 +1,16 @@
 // Renovate (GitHub App, https://github.com/apps/renovate): a pull request for each new release of
-// what Haul builds on, plus the "Dependency Dashboard" issue listing what is open.
-// Only those: QuickJS through rquickjs (every hoster plugin and the CNL2 snippets run in it), Node
-// (image, CI and the requirements the docs state) and the cargo-chef of the image. The other crates,
-// the npm packages and the actions are not tracked here; Rust (rust:1-bookworm, dtolnay stable)
-// and the Debian images float on purpose and are rebuilt by CI's weekly run. Check with
-// `npx --package renovate renovate-config-validator .github/renovate.json5`.
+// what Haul builds on, plus the "Dependency Dashboard" issue listing what is open. Their own pull
+// requests: QuickJS through rquickjs (every hoster plugin and the CNL2 snippets run in it), Node
+// (image, CI and the requirements the docs state) and the cargo-chef of the image. Rust
+// (rust:1-bookworm, dtolnay stable) and the Debian images float on purpose and are rebuilt by CI's
+// weekly run.
+// Everything else (the other packages, the actions, the images) comes with the shared settings of
+// firsttris/workflows (renovate/default.json5): minor and patch updates once a month in one pull
+// request that merges itself when CI is green, majors on request in the dashboard.
+// Check with `npx --package renovate renovate-config-validator .github/renovate.json5`.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["config:recommended"],
-  enabledManagers: ["dockerfile", "cargo", "npm", "custom.regex"],
-  timezone: "Europe/Berlin",
-  labels: ["dependencies"],
-  automerge: false,
+  extends: ["github>firsttris/workflows//renovate/default.json5"],
   customManagers: [
     {
       // The Node of CI, the extension build, the hoster probe and the release binaries
@@ -42,11 +41,6 @@
   ],
   packageRules: [
     {
-      // From the package managers only rquickjs and @types/node (below)
-      matchManagers: ["cargo", "npm"],
-      enabled: false,
-    },
-    {
       // Rust and Debian float on purpose (rust:1-bookworm, debian:bookworm-slim); a move to the
       // next Debian is a change of all three stages by hand. Haul's own image moves with its
       // releases.
@@ -64,6 +58,9 @@
       prBodyNotes: [
         "Every hoster plugin runs in it (`crates/haul/src/plugins/`), and the CNL2 `jk` snippet in its own runtime without host functions (docs/click-n-load.md). Before merging: read rquickjs' CHANGELOG for API changes and the QuickJS version it bundles; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` (the plugin host and CNL tests) must be green; the plugins are bundled for `es2020` (scripts/build-plugins.mjs). Then run **Actions → Hoster probe → Run workflow** on this branch: its pull-request trigger does not fire for Cargo.toml.",
       ],
+      schedule: ["at any time"],
+      automerge: false,
+      dependencyDashboardApproval: false,
     },
     {
       // Node of the image's web stage, CI, the docs and its types, in one PR so they stay on one major
@@ -74,6 +71,9 @@
       prBodyNotes: [
         "The image's `web` stage (`node:<major>-bookworm-slim`), `node-version` in every workflow, `@types/node` of the UI and the requirement in README.md and docs/ move together. CI's docker job builds the image when the Dockerfile changes; `pnpm build` builds the plugins and the UI.",
       ],
+      schedule: ["at any time"],
+      automerge: false,
+      dependencyDashboardApproval: false,
     },
     {
       // The types follow the image's major; their own patches are not worth a PR
