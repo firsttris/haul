@@ -1,0 +1,90 @@
+// Renovate (GitHub App, https://github.com/apps/renovate): a pull request for each new release of
+// what Haul builds on, plus the "Dependency Dashboard" issue listing what is open.
+// Only those: QuickJS through rquickjs (every hoster plugin and the CNL2 snippets run in it), Node
+// (image, CI and the requirements the docs state) and the cargo-chef of the image. The other crates,
+// the npm packages and the actions are not tracked here; Rust (rust:1-bookworm, dtolnay stable)
+// and the Debian images float on purpose and are rebuilt by CI's weekly run. Check with
+// `npx --package renovate renovate-config-validator .github/renovate.json5`.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  enabledManagers: ["dockerfile", "cargo", "npm", "custom.regex"],
+  timezone: "Europe/Berlin",
+  labels: ["dependencies"],
+  automerge: false,
+  customManagers: [
+    {
+      // The Node of CI, the extension build, the hoster probe and the release binaries
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      matchStrings: ["node-version: (?<currentValue>\\d+)\\n"],
+      depNameTemplate: "node",
+      datasourceTemplate: "node-version",
+      versioningTemplate: "node",
+    },
+    {
+      // The Node major the docs ask for (README, development, plugins-with-claude, architecture)
+      customType: "regex",
+      managerFilePatterns: ["/^README\\.md$/", "/^docs/(development|plugins-with-claude|architecture)\\.md$/"],
+      matchStrings: ["Node\\.js (?<currentValue>\\d+)\\b", "\\(Node (?<currentValue>\\d+)\\)"],
+      depNameTemplate: "node",
+      datasourceTemplate: "node-version",
+      versioningTemplate: "node",
+    },
+    {
+      // `cargo install cargo-chef --version x.y.z` in docker/Dockerfile
+      customType: "regex",
+      managerFilePatterns: ["/^docker/Dockerfile$/"],
+      matchStrings: ["cargo install cargo-chef --version (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      depNameTemplate: "cargo-chef",
+      datasourceTemplate: "crate",
+    },
+  ],
+  packageRules: [
+    {
+      // From the package managers only rquickjs and @types/node (below)
+      matchManagers: ["cargo", "npm"],
+      enabled: false,
+    },
+    {
+      // Rust and Debian float on purpose (rust:1-bookworm, debian:bookworm-slim); a move to the
+      // next Debian is a change of all three stages by hand. Haul's own image moves with its
+      // releases.
+      matchPackageNames: ["rust", "debian", "docker.io/tristanteu/**", "tristanteu/**"],
+      enabled: false,
+    },
+    {
+      // The plugin host: rquickjs is 0.x, so every minor can change its API
+      matchManagers: ["cargo"],
+      matchPackageNames: ["rquickjs"],
+      enabled: true,
+      groupName: "QuickJS (rquickjs)",
+      sourceUrl: "https://github.com/DelSkayn/rquickjs",
+      commitMessageTopic: "rquickjs",
+      prBodyNotes: [
+        "Every hoster plugin runs in it (`crates/haul/src/plugins/`), and the CNL2 `jk` snippet in its own runtime without host functions (docs/click-n-load.md). Before merging: read rquickjs' CHANGELOG for API changes and the QuickJS version it bundles; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` (the plugin host and CNL tests) must be green; the plugins are bundled for `es2020` (scripts/build-plugins.mjs). Then run **Actions → Hoster probe → Run workflow** on this branch: its pull-request trigger does not fire for Cargo.toml.",
+      ],
+    },
+    {
+      // Node of the image's web stage, CI, the docs and its types, in one PR so they stay on one major
+      matchPackageNames: ["node", "@types/node"],
+      enabled: true,
+      groupName: "Node",
+      sourceUrl: "https://github.com/nodejs/node",
+      prBodyNotes: [
+        "The image's `web` stage (`node:<major>-bookworm-slim`), `node-version` in every workflow, `@types/node` of the UI and the requirement in README.md and docs/ move together. CI's docker job builds the image when the Dockerfile changes; `pnpm build` builds the plugins and the UI.",
+      ],
+    },
+    {
+      // The types follow the image's major; their own patches are not worth a PR
+      matchPackageNames: ["@types/node"],
+      matchUpdateTypes: ["minor", "patch"],
+      enabled: false,
+    },
+    {
+      matchPackageNames: ["cargo-chef"],
+      sourceUrl: "https://github.com/LukeMathWalker/cargo-chef",
+      commitMessageTopic: "cargo-chef",
+    },
+  ],
+}
