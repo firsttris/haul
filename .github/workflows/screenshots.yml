@@ -30,7 +30,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # A C compiler for the Rust build, curl for rustup, 7-Zip and unrar for the extraction
       - name: Build tools
         run: apt-get update && apt-get install -y --no-install-recommends build-essential curl 7zip unrar
