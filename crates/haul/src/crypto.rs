@@ -1,11 +1,12 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Result};
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 /// Encrypts account secrets at rest. The key is derived from `APP_SECRET`, so the
@@ -25,10 +26,10 @@ impl SecretBox {
 
     pub fn encrypt(&self, plain: &str) -> Result<String> {
         let mut nonce = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce);
+        rand::rng().fill_bytes(&mut nonce);
         let ct = self
             .cipher
-            .encrypt(Nonce::from_slice(&nonce), plain.as_bytes())
+            .encrypt(&Nonce::from(nonce), plain.as_bytes())
             .map_err(|_| anyhow!("encryption failed"))?;
         let mut out = nonce.to_vec();
         out.extend(ct);
@@ -43,7 +44,7 @@ impl SecretBox {
         let (nonce, ct) = raw.split_at(12);
         let plain = self
             .cipher
-            .decrypt(Nonce::from_slice(nonce), ct)
+            .decrypt(&Nonce::try_from(nonce).expect("12-byte nonce"), ct)
             .map_err(|_| anyhow!(crate::msg!("server_crypto_cannotDecrypt")))?;
         Ok(String::from_utf8(plain)?)
     }
@@ -51,7 +52,7 @@ impl SecretBox {
 
 pub fn random_token() -> String {
     let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     hex::encode(buf)
 }
 
@@ -60,9 +61,9 @@ pub fn sha256_hex(s: &str) -> String {
 }
 
 pub fn hash_password(password: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
+    // A random salt from the OS.
     Ok(Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| anyhow!("{e}"))?
         .to_string())
 }

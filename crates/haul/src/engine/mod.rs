@@ -1132,7 +1132,8 @@ impl Engine {
     pub async fn ids_with_status(&self, statuses: &[&str]) -> Result<Vec<i64>> {
         let placeholders = vec!["?"; statuses.len()].join(",");
         let sql = format!("SELECT id FROM downloads WHERE status IN ({placeholders})");
-        let mut q = sqlx::query_scalar(&sql);
+        // Only "?" placeholders are put into the SQL.
+        let mut q = sqlx::query_scalar(sqlx::AssertSqlSafe(sql));
         for s in statuses {
             q = q.bind(*s);
         }
