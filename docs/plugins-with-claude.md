@@ -39,7 +39,7 @@ pnpm build:plugins && cargo build -p haul   # once, so the probe is ready
 claude
 ```
 
-The requirements are those of [Development](development.md#setup): Rust, Node.js 22 and pnpm.
+The requirements are those of [Development](development.md#setup): Rust, Node.js 26 and pnpm.
 
 ## Writing a plugin
 

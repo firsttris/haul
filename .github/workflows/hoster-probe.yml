@@ -62,7 +62,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: ${{ !steps.cases.outputs.skip }}
         with:
-          node-version: 22
+          node-version: 26
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ !steps.cases.outputs.skip }}
