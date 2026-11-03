@@ -18,12 +18,12 @@ jobs:
       - id: playwright
         uses: firsttris/workflows/actions/playwright-image@v1
         with:
-          lockfile: pnpm-lock.yaml
+          lockfile: bun.lock
 
   screenshots:
     needs: image
     runs-on: ubuntu-latest
-    # The browser and its fonts of the @playwright/test version in pnpm-lock.yaml
+    # The browser and its fonts of the @playwright/test version in bun.lock
     container:
       image: ${{ needs.image.outputs.image }}
       options: --ipc=host
@@ -38,17 +38,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: screenshots
+      # The npm package brings the Bun of packageManager without unzip, which the image lacks.
+      # node reads the version: the image has no jq. Its own line, so a failure stops the step.
       - name: Install
         run: |
-          npm install --global corepack@latest
-          corepack enable
-          pnpm install --frozen-lockfile
+          version=$(node -p 'require("./package.json").packageManager.split("@")[1]')
+          npm install --global "bun@$version"
+          bun install --frozen-lockfile
       - name: Build
         run: |
-          pnpm build
+          bun run build
           cargo build --release -p haul
       - name: Take the screenshots
-        run: pnpm screenshots
+        run: bun run screenshots
       - uses: firsttris/workflows/actions/commit-changes@v1
         with:
           paths: |

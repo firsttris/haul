@@ -24,12 +24,12 @@ pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {
     match Assets::get("index.html") {
         Some(index) => embedded(&headers, index, "text/html; charset=utf-8", "no-cache"),
         None => match std::env::var("HAUL_DEV_UI").ok().filter(|v| !v.is_empty()) {
-            // `pnpm dev`: the UI is served by Vite; send the browser there.
+            // `bun run dev`: the UI is served by Vite; send the browser there.
             Some(dev) => Redirect::temporary(&format!("{}{}", dev.trim_end_matches('/'), uri))
                 .into_response(),
             None => (
                 StatusCode::NOT_FOUND,
-                "UI not built. Run `pnpm build`, or use `pnpm dev` and open http://localhost:5173.",
+                "UI not built. Run `bun run build`, or use `bun run dev` and open http://localhost:5173.",
             )
                 .into_response(),
         },

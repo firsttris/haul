@@ -61,7 +61,7 @@ the build and the server pick it up on their own, no registration elsewhere):
 ```
 
 `src/index.ts` with `export default definePlugin({ ... })`, and `test/<name>.test.ts`.
-Run `pnpm install` once afterwards so the workspace links `@haul/plugin-sdk`.
+Run `bun install` once afterwards so the workspace links `@haul/plugin-sdk`.
 
 ## 3. Rules of the runtime (QuickJS, not Node)
 
@@ -101,10 +101,10 @@ hoster has it. Assert on the forms and headers the plugin sends, not only on the
 ## 5. Checks before you are done
 
 ```bash
-pnpm vitest run plugins/<name>  # the plugin's tests (pnpm test runs everything)
-pnpm typecheck
-pnpm build:plugins              # must bundle without warnings → plugins/dist/<name>.js
-cargo test --workspace          # if the Rust side or the SDK prelude was touched
+bun --bun vitest run plugins/<name>  # the plugin's tests (bun run test runs everything)
+bun run typecheck
+bun run build:plugins                # must bundle without warnings → plugins/dist/<name>.js
+cargo test --workspace               # if the Rust side or the SDK prelude was touched
 ```
 
 ## 5a. Working against the real hoster
@@ -132,14 +132,14 @@ it), develop against it, not only against guessed pages:
    check, resolve, download, compare name, size and checksum):
 
    ```bash
-   pnpm build:plugins && cargo build -p haul
+   bun run build:plugins && cargo build -p haul
    ./target/debug/haul probe --secrets ~/.haul-probe/links.json --only <case> .github/hoster-probe.json
    ```
 
 4. Read `probe-out/summary.md`, and for a failed case `probe-out/haul.log` and the pages the
    hoster sent in `probe-out/`. Turn every new page into a test, fix, repeat until the case is
    `ok`. `captcha` means the plugin got as far as a captcha: finish that path by hand with
-   `pnpm dev` (http://localhost:5173, `admin` / `adminadmin`), adding the link in the UI and
+   `bun run dev` (http://localhost:5173, `admin` / `adminadmin`), adding the link in the UI and
    solving the captcha in the browser. `blocked` means the hoster turned the network away, not
    that the plugin is wrong. Statuses and case fields: "Testing on real hosters" in
    `docs/plugins.md`.
@@ -211,6 +211,6 @@ Rules:
 ## 8. A plugin only for one server
 
 For a user who wants a plugin without contributing it: same files and tests, then
-`pnpm build:plugins`, copy `plugins/dist/<name>.js` to the server's `/config/plugins/`, and click
+`bun run build:plugins`, copy `plugins/dist/<name>.js` to the server's `/config/plugins/`, and click
 **Reload** under **Accounts & plugins**. No new image is needed. A plugin there with the `id` of a
 built-in one replaces it.

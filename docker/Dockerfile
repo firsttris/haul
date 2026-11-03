@@ -1,18 +1,17 @@
 # syntax=docker/dockerfile:1
 
 # ---- 1. UI and plugins ---------------------------------------------------------------
-FROM node:26-bookworm-slim AS web
+FROM oven/bun:1.4.4 AS web
 WORKDIR /src
-# Node 25+ no longer ships corepack, so it comes from npm.
-RUN npm install --global corepack@latest && corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-# Every workspace package has to be there for the install, or pnpm does not link
+COPY package.json bun.lock bunfig.toml tsconfig.base.json ./
+# Every workspace package has to be there for the install, or Bun does not link
 # @haul/plugin-sdk into the plugins that the build then bundles.
 COPY scripts scripts
 COPY packages packages
 COPY plugins plugins
 COPY ui ui
-RUN pnpm install --frozen-lockfile && pnpm build
+COPY extension/package.json extension/package.json
+RUN bun install --frozen-lockfile && bun run build
 
 # ---- 2. Server binary (UI embedded via rust-embed) ------------------------------------
 # cargo-chef splits the build: the dependencies are cooked from a recipe of the manifests alone,

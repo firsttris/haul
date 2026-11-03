@@ -34,12 +34,12 @@ from a cloud sandbox or a data centre.
 ```bash
 git clone https://github.com/firsttris/haul
 cd haul
-pnpm install
-pnpm build:plugins && cargo build -p haul   # once, so the probe is ready
+bun install
+bun run build:plugins && cargo build -p haul   # once, so the probe is ready
 claude
 ```
 
-The requirements are those of [Development](development.md#setup): Rust, Node.js 26 and pnpm.
+The requirements are those of [Development](development.md#setup): Rust and Bun.
 
 ## Writing a plugin
 
@@ -58,8 +58,8 @@ The skill can also be called by name with `/hoster-plugin`. The agent then:
 1. picks the closest existing plugin (XFileSharing sites need only configuration, see
    `plugins/ddownload`) and reads JDownloader's and pyLoad's plugin for the hoster;
 2. fetches the hoster's pages and turns trimmed copies into test fixtures;
-3. writes `plugins/<name>/` with its tests, and runs `pnpm vitest run plugins/<name>`,
-   `pnpm typecheck` and `pnpm build:plugins`;
+3. writes `plugins/<name>/` with its tests, and runs `bun --bun vitest run plugins/<name>`,
+   `bun run typecheck` and `bun run build:plugins`;
 4. tries it on the real hoster with `haul probe` (see [Testing on real hosters](plugins.md#testing-on-real-hosters)):
    check, resolve, download, compare name, size and checksum; every page that surprises it
    becomes a new test, until the case is `ok`;
@@ -83,7 +83,7 @@ first, then fixes the plugin and raises its `version`.
 | **A test file** | every hoster gets the same test file, `haul-probe.bin` as described by `*` in [`.github/hoster-probe.json`](https://github.com/firsttris/haul/blob/main/.github/hoster-probe.json). Keep it in `~/.haul-probe/haul-probe.bin`. The agent can upload it itself (asking first), or you upload it and give it the link; for a hoster with folders, a folder with two files. |
 | **The links** | in `~/.haul-probe/links.json`, outside the repository: `{"PROBE_EXAMPLE": "https://…"}`, or a whole case with an account: `{"PROBE_EXAMPLE": "{\"url\": \"…\", \"account\": {\"user\": \"…\", \"secret\": \"…\"}}"}` |
 | **An account** | only if the hoster needs one for what the plugin should do (premium, uploads) |
-| **Captchas** | the agent stops at a captcha and asks you to solve it, in your browser or in Haul (`pnpm dev`) |
+| **Captchas** | the agent stops at a captcha and asks you to solve it, in your browser or in Haul (`bun run dev`) |
 
 ## With a browser (Playwright MCP)
 
@@ -110,8 +110,8 @@ google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.haul-chrome"
 Then add both to Claude Code:
 
 ```bash
-claude mcp add playwright-headless -- npx @playwright/mcp@latest --headless --isolated
-claude mcp add playwright-chrome -- npx @playwright/mcp@latest --cdp-endpoint http://localhost:9222
+claude mcp add playwright-headless -- bunx @playwright/mcp@latest --headless --isolated
+claude mcp add playwright-chrome -- bunx @playwright/mcp@latest --cdp-endpoint http://localhost:9222
 ```
 
 Tell the agent which is which if the names do not say it.

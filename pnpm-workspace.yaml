@@ -1,7 +1,0 @@
-packages:
-  - packages/*
-  - plugins/*
-  - ui
-  - extension
-allowBuilds:
-  esbuild: true

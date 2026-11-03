@@ -145,7 +145,7 @@ Texts for the account form (`account.userLabel`, `secretLabel`, `help`) take a s
 ## Building and installing
 
 ```bash
-pnpm build:plugins        # → plugins/dist/<name>.js
+bun run build:plugins     # → plugins/dist/<name>.js
 ```
 
 Put your own or updated plugins into `/config/plugins/` and click **Reload** under
@@ -207,7 +207,7 @@ Locally, with the links in a JSON file of their own (`{"PROBE_DDOWNLOAD": "https
 it out of the repository), or with a cases file that has `url`s itself:
 
 ```bash
-pnpm build:plugins && cargo build -p haul
+bun run build:plugins && cargo build -p haul
 ./target/debug/haul probe --secrets links.json .github/hoster-probe.json
 ./target/debug/haul probe --secrets links.json --only ddownload .github/hoster-probe.json
 ```

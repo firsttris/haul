@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Send links to Haul: right-click menu and Click'n'Load in the browser",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "bun build.ts",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {

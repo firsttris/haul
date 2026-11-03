@@ -259,7 +259,7 @@ pub async fn main(args: &[String]) -> Result<i32> {
     }
     if plugins.list().is_empty() {
         bail!(
-            "no plugins in {} (pnpm build:plugins)",
+            "no plugins in {} (bun run build:plugins)",
             args.plugins.display()
         );
     }

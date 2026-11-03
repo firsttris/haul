@@ -32,20 +32,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 26
-          cache: pnpm
+          bun-version-file: package.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
       - run: shellcheck scripts/install.sh
-      - run: pnpm test
-      - run: pnpm build
+      - run: bun run test
+      - run: bun run build
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -80,7 +78,7 @@ jobs:
           esac
           if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
             docker=true
-          elif git diff --name-only "$from" HEAD | grep -qE '^(docker/|\.dockerignore|Cargo\.lock|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|scripts/)'; then
+          elif git diff --name-only "$from" HEAD | grep -qE '^(docker/|\.dockerignore|Cargo\.lock|package\.json|bun\.lock|bunfig\.toml|tsconfig\.base\.json|scripts/)'; then
             docker=true
           else
             docker=false

@@ -9,17 +9,17 @@
 
 ## Setup
 
-Requirements: Rust (stable), Node.js 26, pnpm, and for extraction `7zip` and `unrar`
+Requirements: Rust (stable), [Bun](https://bun.sh/) 1.4 (the version in `packageManager` of package.json), and for extraction `7zip` and `unrar`
 (Debian/Ubuntu: `sudo apt install 7zip unrar`, unrar is in `non-free`/`multiverse`).
 
 ```bash
 git clone https://github.com/firsttris/haul
 cd haul
-pnpm install
-pnpm dev
+bun install
+bun run dev
 ```
 
-`pnpm dev` creates `.env` from [`.env.example`](https://github.com/firsttris/haul/blob/main/.env.example) on the first run, builds the plugins
+`bun run dev` creates `.env` from [`.env.example`](https://github.com/firsttris/haul/blob/main/.env.example) on the first run, builds the plugins
 and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http://localhost:5173 and log
 in with `admin` / `adminadmin`. Data goes to `./.data`.
 
@@ -33,8 +33,8 @@ environment take precedence. As long as no UI is built into the binary, `HAUL_DE
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-pnpm test          # SDK helpers and hoster plugins against a fake context
-pnpm typecheck
+bun run test       # SDK helpers and hoster plugins against a fake context
+bun run typecheck
 ```
 
 CI runs all of them on every pull request, and weekly on main. It builds the image only when the
@@ -57,15 +57,15 @@ mkdocs serve        # http://localhost:8000
 
 The picture in the README (`docs/screenshot.png`) and the repository's social media image
 (`docs/social-preview.png`, 1280 × 640, uploaded under *Settings → Social preview*, rendered
-from `scripts/social-preview/social-preview.html`) come from `pnpm screenshots`. It starts a
-fresh haul with its own data directory (`scripts/screenshots/serve.mjs`) whose `HTTP_PROXY`
+from `scripts/social-preview/social-preview.html`) come from `bun run screenshots`. It starts a
+fresh haul with its own data directory (`scripts/screenshots/serve.ts`) whose `HTTP_PROXY`
 points at a stand-in for the internet: the linked files are served there with their real sizes,
 each at its own speed, so progress, speed and ETA are real. No hoster accounts and no internet
-are needed. It needs `pnpm build`, `cargo build --release -p haul` and 7-Zip; unrar keeps the
+are needed. It needs `bun run build`, `cargo build --release -p haul` and 7-Zip; unrar keeps the
 "unrar is missing" note out of the picture.
 
 ```bash
-pnpm screenshots
+bun run screenshots
 ```
 
 After a change to the look, run **Actions → Update screenshots → Run workflow**: it takes them
@@ -89,7 +89,7 @@ How the server, the queue, the plugins and the downloads fit together is describ
 
 All texts of the UI and the server live in `ui/messages/{de,en}.json`
 ([Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs)); keys follow
-`area_group_name` (`settings_title`, `server_extract_noSpace`). `pnpm --filter @haul/ui i18n` compiles
+`area_group_name` (`settings_title`, `server_extract_noSpace`). `bun run --filter @haul/ui i18n` compiles
 them to `ui/src/paraglide` (dev, build, typecheck and test do that on their own). Components call them
 directly: `m.settings_title()`, `m.done_confirmDeleteOne({ name, dir: String(dir) })`; a key chosen at
 runtime goes through `pickMsg(msgGroup.disks, id)`. Placeholders are `{name}`, a literal brace is `\{`.
@@ -110,10 +110,10 @@ crates/haul-cnl      Click'n'Load forwarder for the desktop
 packages/plugin-sdk  types, helpers, XFileSharing base, test context for plugins
 plugins/*            hoster plugins, one folder each, with tests
 ui                   web UI
-extension            browser extension for Chrome and Firefox (pnpm build:extension)
+extension            browser extension for Chrome and Firefox (bun run build:extension)
 docker               Dockerfile, Compose file and Podman Quadlet units
 docs                 this documentation (mkdocs.yml, requirements-docs.txt)
-scripts              dev.mjs (pnpm dev), build-plugins.mjs, screenshots/ (pnpm screenshots)
+scripts              dev.ts (bun run dev), build-plugins.ts, screenshots/ (bun run screenshots)
 .github/workflows    CI, extension, docs, screenshots, bump and release
 ```
 
