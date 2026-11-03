@@ -16,7 +16,7 @@ pub use host::{ErrorKind, HttpClients, PluginError};
 
 use crate::db::Account;
 
-/// The plugins built into the binary (`pnpm build:plugins`), for installs without
+/// The plugins built into the binary (`bun run build:plugins`), for installs without
 /// `HAUL_BUILTIN_PLUGINS` (the release binary). Empty when the plugins were not built.
 #[derive(rust_embed::RustEmbed)]
 #[folder = "../../plugins/dist"]

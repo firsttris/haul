@@ -14,7 +14,7 @@ ui/src/paraglide
 # MkDocs build (mkdocs build)
 site/
 
-# Playwright (pnpm screenshots)
+# Playwright (bun run screenshots)
 test-results/
 
 # haul probe (docs/plugins.md, "Testing on real hosters")

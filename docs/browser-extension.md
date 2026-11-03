@@ -32,7 +32,7 @@ addons.mozilla.org:
 - **Any Firefox, until the next restart**: `about:debugging#/runtime/this-firefox` →
   **Load Temporary Add-on…** → pick `manifest.json` from the unzipped folder.
 
-**From source**: `pnpm install && pnpm build:extension` builds `extension/dist/chrome` and
+**From source**: `bun install && bun run build:extension` builds `extension/dist/chrome` and
 `extension/dist/firefox`.
 
 ## Set up

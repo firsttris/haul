@@ -183,13 +183,13 @@ The full documentation, with search, is at **[firsttris.github.io/haul](https://
 
 ## 🛠️ Development
 
-Requires Rust (stable), Node.js 26 and pnpm.
+Requires Rust (stable) and [Bun](https://bun.sh/) 1.4 (the version in `packageManager` of package.json).
 
 ```bash
 git clone https://github.com/firsttris/haul
 cd haul
-pnpm install
-pnpm dev        # server on :8080, UI with hot reload on :5173, login admin / adminadmin
+bun install
+bun run dev    # server on :8080, UI with hot reload on :5173, login admin / adminadmin
 ```
 
 **Stack**: Rust with tokio, axum, reqwest and SQLite · hoster plugins in TypeScript, run in QuickJS
@@ -201,7 +201,7 @@ More in [Architecture](https://firsttris.github.io/haul/architecture.html) and t
 A hoster changed its pages or one is missing? Issues and pull requests are welcome, plugins most of
 all: see [writing plugins](https://firsttris.github.io/haul/plugins.html), or let Claude Code write
 one with the skill in the repository ([Plugins with Claude Code](https://firsttris.github.io/haul/plugins-with-claude.html)).
-Please run `cargo test`, `cargo clippy`, `pnpm test` and `pnpm typecheck` before opening a pull
+Please run `cargo test`, `cargo clippy`, `bun run test` and `bun run typecheck` before opening a pull
 request.
 
 ---
