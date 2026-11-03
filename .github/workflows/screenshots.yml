@@ -49,6 +49,8 @@ jobs:
         run: |
           bun run build
           cargo build --release -p haul
+      # Playwright's runner on Bun (bun --bun playwright test in package.json); Node above only
+      # installs Bun
       - name: Take the screenshots
         run: bun run screenshots
       - uses: firsttris/workflows/actions/commit-changes@v1
