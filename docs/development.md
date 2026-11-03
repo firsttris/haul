@@ -63,6 +63,9 @@ points at a stand-in for the internet: the linked files are served there with th
 each at its own speed, so progress, speed and ETA are real. No hoster accounts and no internet
 are needed. It needs `bun run build`, `cargo build --release -p haul` and 7-Zip; unrar keeps the
 "unrar is missing" note out of the picture.
+Playwright's test runner runs on Bun (`bun --bun playwright test`), so Node is not needed;
+the root `package.json` is `"type": "module"`, since under Bun a CommonJS spec reaches Bun's
+parser with its TypeScript types still in it and fails to load.
 
 ```bash
 bun run screenshots

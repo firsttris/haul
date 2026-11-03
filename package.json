@@ -1,6 +1,7 @@
 {
   "name": "haul",
   "private": true,
+  "type": "module",
   "license": "AGPL-3.0-only",
   "packageManager": "bun@1.4.4",
   "workspaces": [
@@ -18,7 +19,7 @@
     "build:extension": "bun run --filter @haul/extension build",
     "test": "bun run --filter @haul/ui i18n && bun --bun vitest run",
     "typecheck": "bun run --workspaces typecheck",
-    "screenshots": "playwright test -c scripts/screenshots/playwright.config.ts"
+    "screenshots": "bun --bun playwright test -c scripts/screenshots/playwright.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 /**
@@ -7,7 +8,7 @@ import { expect, test } from '@playwright/test';
  * extracted, five downloads run under a 60 MB/s limit, two wait.
  */
 
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = path.join(ROOT, 'docs');
 
 const PACKAGES = [
