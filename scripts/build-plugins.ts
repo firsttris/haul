@@ -1,12 +1,14 @@
 // Bundles every plugin in plugins/<name>/src/index.ts into plugins/dist/<name>.js.
 // The output is a plain script that assigns the plugin to `__plugin`; the Rust core
 // evaluates it in QuickJS.
+// Still esbuild, not Bun.build: Bun.build cannot lower the syntax to es2020 (its own helpers use
+// `??=`, class fields stay as they are) and has no `globalName`, so its IIFE would not hand the
+// plugin to the core.
 import { build } from 'esbuild';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugins');
+const root = join(import.meta.dir, '..', 'plugins');
 const out = join(root, 'dist');
 mkdirSync(out, { recursive: true });
 

@@ -1,4 +1,4 @@
-// The server behind the README picture (pnpm screenshots): a fresh haul with its own data
+// The server behind the README picture (bun run screenshots): a fresh haul with its own data
 // directory, whose downloads go to a stand-in for the internet on 127.0.0.1:8899. haul's HTTP
 // client honors HTTP_PROXY, so every http:// link it fetches ends up here, where the files of
 // FILES are served with their real sizes, each at its own speed, with HEAD and Range like a

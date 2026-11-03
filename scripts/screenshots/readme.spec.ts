@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 /**
- * docs/screenshot.png and docs/social-preview.png: four packages in a haul that serve.mjs
+ * docs/screenshot.png and docs/social-preview.png: four packages in a haul that serve.ts
  * started, downloading from its stand-in for the internet. The photo archive finishes and is
  * extracted, five downloads run under a 60 MB/s limit, two wait.
  */

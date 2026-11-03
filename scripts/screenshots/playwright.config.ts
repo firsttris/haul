@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-// The README picture and the social preview: pnpm screenshots (needs target/release/haul and 7z)
+// The README picture and the social preview: bun run screenshots (needs target/release/haul and 7z)
 export default defineConfig({
   testDir: '.',
   workers: 1,
@@ -19,7 +19,7 @@ export default defineConfig({
     launchOptions: process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {},
   },
   webServer: {
-    command: 'node serve.mjs',
+    command: 'bun serve.ts',
     url: 'http://127.0.0.1:8437/api/auth/state',
     reuseExistingServer: false,
     timeout: 60_000,
