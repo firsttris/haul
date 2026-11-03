@@ -1,34 +1,26 @@
 // Renovate (GitHub App, https://github.com/apps/renovate): a pull request for each new release of
 // what Haul builds on, plus the "Dependency Dashboard" issue listing what is open. Their own pull
-// requests: QuickJS through rquickjs (every hoster plugin and the CNL2 snippets run in it), Node
-// (image, CI and the requirements the docs state) and the cargo-chef of the image. Rust
+// requests: QuickJS through rquickjs (every hoster plugin and the CNL2 snippets run in it), Bun
+// (image, the packageManager CI installs) and the cargo-chef of the image. Rust
 // (rust:1-bookworm, dtolnay stable) and the Debian images float on purpose and are rebuilt by CI's
 // weekly run.
 // Everything else (the other packages, the actions, the images) comes with the shared settings of
 // firsttris/workflows (renovate/default.json5): minor and patch updates once a month in one pull
 // request that merges itself when CI is green, majors on request in the dashboard.
-// Check with `npx --package renovate renovate-config-validator .github/renovate.json5`.
+// Check with `bunx --package renovate renovate-config-validator .github/renovate.json5`.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["github>firsttris/workflows//renovate/default.json5"],
   customManagers: [
     {
-      // The Node of CI, the extension build, the hoster probe and the release binaries
+      // "packageManager": "bun@x.y.z": the Bun of every workflow (bun-version-file, and the
+      // npm-installed Bun of the screenshots job)
       customType: "regex",
-      managerFilePatterns: ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
-      matchStrings: ["node-version: (?<currentValue>\\d+)\\n"],
-      depNameTemplate: "node",
-      datasourceTemplate: "node-version",
-      versioningTemplate: "node",
-    },
-    {
-      // The Node major the docs ask for (README, development, plugins-with-claude, architecture)
-      customType: "regex",
-      managerFilePatterns: ["/^README\\.md$/", "/^docs/(development|plugins-with-claude|architecture)\\.md$/"],
-      matchStrings: ["Node\\.js (?<currentValue>\\d+)\\b", "\\(Node (?<currentValue>\\d+)\\)"],
-      depNameTemplate: "node",
-      datasourceTemplate: "node-version",
-      versioningTemplate: "node",
+      managerFilePatterns: ["/^package\\.json$/"],
+      matchStrings: ['"packageManager": "bun@(?<currentValue>\\d+\\.\\d+\\.\\d+)"'],
+      depNameTemplate: "oven-sh/bun",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^bun-v(?<version>.+)$",
     },
     {
       // `cargo install cargo-chef --version x.y.z` in docker/Dockerfile
@@ -56,20 +48,21 @@
       sourceUrl: "https://github.com/DelSkayn/rquickjs",
       commitMessageTopic: "rquickjs",
       prBodyNotes: [
-        "Every hoster plugin runs in it (`crates/haul/src/plugins/`), and the CNL2 `jk` snippet in its own runtime without host functions (docs/click-n-load.md). Before merging: read rquickjs' CHANGELOG for API changes and the QuickJS version it bundles; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` (the plugin host and CNL tests) must be green; the plugins are bundled for `es2020` (scripts/build-plugins.mjs). Then run **Actions → Hoster probe → Run workflow** on this branch: its pull-request trigger does not fire for Cargo.toml.",
+        "Every hoster plugin runs in it (`crates/haul/src/plugins/`), and the CNL2 `jk` snippet in its own runtime without host functions (docs/click-n-load.md). Before merging: read rquickjs' CHANGELOG for API changes and the QuickJS version it bundles; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` (the plugin host and CNL tests) must be green; the plugins are bundled for `es2020` (scripts/build-plugins.ts, still esbuild). Then run **Actions → Hoster probe → Run workflow** on this branch: its pull-request trigger does not fire for Cargo.toml.",
       ],
       schedule: ["at any time"],
       automerge: false,
       dependencyDashboardApproval: false,
     },
     {
-      // Node of the image's web stage, CI, the docs and its types, in one PR so they stay on one major
-      matchPackageNames: ["node", "@types/node"],
+      // Bun: the image's web stage (oven/bun) and packageManager in package.json in one PR, so CI
+      // tests the Bun the image builds with
+      matchPackageNames: ["docker.io/oven/bun", "oven/bun", "oven-sh/bun"],
       enabled: true,
-      groupName: "Node",
-      sourceUrl: "https://github.com/nodejs/node",
+      groupName: "Bun",
+      sourceUrl: "https://github.com/oven-sh/bun",
       prBodyNotes: [
-        "The image's `web` stage (`node:<major>-bookworm-slim`), `node-version` in every workflow, `@types/node` of the UI and the requirement in README.md and docs/ move together. CI's docker job builds the image when the Dockerfile changes; `pnpm build` builds the plugins and the UI.",
+        "The image's `web` stage (`oven/bun:<version>` in docker/Dockerfile) and `packageManager` in package.json (CI's `bun-version-file` and the screenshots job's `npm install bun@…`) move together. Bun installs, runs the scripts, Vite and Vitest, and bundles the browser extension (`Bun.build`, extension/build.ts); the hoster plugins are still bundled by esbuild. CI's docker job builds the image when the Dockerfile changes; `bun run build` builds the plugins and the UI, `bun run build:extension` the extension.",
       ],
       schedule: ["at any time"],
       automerge: false,
@@ -79,16 +72,6 @@
       matchPackageNames: ["cargo-chef"],
       sourceUrl: "https://github.com/LukeMathWalker/cargo-chef",
       commitMessageTopic: "cargo-chef",
-    },
-    {
-      // The types' own minor and patch releases go with the monthly update of the other packages;
-      // a new major comes with Node above
-      matchPackageNames: ["@types/node"],
-      matchUpdateTypes: ["minor", "patch"],
-      groupName: "dependencies (minor and patch)",
-      groupSlug: "minor-patch",
-      schedule: ["* 0-5 1 * *"],
-      automerge: true,
     },
   ],
 }
