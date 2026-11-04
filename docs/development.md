@@ -22,8 +22,17 @@ bun run dev
 `bun run dev` creates `.env` from [`.env.example`](https://github.com/firsttris/haul/blob/main/.env.example) on the first run, builds the plugins
 and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http://localhost:5173 and log
 in with `admin` / `adminadmin`. Data goes to `./.data`.
-Ctrl+C, an IDE's stop (SIGTERM) or closing the terminal (SIGHUP) stops both with everything they
-started; when one of them exits, the other is stopped too. Ctrl+Z suspends both, `fg` resumes them.
+The first part is [`scripts/dev-prepare.ts`](https://github.com/firsttris/haul/blob/main/scripts/dev-prepare.ts); then
+`bun run --parallel dev:server dev:ui` runs `cargo run -p haul` and `bun run --cwd ui dev` side by
+side, each line prefixed with its script's name, and stops the other when one of them exits with an
+error. Ctrl+C, Ctrl+Z and closing the terminal reach both, as the terminal signals the whole
+foreground process group; `fg` resumes them after Ctrl+Z.
+`--parallel` pipes both scripts' output for the prefix and gives them no input, so in a terminal
+`dev` sets `FORCE_COLOR` and `CARGO_TERM_COLOR` to keep their colours; Vite's keyboard shortcuts
+(`h`, `r`, `o`, `q`) need a terminal on its input and are there only with `bun run dev:ui` on its own.
+A signal sent to the `bun run dev` process alone (`kill <pid>`, an IDE's stop without a terminal)
+stops it but leaves both servers running: send the signal to its process group instead
+(`kill -- -$(ps -o pgid= -p <pid>)`) or run the IDE's configuration in a terminal.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
 environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`
@@ -35,7 +44,7 @@ environment take precedence. As long as no UI is built into the binary, `HAUL_DE
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-bun run test       # bun run dev's process handling, SDK helpers and hoster plugins against a fake context
+bun run test       # bun run dev's prepare step, SDK helpers and hoster plugins against a fake context
 bun run typecheck
 ```
 
@@ -118,7 +127,7 @@ ui                   web UI
 extension            browser extension for Chrome and Firefox (bun run build:extension)
 docker               Dockerfile, Compose file and Podman Quadlet units
 docs                 this documentation (mkdocs.yml, requirements-docs.txt)
-scripts              dev.ts (bun run dev), build-plugins.ts, screenshots/ (bun run screenshots)
+scripts              dev-prepare.ts (bun run dev), build-plugins.ts, screenshots/ (bun run screenshots)
 .github/workflows    CI, extension, docs, screenshots, bump and release
 ```
 
