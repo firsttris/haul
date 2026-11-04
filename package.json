@@ -11,13 +11,13 @@
     "extension"
   ],
   "scripts": {
-    "dev": "bun scripts/dev.ts",
+    "dev": "bun scripts/dev-prepare.ts && bun run --parallel dev:server dev:ui",
     "dev:server": "cargo run -p haul",
     "dev:ui": "bun run --cwd ui dev",
     "build": "bun run build:plugins && bun run --filter @haul/ui build",
     "build:plugins": "bun scripts/build-plugins.ts",
     "build:extension": "bun run --filter @haul/extension build",
-    "test": "bun test ./scripts/dev.test.ts && bun run --filter @haul/ui i18n && bun --bun vitest run",
+    "test": "bun test ./scripts/dev-prepare.test.ts && bun run --filter @haul/ui i18n && bun --bun vitest run",
     "typecheck": "bun run --workspaces typecheck",
     "screenshots": "bun --bun playwright test -c scripts/screenshots/playwright.config.ts"
   },
