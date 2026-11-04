@@ -123,6 +123,27 @@ for (const [signal, number] of [
   }, 20_000);
 }
 
+/** The process states `ps` shows (T: stopped), one letter per pid */
+function states() {
+  const ps = Bun.spawnSync(['ps', '-o', 'stat=', '-p', pids.join(',')]);
+  return ps.stdout.toString().trim().split('\n').map((line) => line.trim()[0]);
+}
+
+// Ctrl+Z reaches only dev.ts: the servers run in sessions of their own. Left running, Vite
+// would keep reading the terminal and swallow what is typed into the shell.
+test('SIGTSTP (Ctrl+Z) to dev.ts stops both servers and what they started, SIGCONT (fg) resumes them', async () => {
+  const proc = start();
+  await started();
+
+  proc.kill('SIGTSTP');
+  await until(() => states().every((state) => state === 'T'), 3_000).catch(() => {});
+  expect(states()).toEqual(['T', 'T', 'T', 'T']);
+
+  proc.kill('SIGCONT');
+  await until(() => states().every((state) => state !== 'T'), 3_000).catch(() => {});
+  expect(states().filter((state) => state === 'T')).toEqual([]);
+}, 20_000);
+
 test('when one server exits, the other is stopped and dev.ts exits with its code', async () => {
   const proc = start({ SERVER_EXIT: '3' });
   await started();
