@@ -27,6 +27,9 @@ The first part is [`scripts/dev-prepare.ts`](https://github.com/firsttris/haul/b
 side, each line prefixed with its script's name, and stops the other when one of them exits with an
 error. Ctrl+C, Ctrl+Z and closing the terminal reach both, as the terminal signals the whole
 foreground process group; `fg` resumes them after Ctrl+Z.
+`--parallel` pipes both scripts' output for the prefix and gives them no input, so in a terminal
+`dev` sets `FORCE_COLOR` and `CARGO_TERM_COLOR` to keep their colours; Vite's keyboard shortcuts
+(`h`, `r`, `o`, `q`) need a terminal on its input and are there only with `bun run dev:ui` on its own.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
 environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`
