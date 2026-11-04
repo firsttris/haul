@@ -23,7 +23,7 @@ bun run dev
 and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http://localhost:5173 and log
 in with `admin` / `adminadmin`. Data goes to `./.data`.
 Ctrl+C, an IDE's stop (SIGTERM) or closing the terminal (SIGHUP) stops both with everything they
-started; when one of them exits, the other is stopped too.
+started; when one of them exits, the other is stopped too. Ctrl+Z suspends both, `fg` resumes them.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
 environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`

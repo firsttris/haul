@@ -26,7 +26,7 @@ const processes = [
   Bun.spawn(['bun', 'run', '--cwd', 'ui', 'dev'], { stdio: ['inherit', 'inherit', 'inherit'], detached: true }),
 ];
 
-const stopAll = (signal: NodeJS.Signals) => {
+const signalAll = (signal: NodeJS.Signals) => {
   for (const p of processes) {
     try {
       process.kill(-p.pid, signal);
@@ -36,10 +36,19 @@ const stopAll = (signal: NodeJS.Signals) => {
   }
 };
 
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => stopAll(signal));
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => signalAll(signal));
+
+// Ctrl+Z (SIGTSTP) reaches only dev.ts, the servers' sessions are out of the terminal's reach: stop
+// them too, or Vite keeps reading the terminal the shell has taken back. SIGSTOP, as the kernel drops
+// SIGTSTP sent to an orphaned group (a session of its own is one); `fg` (SIGCONT) resumes them.
+process.on('SIGTSTP', () => {
+  signalAll('SIGSTOP');
+  process.kill(process.pid, 'SIGSTOP');
+});
+process.on('SIGCONT', () => signalAll('SIGCONT'));
 
 // The first to exit decides the exit code: its own, or 128 + n when signal n stopped it
 const first = await Promise.race(processes.map((p) => p.exited.then(() => p)));
-stopAll('SIGTERM');
+signalAll('SIGTERM');
 await Promise.all(processes.map((p) => p.exited));
 process.exit(first.signalCode ? 128 + constants.signals[first.signalCode] : (first.exitCode ?? 1));
