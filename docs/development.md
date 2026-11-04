@@ -22,6 +22,8 @@ bun run dev
 `bun run dev` creates `.env` from [`.env.example`](https://github.com/firsttris/haul/blob/main/.env.example) on the first run, builds the plugins
 and starts the server (`:8080`) and the UI with hot reload (`:5173`). Open http://localhost:5173 and log
 in with `admin` / `adminadmin`. Data goes to `./.data`.
+Ctrl+C, an IDE's stop (SIGTERM) or closing the terminal (SIGHUP) stops both with everything they
+started; when one of them exits, the other is stopped too.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
 environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`
@@ -33,7 +35,7 @@ environment take precedence. As long as no UI is built into the binary, `HAUL_DE
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-bun run test       # SDK helpers and hoster plugins against a fake context
+bun run test       # bun run dev's process handling, SDK helpers and hoster plugins against a fake context
 bun run typecheck
 ```
 
