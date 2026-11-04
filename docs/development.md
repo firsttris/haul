@@ -97,7 +97,7 @@ How the server, the queue, the plugins and the downloads fit together is describ
 | Database | SQLite via sqlx, migrations in `crates/haul/migrations` |
 | Live updates | Server-Sent Events (`/api/events`) |
 | Plugins | TypeScript bundled with esbuild, run with rquickjs inside the server |
-| Frontend | Vite, React, TanStack Router, Query and Table; embedded in the binary with rust-embed |
+| Frontend | Vite, React with the TanStack Redact runtime (imports stay `react`, the Vite plugin swaps them), TanStack Router, Query and Table; embedded in the binary with rust-embed |
 
 ### Texts
 

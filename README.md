@@ -193,7 +193,7 @@ bun run dev    # server on :8080, UI with hot reload on :5173, login admin / adm
 ```
 
 **Stack**: Rust with tokio, axum, reqwest and SQLite · hoster plugins in TypeScript, run in QuickJS
-inside the server · React, TanStack Router, Query and Table, embedded in the binary.
+inside the server · React (rendered by TanStack Redact), TanStack Router, Query and Table, embedded in the binary.
 More in [Architecture](https://firsttris.github.io/haul/architecture.html) and the [development guide](https://firsttris.github.io/haul/development.html).
 
 ## 🤝 Contributing

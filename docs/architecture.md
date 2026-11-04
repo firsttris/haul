@@ -58,7 +58,7 @@ package folder. A finished package is extracted, and the UI follows every step l
 | Database | `crates/haul/src/db.rs`, `migrations/` | SQLite via sqlx, migrations run at start |
 | Live updates | `crates/haul/src/events.rs` | Server-Sent Events on `/api/events` |
 | Click'n'Load | `crates/haul/src/cnl.rs`, `crates/haul-cnl` | listener on `:9666`, forwarder for the desktop |
-| Web UI | `ui/` | Vite, React, TanStack Router, Query and Table, embedded with rust-embed |
+| Web UI | `ui/` | Vite, React (rendered by TanStack Redact), TanStack Router, Query and Table, embedded with rust-embed |
 | Plugin SDK | `packages/plugin-sdk` | types, helpers, XFileSharing base, test context |
 | Browser extension | `extension/` | Chrome and Firefox, Click'n'Load and *Send to Haul* |
 
