@@ -13,16 +13,6 @@
   extends: ["github>firsttris/workflows//renovate/default.json5"],
   customManagers: [
     {
-      // "packageManager": "bun@x.y.z": the Bun of every workflow (bun-version-file, and the
-      // npm-installed Bun of the screenshots job)
-      customType: "regex",
-      managerFilePatterns: ["/^package\\.json$/"],
-      matchStrings: ['"packageManager": "bun@(?<currentValue>\\d+\\.\\d+\\.\\d+)"'],
-      depNameTemplate: "oven-sh/bun",
-      datasourceTemplate: "github-releases",
-      extractVersionTemplate: "^bun-v(?<version>.+)$",
-    },
-    {
       // `cargo install cargo-chef --version x.y.z` in docker/Dockerfile
       customType: "regex",
       managerFilePatterns: ["/^docker/Dockerfile$/"],
@@ -56,8 +46,9 @@
     },
     {
       // Bun: the image's web stage (oven/bun) and packageManager in package.json in one PR, so CI
-      // tests the Bun the image builds with
-      matchPackageNames: ["docker.io/oven/bun", "oven/bun", "oven-sh/bun"],
+      // tests the Bun the image builds with. Renovate's bun manager reads "packageManager":
+      // "bun@x.y.z" itself, as the npm package `bun` (no regex manager needed).
+      matchPackageNames: ["docker.io/oven/bun", "oven/bun", "bun"],
       enabled: true,
       groupName: "Bun",
       sourceUrl: "https://github.com/oven-sh/bun",
