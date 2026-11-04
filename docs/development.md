@@ -30,6 +30,9 @@ foreground process group; `fg` resumes them after Ctrl+Z.
 `--parallel` pipes both scripts' output for the prefix and gives them no input, so in a terminal
 `dev` sets `FORCE_COLOR` and `CARGO_TERM_COLOR` to keep their colours; Vite's keyboard shortcuts
 (`h`, `r`, `o`, `q`) need a terminal on its input and are there only with `bun run dev:ui` on its own.
+A signal sent to the `bun run dev` process alone (`kill <pid>`, an IDE's stop without a terminal)
+stops it but leaves both servers running: send the signal to its process group instead
+(`kill -- -$(ps -o pgid= -p <pid>)`) or run the IDE's configuration in a terminal.
 
 The server reads `.env` itself, so `cargo run -p haul` works on its own too. Variables set in the
 environment take precedence. As long as no UI is built into the binary, `HAUL_DEV_UI`
