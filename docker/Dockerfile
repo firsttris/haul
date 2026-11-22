@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- 1. UI and plugins ---------------------------------------------------------------
-FROM oven/bun:1.4.4 AS web
+FROM oven/bun:1.4.5 AS web
 WORKDIR /src
 COPY package.json bun.lock bunfig.toml tsconfig.base.json ./
 # Every workspace package has to be there for the install, or Bun does not link
